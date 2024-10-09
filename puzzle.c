@@ -16,8 +16,9 @@ Square*** setUpPuzzle(int** puzzle) {
             sudoku[i][j] -> number = puzzle[i][j];
             sudoku[i][j] -> row = i;
             sudoku[i][j] -> col = j;
+            sudoku[i][j] -> solavable = 9;
 
-            for (j = 0; j < SIZE_ROWS; j++) {
+            for (x = 0; x < SIZE_ROWS; x++) {
                 sudoku[i][j] -> possible[x] = 0;
             }
         }
@@ -31,6 +32,20 @@ Square*** setUpPuzzle(int** puzzle) {
             }
         }
     }
+    return sudoku;
+}
+
+int checkPuzzle(Square*** sudoku) {
+    int i, j;
+    for (i = 0; i < SIZE_ROWS; i++) {
+        for (j = 0; j < SIZE_COLUMNS; j++) {
+            if(sudoku[i][j] -> solavable != 0) {
+                solveSquare(sudoku[i][j]);
+                updateSudoku(sudoku, i, j);
+            }
+        }
+    }
+    return 1;
 }
 
 int ** createPuzzle() {
@@ -63,24 +78,25 @@ int ** createPuzzle() {
 int updateSudoku(Square*** sudoku, int row, int col) {
     int x;
     int number = sudoku[row][col] -> number;
-
-    for (x = 0; x < SIZE_ROWS; x++) {
-        if (sudoku[x][col] -> possible[number - 1] == 0) {
-            sudoku[x][col] -> possible[number - 1]--;
+    if (number > 0 && number <= 9) { // Only proceed for valid numbers
+        for (x = 0; x < SIZE_ROWS; x++) {
+            if (sudoku[x][col] -> possible[number - 1] == 0) {
+                sudoku[x][col] -> possible[number - 1]--;
+            }
+            sudoku[x][col] -> possible[number - 1] = 1;
         }
-        sudoku[x][col] -> possible[number] = 1;
-    }
 
-    for (x = 0; x < SIZE_COLUMNS; x++) {
-        if (sudoku[row][x] -> possible[number - 1] == 0) {
-            sudoku[row][x] -> possible[number - 1]--;
+        for (x = 0; x < SIZE_COLUMNS; x++) {
+            if (sudoku[row][x] -> possible[number - 1] == 0) {
+                sudoku[row][x] -> possible[number - 1]--;
+            }
+            sudoku[row][x] -> possible[number - 1] = 1;
         }
-        sudoku[x][col] -> possible[number] = 1;
     }
     return 1;
 }
 
-void printPuzzle(int** puzzle) {
+void printPuzzle(Square*** puzzle) {
     int i, j;
 
     printf("Puzzle:\n");
@@ -89,7 +105,7 @@ void printPuzzle(int** puzzle) {
         printf("|");
         //print each row
         for (j = 0; j < SIZE_COLUMNS; j++) {
-            printf(" %d ", puzzle[i][j]);
+            printf(" %d ", puzzle[i][j] -> number);
             if((j +1) % 3 == 0) {
                 printf("|");
             }

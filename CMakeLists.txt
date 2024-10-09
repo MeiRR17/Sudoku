@@ -5,4 +5,5 @@ set(CMAKE_C_STANDARD 11)
 
 add_executable(Sudoku sudoku.c
         sudoku.h
-        puzzle.c)
+        puzzle.c
+        square.c)

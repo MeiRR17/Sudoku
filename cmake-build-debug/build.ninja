@@ -61,6 +61,12 @@ build CMakeFiles/Sudoku.dir/puzzle.c.obj: C_COMPILER__Sudoku_unscanned_Debug C$:
   OBJECT_DIR = CMakeFiles\Sudoku.dir
   OBJECT_FILE_DIR = CMakeFiles\Sudoku.dir
 
+build CMakeFiles/Sudoku.dir/square.c.obj: C_COMPILER__Sudoku_unscanned_Debug C$:/Users/mbzdv/CLionProjects/Sudoku/square.c || cmake_object_order_depends_target_Sudoku
+  DEP_FILE = CMakeFiles\Sudoku.dir\square.c.obj.d
+  FLAGS = -g -std=gnu11 -fdiagnostics-color=always
+  OBJECT_DIR = CMakeFiles\Sudoku.dir
+  OBJECT_FILE_DIR = CMakeFiles\Sudoku.dir
+
 
 # =============================================================================
 # Link build statements for EXECUTABLE target Sudoku
@@ -69,7 +75,7 @@ build CMakeFiles/Sudoku.dir/puzzle.c.obj: C_COMPILER__Sudoku_unscanned_Debug C$:
 #############################################
 # Link the executable Sudoku.exe
 
-build Sudoku.exe: C_EXECUTABLE_LINKER__Sudoku_Debug CMakeFiles/Sudoku.dir/sudoku.c.obj CMakeFiles/Sudoku.dir/puzzle.c.obj
+build Sudoku.exe: C_EXECUTABLE_LINKER__Sudoku_Debug CMakeFiles/Sudoku.dir/sudoku.c.obj CMakeFiles/Sudoku.dir/puzzle.c.obj CMakeFiles/Sudoku.dir/square.c.obj
   FLAGS = -g
   LINK_LIBRARIES = -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
   OBJECT_DIR = CMakeFiles\Sudoku.dir

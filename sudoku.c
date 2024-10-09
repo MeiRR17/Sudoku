@@ -9,13 +9,17 @@ int main() {
     int ** puzzle;
     Square *** sudoku;
 
-    puzzle = createPuzzle();
+    puzzle = createPuzzle();  // Initialize the puzzle
 
-    printPuzzle(puzzle);
+    sudoku = setUpPuzzle(puzzle);  // Convert puzzle to the sudoku structure
 
-    sudoku = setUpPuzzle(puzzle);
+    printPuzzle(sudoku);  // Print the initial state of the puzzle
 
-    checkPuzzle();
+    checkPuzzle(sudoku);  // Check the puzzle and attempt to solve it
+
+    printf("\n\n");  // Correctly print two new lines instead of passing to printPuzzle
+
+    printPuzzle(sudoku);  // Print the updated puzzle after solving
 
     return 0;
 }
