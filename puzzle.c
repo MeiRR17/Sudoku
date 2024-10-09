@@ -4,22 +4,30 @@
 
 Square*** setUpPuzzle(int** puzzle) {
     Square***  sudoku;
-    int i, j;
+    int i, j, x;
 
     sudoku = (Square***)malloc(sizeof(Square**)*9);
 
-    for (i = 0; i < 9; i++) {
+    for (i = 0; i < SIZE_ROWS; i++) {
         sudoku[i] = (Square**)malloc(sizeof(Square*)*9);
 
-        for (j = 0; j < 9; j++) {
+        for (j = 0; j < SIZE_COLUMNS; j++) {
             sudoku[i][j] = (Square*)malloc(sizeof(Square)*9);
             sudoku[i][j] -> number = puzzle[i][j];
             sudoku[i][j] -> row = i;
             sudoku[i][j] -> col = j;
-            if(sudoku[i][j] -> number != 0) {
-                sudoku[i][j] -> code = POSSIBLE;
-            }else {
-                sudoku[i][j] -> code = 0x0;
+
+            for (j = 0; j < SIZE_ROWS; j++) {
+                sudoku[i][j] -> possible[x] = 0;
+            }
+        }
+    }
+    for (i = 0; i < SIZE_ROWS; i++) {
+        for (j = 0; j < SIZE_COLUMNS; j++) {
+            if (sudoku[i][j] -> number != 0) {
+                sudoku[i][j] -> solavable = 0;
+                updateSudoku(sudoku, i, j);
+                UNSOLVED--;
             }
         }
     }
@@ -52,15 +60,35 @@ int ** createPuzzle() {
     return puzzle;
 }
 
+int updateSudoku(Square*** sudoku, int row, int col) {
+    int x;
+    int number = sudoku[row][col] -> number;
+
+    for (x = 0; x < SIZE_ROWS; x++) {
+        if (sudoku[x][col] -> possible[number - 1] == 0) {
+            sudoku[x][col] -> possible[number - 1]--;
+        }
+        sudoku[x][col] -> possible[number] = 1;
+    }
+
+    for (x = 0; x < SIZE_COLUMNS; x++) {
+        if (sudoku[row][x] -> possible[number - 1] == 0) {
+            sudoku[row][x] -> possible[number - 1]--;
+        }
+        sudoku[x][col] -> possible[number] = 1;
+    }
+    return 1;
+}
+
 void printPuzzle(int** puzzle) {
     int i, j;
 
     printf("Puzzle:\n");
     printf("-------------------------------\n");
-    for (i = 0; i < 9; i++) {
+    for (i = 0; i < SIZE_ROWS; i++) {
         printf("|");
         //print each row
-        for (j = 0; j < 9; j++) {
+        for (j = 0; j < SIZE_COLUMNS; j++) {
             printf(" %d ", puzzle[i][j]);
             if((j +1) % 3 == 0) {
                 printf("|");
