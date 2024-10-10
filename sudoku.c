@@ -7,19 +7,25 @@ int SIZE_COLUMNS = 9;
 
 int main() {
     int ** puzzle;
-    Square *** sudoku;
+    int progress;
+    Sudoku * sudoku;  // Change to Sudoku*
 
     puzzle = createPuzzle();  // Initialize the puzzle
 
     sudoku = setUpPuzzle(puzzle);  // Convert puzzle to the sudoku structure
 
-    printPuzzle(sudoku);  // Print the initial state of the puzzle
+    printPuzzle(sudoku->squares);  // Print the initial state of the puzzle
 
-    checkPuzzle(sudoku);  // Check the puzzle and attempt to solve it
+    while (UNSOLVED > 0) {
+        progress = checkPuzzle(sudoku->squares, sudoku->boxes);
 
-    printf("\n\n");  // Correctly print two new lines instead of passing to printPuzzle
+        if (progress == 0) {
+            printf("\nFailed to solve puzzle\n");
+            break;
+        }
+    }
 
-    printPuzzle(sudoku);  // Print the updated puzzle after solving
+    printPuzzle(sudoku->squares);  // Print the updated puzzle after solving
 
     return 0;
 }
