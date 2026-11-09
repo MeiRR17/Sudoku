@@ -1,6 +1,6 @@
-# Sudoku — C11 exact solver, CLI and quality gates (`v0.8.0`, experimental)
+# Sudoku — C11 exact solver, CLI and quality gates (`v0.8.1`, experimental)
 
-A fully offline Sudoku engine with deterministic exact solving, solution classification, validation and a scriptable CLI. **This is a development milestone, not a production release.** v0.7.0 added playable terminal Sudoku with notes, bounded undo/redo, check/reset, completion detection and checksummed atomic save/resume. v0.8.0 adds development packaging, but clean Windows/macOS validation, license approval and official release remain pending.
+A fully offline Sudoku engine with deterministic exact solving, solution classification, validation and a scriptable CLI. **This is a development milestone, not a production release.** v0.7.0 added playable terminal Sudoku with notes, bounded undo/redo, check/reset, completion detection and checksummed atomic save/resume. v0.8.0 added development packaging; v0.8.1 hardens the input-stream lifecycle and makes the Clang static analyzer part of the full local quality gate. Native Windows/macOS validation, license approval and an official release remain pending. The manual CI workflow now fails if its actual OS/CPU architecture does not match the requested native platform.
 
 ## Build and use
 
@@ -36,7 +36,7 @@ Start a uniquely solvable imported puzzle (`sudoku play --file tests/fixtures/un
 
 ## Stage and verify a development package
 
-`v0.8.0` includes relocatable CMake install/export metadata, deterministic ZIP/TGZ packaging,
+`v0.8.0` and `v0.8.1` include relocatable CMake install/export metadata, deterministic ZIP/TGZ packaging,
 SHA-256 checksums and local install/extract/smoke tests. These are **development
 artifacts only**, not an official GitHub Release. They are not signed; no owner-approved
 open-source license exists and native Windows x64 / macOS arm64 acceptance is pending.
@@ -78,6 +78,7 @@ A GitHub Actions quality gate is available through **manual `workflow_dispatch` 
 - [CLI JSON and exit-code contract](docs/CLI_JSON_SCHEMA.md)
 - [v0.7.0 gameplay verification](docs/VERIFICATION_v0.7.0.md)
 - [v0.8.0 technical packaging verification](docs/VERIFICATION_v0.8.0.md)
+- [v0.8.1 input-safety and static-analysis verification](docs/VERIFICATION_v0.8.1.md)
 - [Interactive gameplay, commands and versioned save format](docs/GAMEPLAY_AND_SAVE.md)
 - [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 

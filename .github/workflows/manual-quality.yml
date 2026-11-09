@@ -31,6 +31,8 @@ jobs:
         run: python -c "import platform; print(platform.platform(), platform.machine())"
       - name: Check out code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Refuse to certify a runner with the wrong CPU architecture
+        run: python scripts/verify_runner_platform.py --expected "${{ inputs.runner_os }}"
       - name: Fast CMake/CTest gate (no external Python deps)
         if: ${{ !inputs.full_linux_gate || inputs.runner_os != 'ubuntu-latest' }}
         run: python scripts/quality_gate.py --mode fast

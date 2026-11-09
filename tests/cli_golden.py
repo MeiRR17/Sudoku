@@ -89,7 +89,7 @@ for invalid in [
     args = invalid[0].split()
     run(*args, code=invalid[1], stdout="", stderr_contains="Usage error")
 run("--help", stderr_contains="" if False else None)
-run("--version", stdout="Sudoku 0.8.0 (experimental)\n")
+run("--version", stdout="Sudoku 0.8.1 (experimental)\n")
 run("solve", "--help")
 run("--demo")
 
@@ -121,6 +121,31 @@ with tempfile.TemporaryDirectory() as tmp:
     checks_add()
     run("validate", "--puzzle", GIVENS, "--output", temp / "not-a-directory" / "no.txt",
         code=4, stdout="", stderr_contains="Output create failed")
+    # Input stream safety: successful EOF, binary bytes, limit boundary, and
+    # missing files must not produce a success JSON document.
+    empty_input = temp / "empty.txt"
+    empty_input.write_bytes(b"")
+    run("validate", "--file", empty_input, "--format", "json",
+        code=3, stdout="", stderr_contains="81 digits")
+    bad_binary = temp / "embedded-nul.txt"
+    bad_binary.write_bytes(GIVENS[:41].encode() + b"\x00" + GIVENS[42:].encode())
+    run("validate", "--file", bad_binary, "--format", "json",
+        code=3, stdout="", stderr_contains="non-digit")
+    max_len = temp / "exact-limit.txt"
+    max_len.write_bytes(b" " * (1024 * 1024))
+    run("validate", "--file", max_len, "--format", "json",
+        code=3, stdout="", stderr_contains="81 digits")
+    above_limit = temp / "above-limit.txt"
+    above_limit.write_bytes(b"0" * (1024 * 1024 + 1))
+    run("validate", "--file", above_limit, "--format", "json",
+        code=3, stdout="", stderr_contains="1 MiB")
+    run("validate", "--file", temp / "missing-input.txt", "--format", "json",
+        code=4, stdout="", stderr_contains="Input open failed")
+    run("solve", "--file", temp / "missing-input.txt", "--format", "json",
+        "--output", temp / "must-not-be-created.json", code=4, stdout="",
+        stderr_contains="Input open failed")
+    assert not (temp / "must-not-be-created.json").exists()
+    checks_add()
     crlf = temp / "crlf.txt"
     crlf.write_bytes((GIVENS[:9] + "\r\n" + GIVENS[9:] + "\r\n").encode())
     run("solve", "--file", crlf, "--format", "compact", stdout=SOLUTION + "\n")

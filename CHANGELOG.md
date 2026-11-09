@@ -6,6 +6,15 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 - Pending: cross-platform acceptance on Windows x64 and macOS arm64, license decision by owner, signing and official release.
 
+## [0.8.1] — 2026-11-09 (hardening patch; acceptance HOLD)
+
+- Fixed three reproducible Clang static-analyzer findings in the CLI's file/stdin stream lifecycle: eliminate repeated `fread` after EOF/error, close owned file streams on all paths and retain precise error handling.
+- Added a portable, strict Clang analyzer gate across all six production C translation units and integrated it into the opt-in full quality gate.
+- Expanded CLI golden tests for empty files, embedded NUL, maximum-length input, oversized files, nonexistent files and failure-to-create-output behavior.
+- Added a native runner architecture guard for manually invoked GitHub Actions: macOS acceptance requires actual Apple Silicon arm64, Windows acceptance x64; mislabeled/Intel runners fail closed.
+- Refreshed development package metadata to `0.8.1` and included analyzer+patch evidence in the reproducible source manifest.
+- **No official release or license was approved.** Native Windows/MSVC and macOS arm64 acceptance checks remain OPEN in issue #10.
+
 ## [0.8.0] — 2026-11-09 (technical delivery, acceptance HOLD)
 
 - Added relocatable CMake install/export and version metadata for CLI and core library.

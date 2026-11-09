@@ -51,6 +51,7 @@ def main():
     if not shutil.which('gcc') or not shutil.which('clang') or not shutil.which('gcov'):
         ap.error('full mode requires gcc, clang and gcov')
     build(dest / 'clang', compiler='clang')
+    run(sys.executable, ROOT / 'scripts' / 'static_analysis.py')
     build(dest / 'gcc-sanitized', compiler='gcc', sanitizer=True)
     build(dest / 'gcc-coverage', compiler='gcc', coverage=True)
     run(sys.executable, ROOT / 'scripts' / 'coverage.py', dest / 'gcc-coverage', '--min-percent', '90')
