@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sudoku VERSION 0.8.1 LANGUAGES C)
+project(Sudoku VERSION 0.8.2 LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -119,6 +119,8 @@ if(BUILD_TESTING)
         if(NOT SUDOKU_ENABLE_SANITIZERS AND NOT SUDOKU_ENABLE_COVERAGE)
             add_test(NAME sudoku_package_e2e
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_smoke.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
+            add_test(NAME sudoku_package_integrity
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_integrity.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
         endif()
         add_test(NAME sudoku_game_e2e
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/game_e2e.py" "$<TARGET_FILE:sudoku>" "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")

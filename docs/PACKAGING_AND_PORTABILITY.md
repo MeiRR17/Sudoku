@@ -56,3 +56,11 @@ The existing GitHub workflow `.github/workflows/manual-quality.yml` is **manual-
 - No dependency downloads, tokens or secrets are needed to create local packages. Never commit binary artifacts or user game saves to the repository.
 - Untrusted save files are checksummed for integrity but not authenticated. See [GAMEPLAY_AND_SAVE.md](GAMEPLAY_AND_SAVE.md); atomic replacement is not a cross-platform power-loss durability guarantee.
 - Source remains **copyrighted with no approved public reuse license**; an artifact existing locally does not grant redistribution rights to third parties.
+
+## v0.8.2 — malicious-archive rejection and ZIP/TAR parity
+
+The packager performs strict verification of canonical file paths, safe regular-file metadata (including no ZIP symlinks), uniqueness/sort ordering, bounded extraction memory and exact byte-for-byte parity between source ZIP/TAR.GZ and platform ZIP/TAR.GZ. `SHA256SUMS` must contain the expected four versioned archives, each with mandatory content; rebuilding checksums after one ZIP file is modified no longer yields a valid package. `tests/package_integrity.py` exercises several forged/tampered packages with recomputed checksums.
+
+This is an **integrity gate, not a signature**: a party able to replace both archive formats and the unsigned manifest can still forge a self-consistent package. Production requires provenance/authentication and the owner's explicit license decision. Native Windows and Apple Silicon testing remain separate open gates.
+
+The v0.8.2 extracted-source ZIP is also configured and built in an independent temporary directory by `tests/package_smoke.py`, with `BUILD_TESTING=OFF`; a known puzzle must solve correctly from that fresh build. Packaging parity tests execute only for uninstrumented Release builds; GCC sanitizer/coverage builds retain their usual 19 unit/integration checks.
