@@ -21,6 +21,7 @@ docs/VERIFICATION_v0.6.0.md
 docs/VERIFICATION_v0.7.0.md
 docs/VERIFICATION_v0.8.0.md
 docs/VERIFICATION_v0.8.1.md
+docs/VERIFICATION_v0.8.2.md
 include/sudoku/board.h
 include/sudoku/game.h
 include/sudoku/generator.h
@@ -57,6 +58,7 @@ tests/fuzz_solver.c
 tests/game_e2e.py
 tests/generator_golden.py
 tests/package_smoke.py
+tests/package_integrity.py
 tests/run_stdin.cmake
 tests/test_board.c
 tests/test_game.c

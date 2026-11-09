@@ -6,6 +6,12 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 - Pending: cross-platform acceptance on Windows x64 and macOS arm64, license decision by owner, signing and official release.
 
+## [0.8.2] — 2026-11-09 (development patch; release HOLD)
+
+- Strengthen ZIP/TAR.GZ verifier: validate canonical paths, regular files, size/count budgets and identical source/binary contents across archive formats.
+- Validate expected release filenames, required file inventory and unsigned SHA-256 manifest consistency; add adversarial archive tests that mutate packages and regenerate SHA256SUMS.
+- Continue **without** a license choice, official GitHub Release or unsupported native Windows/macOS acceptance claims.
+
 ## [0.8.1] — 2026-11-09 (hardening patch; acceptance HOLD)
 
 - Fixed three reproducible Clang static-analyzer findings in the CLI's file/stdin stream lifecycle: eliminate repeated `fread` after EOF/error, close owned file streams on all paths and retain precise error handling.

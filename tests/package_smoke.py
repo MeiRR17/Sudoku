@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory(prefix='sudoku-package-e2e-') as tmp:
     exe = root / 'bin' / ('sudoku.exe' if platform.system() == 'Windows' else 'sudoku')
     if platform.system() != 'Windows':
         exe.chmod(0o755)  # zip extraction permissions vary by host
-    assert call(exe, '--version').stdout.strip() == 'Sudoku 0.8.1 (experimental)'
+    assert call(exe, '--version').stdout.strip() == 'Sudoku 0.8.2 (experimental)'
     result = call(exe, 'solve', '--file', ROOT / 'tests/fixtures/unique.txt', '--format', 'compact')
     assert result.stdout.strip() == EXPECTED
     assert 'Usage' in call(exe, '--help').stdout
@@ -51,6 +51,22 @@ with tempfile.TemporaryDirectory(prefix='sudoku-package-e2e-') as tmp:
         assert any(x.endswith('/CMakeLists.txt') for x in names)
         assert any(x.endswith('/src/core/game.c') for x in names)
         assert all('/build-' not in x and '/.git/' not in x and '/dist/' not in x for x in names)
+    # Extract and build the *shipped source archive*, not the checkout. This
+    # catches a missing CMake/module/source file in release_files.txt.
+    source_zip = next(left.glob('*-source.zip'))
+    with zipfile.ZipFile(source_zip) as source_archive:
+        source_archive.extractall(temp / 'source-extracted')
+    source_root = temp / 'source-extracted' / source_zip.stem
+    independent_build = temp / 'source-build'
+    call('cmake', '-S', source_root, '-B', independent_build,
+         '-DBUILD_TESTING=OFF', '-DCMAKE_BUILD_TYPE=Release')
+    call('cmake', '--build', independent_build, '--config', 'Release')
+    from_source = independent_build / ('sudoku.exe' if platform.system() == 'Windows' else 'sudoku')
+    if not from_source.is_file():
+        from_source = independent_build / 'Release' / from_source.name
+    assert call(from_source, 'solve', '--puzzle',
+                '530070000600195000098000060800060003400803001700020006060000280000419005000080079',
+                '--format', 'compact').stdout.strip() == EXPECTED
     # Consume the exported static core as an independently configured CMake project.
     consumer = temp / 'consumer'
     consumer.mkdir()
@@ -76,4 +92,4 @@ int main(void) {
     import shutil
     shutil.rmtree(root)
     assert not root.exists()
-    print('PACKAGE E2E PASS: reproducible ZIP/TGZ + hashes, install/extract/CLI, CMake consumer and uninstall')
+    print('PACKAGE E2E PASS: reproducible ZIP/TGZ, source rebuild, hashes, install, CMake consumer and uninstall')

@@ -1,6 +1,6 @@
-# Sudoku — C11 exact solver, CLI and quality gates (`v0.8.1`, experimental)
+# Sudoku — C11 exact solver, CLI and quality gates (`v0.8.2`, experimental)
 
-A fully offline Sudoku engine with deterministic exact solving, solution classification, validation and a scriptable CLI. **This is a development milestone, not a production release.** v0.7.0 added playable terminal Sudoku with notes, bounded undo/redo, check/reset, completion detection and checksummed atomic save/resume. v0.8.0 added development packaging; v0.8.1 hardens the input-stream lifecycle and makes the Clang static analyzer part of the full local quality gate. Native Windows/macOS validation, license approval and an official release remain pending. The manual CI workflow now fails if its actual OS/CPU architecture does not match the requested native platform.
+A fully offline Sudoku engine with deterministic exact solving, solution classification, validation and a scriptable CLI. **This is a development milestone, not a production release.** v0.7.0 added playable terminal Sudoku with notes, bounded undo/redo, check/reset, completion detection and checksummed atomic save/resume. v0.8.0 added development packaging; v0.8.1 hardened the input-stream lifecycle and makes the Clang static analyzer part of the full local quality gate. Native Windows/macOS validation, license approval and an official release remain pending. The manual CI workflow now fails if its actual OS/CPU architecture does not match the requested native platform.
 
 ## Build and use
 
@@ -36,7 +36,7 @@ Start a uniquely solvable imported puzzle (`sudoku play --file tests/fixtures/un
 
 ## Stage and verify a development package
 
-`v0.8.0` and `v0.8.1` include relocatable CMake install/export metadata, deterministic ZIP/TGZ packaging,
+`v0.8.0` and `v0.8.1` introduced relocatable CMake install/export metadata, deterministic ZIP/TGZ packaging,
 SHA-256 checksums and local install/extract/smoke tests. These are **development
 artifacts only**, not an official GitHub Release. They are not signed; no owner-approved
 open-source license exists and native Windows x64 / macOS arm64 acceptance is pending.
@@ -79,7 +79,12 @@ A GitHub Actions quality gate is available through **manual `workflow_dispatch` 
 - [v0.7.0 gameplay verification](docs/VERIFICATION_v0.7.0.md)
 - [v0.8.0 technical packaging verification](docs/VERIFICATION_v0.8.0.md)
 - [v0.8.1 input-safety and static-analysis verification](docs/VERIFICATION_v0.8.1.md)
+- [v0.8.2 package integrity verification](docs/VERIFICATION_v0.8.2.md)
 - [Interactive gameplay, commands and versioned save format](docs/GAMEPLAY_AND_SAVE.md)
 - [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 The active engine lives in `src/core` and its API in `include/sudoku`. The legacy experimental solver is preserved in Git history and the historical [Learning_Modules copy](https://github.com/MeiRR17/Learning_Modules/tree/main/tracks/languages/c/sudoku), which is not automatically modified. No formal license is selected; public visibility is **not** permission to reuse the code.
+
+### v0.8.2 integrity hardening (development only)
+
+The native development package verifier now checks archive content consistency **across both ZIP and TAR.GZ**, not just their SHA-256 manifest, and rejects symlink, traversal, duplicate and oversized archive records. Run `ctest` on an uninstrumented Release build to execute the adversarial packaging tests; see [v0.8.2 evidence](docs/VERIFICATION_v0.8.2.md). These checks do not authenticate the publisher or substitute for Windows/macOS validation and an owner-approved license.
