@@ -1,0 +1,114 @@
+# Sudoku — Production Readiness Gates
+
+**Status:** release checklist / future gates; **nothing below is marked passed by documentation alone**.  
+**Owner:** Sudoku maintainers. **Release target:** v1.0.0. **Default branch:** master.
+
+## Gate 0 — Scope and provenance (v0.1 onward)
+
+- [ ] Confirm the repository is the canonical product codebase and historical Learning_Modules snapshot is not an auto-sync target.
+- [ ] Confirm actual baseline build failure(s) using a clean checkout, archive command, compiler and OS.
+- [ ] Restore/create sudoku.h and compile both Debug and Release configurations.
+- [ ] Update README to accurately distinguish implemented features from planned features.
+- [ ] Record decisions: supported OS, license, versioning, support owner, release destination.
+
+## Gate 1 — Functional correctness (v0.2–v0.4)
+
+- [ ] Parser accepts valid 81-character input and a documented text-grid format.
+- [ ] Parser rejects invalid length, characters, out-of-range values and oversized input without crash.
+- [ ] Board validator catches duplicate digits in each row, column and box.
+- [ ] Exact solver preserves givens and yields only legal complete solutions.
+- [ ] Count-to-two correctly distinguishes no solution, unique solution and multiple solutions.
+- [ ] Fixtures cover empty, solved, easy, medium, hard, contradictions, unsolvable and multi-solution boards.
+- [ ] CLI supports documented commands, stable output shapes and deterministic exit statuses.
+- [ ] No use-after-free, out-of-bounds, uninitialized reads or undefined behavior in tested paths.
+
+## Gate 2 — Test quality and release evidence (v0.5–v0.9)
+
+- [ ] Core/validator/parser unit tests plus CLI integration tests pass.
+- [ ] Cross-check solver outputs using an independent board validator; malformed-input/property tests pass.
+- [ ] At least 90% **measured** line coverage of core/parser or documented scope-specific rationale for exclusions.
+- [ ] Debug sanitizer run (ASan + UBSan where available) passes with no findings.
+- [ ] Release build and high-warning compiler builds pass; zero release-blocking compiler diagnostics.
+- [ ] Reproducible local one-command test script is documented and run with exact toolchain versions.
+- [ ] CI matrix is enabled when quota allows. If hosted CI is unavailable, record the local evidence, machines and SHAs; do not silently claim CI passed.
+- [ ] Benchmarks include a named dataset, CPU/OS, sample sizes and p50/p95 runtime for solve and generation.
+- [ ] Denial-of-service limits for worst-case search and generation are documented and verified.
+- [ ] Every fix for a released regression has an associated test case.
+
+## Gate 3 — Generator, usability and persistence (v0.6–v0.7)
+
+- [ ] Generate valid completed boards and uniquely solvable puzzles for each supported difficulty.
+- [ ] Seeded generation is repeatable according to a documented compatibility contract.
+- [ ] Difficulty labels are validated using documented human-strategy ratings; clue count alone is not used as proof.
+- [ ] Generator time/attempt ceilings are enforced with explanatory errors.
+- [ ] Gameplay never alters original clues; note, undo/redo, check, reset and completion behave as documented.
+- [ ] Save/load round trip, corrupt save rejection and interruption-safe save behavior are covered.
+- [ ] Terminal output remains legible when colors are disabled and in non-interactive contexts.
+
+## Gate 4 — Security, platform and supply chain (v0.8–v0.9)
+
+- [ ] Input and save files are bounded; file names/paths are handled safely; errors avoid leaking sensitive details.
+- [ ] No network access, tracking, telemetry or unapproved third-party assets for v1.
+- [ ] Explicit owner-approved license/notice in source and binary distributions.
+- [ ] No committed executables/build caches/IDE metadata/secrets; dependencies and GitHub Actions permissions reviewed.
+- [ ] Linux x64 archive smoke-tested on clean supported environment.
+- [ ] Windows x64 archive smoke-tested on clean supported environment.
+- [ ] macOS arm64 archive smoke-tested on clean supported environment.
+- [ ] Version, architecture and help output from binaries match release metadata.
+- [ ] Archives have verified SHA-256 sums and provenance to exact Git commit.
+- [ ] README, CHANGELOG, SECURITY, CONTRIBUTING, license, FAQ and install/uninstall instructions accurate.
+- [ ] Release artifacts downloaded from GitHub and tested rather than relying only on build-directory output.
+
+## Gate 5 — Ship decision (v0.9→v1.0)
+
+- [ ] v1.0 scope frozen and acceptance tests completed.
+- [ ] All P0/P1 bugs resolved; accepted P2/P3 exceptions listed with owner and impact.
+- [ ] Reproduction commands, test outputs, compilers, supported OS and commit SHA stored in release evidence.
+- [ ] Release candidate from same source has passed platform checks.
+- [ ] Approved tag v1.0.0 created only from verified commit.
+- [ ] GitHub Release contains changelog, binaries, source archive, checksums and known limitations.
+- [ ] Exact downloaded release assets are validated on supported systems.
+- [ ] Rollback procedure documented and previous known-good artifact accessible.
+- [ ] Release links and final completion evidence attached to corresponding GitHub issue.
+
+**Release rule:** all applicable gates must pass; any waived gate requires a written impact assessment and explicit owner decision. A checklist item stays unchecked until demonstrably complete.
+
+## Lightweight development cycle (each feature PR)
+
+1. Identify milestone and concise issue scope.
+2. Implement code; run targeted relevant tests, sanitizer check if touching unsafe input or solver logic.
+3. Push branch and open PR to master; include commands/results and changed paths.
+4. Review no scope regression, merge only after the scoped acceptance criteria pass.
+5. Update roadmap issue with actual time spent, SHA and remaining work. Screenshot only for visibly changed UI from a real running build.
+
+## Recommended test fixture families
+
+| Family | Requirement |
+|---|---|
+| Already solved | 81 valid digits, must return exact board and unique solution |
+| Easy/medium/hard | Valid well-known fixtures plus expected solution |
+| Conflicting clues | Duplicate digit in row, column and box |
+| Valid but unsatisfiable | No duplicate givens yet zero complete solutions |
+| Multiple solutions | A valid partial board with >=2 solutions |
+| Empty board | Special performance/cancellation behavior explicitly documented |
+| Invalid input | Wrong length, punctuation, UTF-8, whitespace policy, oversized files |
+| Boundary/runtime | Max file sizes, interrupted writes, retry limits, sanitizer loops |
+| Generator | Reproducible seed, uniqueness, difficulty rubric and timeout |
+| CLI | Exit codes, JSON schema, stdout/stderr, Windows path/line endings |
+
+## Evidence template
+
+For every candidate:
+- Version/tag/commit SHA:
+- Date:
+- Compiler, CMake, OS and CPU:
+- Exact build and test commands:
+- Test counts and failure summary:
+- Sanitizer and coverage result:
+- Per-platform install/smoke result:
+- Benchmark dataset and result:
+- Remaining bugs and risk acceptance:
+- Artifact/checksum locations:
+- Reviewer/owner release approval:
+
+No numerical success percentage or completion claim is inferred from the existence of this plan.
