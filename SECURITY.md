@@ -19,3 +19,8 @@ The exact solver can consume CPU on pathological valid puzzles. The number of re
 Avoid publishing an exploit, secrets, or a sensitive crashing input in a public issue. Use [GitHub private vulnerability reporting](https://github.com/MeiRR17/Sudoku/security/advisories/new) when available; if the private reporting interface is unavailable, request a secure contact channel through the repository owner without sharing technical exploit details publicly. Include minimal steps, affected commit, platform/compiler, any sanitizer stack trace and impact. No response SLA is offered for this experimental project.
 
 Do not interpret the public repository as a license grant. See [ROADMAP.md](ROADMAP.md).
+
+
+## v0.8.3 save durability boundary
+
+On POSIX the game now requests an `fsync` of the parent directory after replacing a save. If that operation fails, it reports a distinct **durability uncertainty warning**: a new target may be present, but survival across power loss is unverified. The checksum is for accidental corruption only, **not authenticity**. Native Windows/macOS save behavior and hardware-level crash recovery remain unverified and are release blockers. Never treat a warning as a guarantee that the prior save was preserved.

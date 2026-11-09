@@ -13,6 +13,7 @@
 #include <io.h>
 #else
 #include <unistd.h>
+#include <fcntl.h>
 #endif
 
 static int cell_index(unsigned row, unsigned col) {
@@ -154,6 +155,7 @@ const char *sudoku_game_status_text(SudokuGameStatus status) {
     case SUDOKU_GAME_NO_HISTORY: return "no action to undo or redo";
     case SUDOKU_GAME_CORRUPT: return "invalid or corrupted save file";
     case SUDOKU_GAME_IO: return "file operation failed";
+    case SUDOKU_GAME_DURABILITY_UNCERTAIN: return "save replaced target, but parent directory sync failed; power-loss durability is unconfirmed";
     default: return "unknown game status";
     }
 }
@@ -256,6 +258,29 @@ static int parse_save(SudokuGame *out, const char *data, size_t size) {
     *out=candidate;
     return 1;
 }
+#if !defined(_WIN32)
+/* A successful rename is not necessarily durable across power loss until the
+ * parent directory metadata has also been synced. This is a best-effort
+ * POSIX durability step, not an across-filesystem or hardware guarantee. */
+static int sync_parent_directory(const char *path) {
+    const char *slash = strrchr(path, '/');
+    size_t length = slash == NULL ? 1u : (slash == path ? 1u : (size_t)(slash - path));
+    char *parent = malloc(length + 1u);
+    int fd, ok;
+    if (parent == NULL) return 0;
+    if (slash == NULL) parent[0] = '.';
+    else if (slash == path) parent[0] = '/';
+    else memcpy(parent, path, length);
+    parent[length] = '\0';
+    fd = open(parent, O_RDONLY);
+    free(parent);
+    if (fd < 0) return 0;
+    ok = fsync(fd) == 0;
+    if (close(fd) != 0) ok = 0;
+    return ok;
+}
+#endif
+
 SudokuGameStatus sudoku_game_save(const SudokuGame *game, const char *path) {
     static unsigned serial=0;
     char bytes[SUDOKU_SAVE_MAX_BYTES];
@@ -296,7 +321,13 @@ SudokuGameStatus sudoku_game_save(const SudokuGame *game, const char *path) {
     }
     if(!ok)(void)remove(temp);
     free(temp);
-    return ok?SUDOKU_GAME_OK:SUDOKU_GAME_IO;
+    if(!ok)return SUDOKU_GAME_IO;
+#if !defined(_WIN32)
+    /* This can fail *after* the replacement occurred; do not tell the caller
+     * the previous save was preserved. Distinct status avoids false claims. */
+    if(!sync_parent_directory(path))return SUDOKU_GAME_DURABILITY_UNCERTAIN;
+#endif
+    return SUDOKU_GAME_OK;
 }
 SudokuGameStatus sudoku_game_load(SudokuGame *game, const char *path) {
     char bytes[SUDOKU_SAVE_MAX_BYTES+1u];

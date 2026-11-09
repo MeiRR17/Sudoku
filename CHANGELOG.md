@@ -2,6 +2,13 @@
 
 Versions under 1.0 are development milestones, **not** supported Production releases. Dates follow ISO 8601.
 
+## [0.8.3] — 2026-11-09
+
+- On POSIX, game saves now fsync their **parent directory after successful rename**, in addition to syncing the temporary file first.
+- Distinguish pre-rename save failure (previous valid save preserved) from **post-rename directory-sync failure** (target replaced; crash durability uncertain). The terminal reports a warning instead of incorrectly promising that the old file survived.
+- Add Linux-only LD_PRELOAD fault-injection E2E covering file fsync failure, rename failure, directory fsync failure, rollback preservation, and successful reload.
+- Keep Windows/macOS/native runner evidence, signed provenance and owner-approved LICENSE explicitly unfulfilled; no RC or Production release.
+
 ## [Unreleased]
 
 - Pending: cross-platform acceptance on Windows x64 and macOS arm64, license decision by owner, signing and official release.
@@ -9,7 +16,7 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 ## [0.8.2] — 2026-11-09 (development patch; release HOLD)
 
 - Strengthen ZIP/TAR.GZ verifier: validate canonical paths, regular files, size/count budgets and identical source/binary contents across archive formats.
-- Validate expected release filenames, required file inventory and unsigned SHA-256 manifest consistency; add adversarial archive tests that mutate packages and regenerate SHA256SUMS.
+- Validate expected release filenames, required file inventory and signed-independent SHA-256 consistency; add adversarial archive tests that mutate packages and regenerate SHA256SUMS.
 - Continue **without** a license choice, official GitHub Release or unsupported native Windows/macOS acceptance claims.
 
 ## [0.8.1] — 2026-11-09 (hardening patch; acceptance HOLD)

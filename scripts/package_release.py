@@ -20,7 +20,7 @@ import tarfile
 import tempfile
 import zipfile
 
-VERSION = '0.8.2'
+VERSION = '0.8.3'
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE_LIST = ROOT / 'scripts' / 'release_files.txt'
 EPOCH = 315532800  # 1980-01-01 UTC; valid in both ZIP and TAR.

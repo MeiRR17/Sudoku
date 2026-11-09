@@ -34,6 +34,8 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'SOLVED!' in stdout and 'Check: ' not in stdout
     assert 'Saved to' in stdout and saved.exists() and not stderr
     checks += 1
+    assert not list(folder.glob(saved.name + '.tmp.*'))
+    checks += 1
     first = saved.read_bytes()
     assert first.startswith(b'SUDOKU_SAVE_V1\n') and b'\nC=' in first
     checks += 1
