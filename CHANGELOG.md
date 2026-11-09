@@ -4,7 +4,14 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [Unreleased]
 
-- Upcoming v0.7.0: offline terminal play, notes, undo and save/resume.
+- Upcoming v0.8.0: cross-platform release packaging, owner license decision and binary smoke tests.
+
+## [0.7.0] — 2026-11-09
+
+- Added `sudoku play` for uniquely solvable imported or seeded puzzles: move/erase, pencil notes, undo/redo, reset, check, status and win detection.
+- Added bounded 128-snapshot in-memory history and persisted elapsed time, progress and notes.
+- Added checksummed `SUDOKU_SAVE_V1` with strict validation and atomic same-directory temporary-write/replace; corrupt saves fail without modifying game state.
+- Added C game engine tests and Python scripted save/resume/win/corruption tests; expanded coverage to all four engine components.
 
 ## [0.6.0] — 2026-11-09
 

@@ -8,6 +8,10 @@ There is **no production-supported release** yet. The latest development branch 
 
 The software works offline. Its main adversarial inputs are puzzle text from `--file`, stdin or `--puzzle`, destination file paths supplied to `--output`, and unsupported flags. Parsing rejects invalid bytes and >1 MiB input. `--output` uses an exclusive-create operation to refuse overwriting existing paths; it is **not** an atomic crash-safe commit. There is no built-in network service, authentication or account data.
 
+### Local gameplay save files (v0.7.0)
+
+`SUDOKU_SAVE_V1` is a strictly bounded (1 KiB), checksummed, plain ASCII format. It is **not encrypted or authenticated**, and a deliberately modified save with a recomputed checksum is not protected against tampering. Use trusted storage paths. Saved state is written to an exclusively created temporary file in the same directory and atomically replaced after a successful write/flush/fsync; this does not guarantee persistence over power loss without a parent-directory fsync. Orphaned temporary files may remain after abrupt termination. Importing a corrupt save does not mutate a running game; no automatic recovery from arbitrary temp files occurs. Windows/macOS native save behavior remains unverified and is tracked for the packaging release.
+
 The exact solver can consume CPU on pathological valid puzzles. The number of recursive placements is bounded by the 81 cells, but the search tree can still be exponential. A strict CPU-time or node budget has not yet been implemented. Do not process untrusted requests in an unbounded shared service.
 
 ## Report a vulnerability

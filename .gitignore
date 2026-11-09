@@ -12,3 +12,10 @@ build/
 CMakeFiles/
 CMakeCache.txt
 .ninja_*
+
+# Local-only player progress and interrupted atomic staging files
+*.save
+*.save.tmp.*
+# Local quality gate artifacts
+.quality-build/
+quality-*/
