@@ -2,147 +2,165 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-Sudoku* createSudoku(Square*** squares, Box** boxes) {
-    Sudoku* sudoku;
-    sudoku = malloc(sizeof(Sudoku));
+static void destroySquares(Square ***squares) {
+    int i, j;
+    if (!squares) return;
+    for (i = 0; i < 9; ++i) {
+        if (!squares[i]) continue;
+        for (j = 0; j < 9; ++j) free(squares[i][j]);
+        free(squares[i]);
+    }
+    free(squares);
+}
 
+Sudoku *createSudoku(Square ***squares, Box **boxes) {
+    Sudoku *sudoku = malloc(sizeof(*sudoku));
+    if (!sudoku) return NULL;
     sudoku->squares = squares;
     sudoku->boxes = boxes;
-
     return sudoku;
 }
 
-Sudoku* setUpPuzzle(int** puzzle) {
-    Square***  squares = (Square***)malloc(sizeof(Square**)*9);
-    Box** boxes = createBoxes();  // Declare boxes
-    int i, j, x;
-    int currentBox = 0;
-
-    for (i = 0; i < SIZE_ROWS; i++) {
-        squares[i] = (Square**)malloc(sizeof(Square*)*9);
-        for (j = 0; j < SIZE_COLUMNS; j++) {
-            squares[i][j] = (Square*)malloc(sizeof(Square));
-            squares[i][j]->number = puzzle[i][j];
-            squares[i][j]->row = i;
-            squares[i][j]->column = j;
-            squares[i][j]->solvable = 9;  // Fix typo
-
-            // Associate square with box
-            boxes[currentBox]->squares[boxes[currentBox]->numbers] = squares[i][j];
-            squares[i][j]->box = boxes[currentBox];
-            boxes[currentBox]->numbers++;
-
-            // Initialize possible numbers
-            for (x = 0; x < SIZE_ROWS; x++) {
-                squares[i][j]->possible[x] = 0;
-            }
-
-            // Adjust currentBox index
-            if (j == 2 || j == 5) {
-                currentBox++;
-            }
-        }
-        currentBox -= 2;
-        if (i == 2 || i == 5) {
-            currentBox += 3;
-        }
-    }
-
-    // Update Sudoku after setup
-    for (i = 0; i < SIZE_ROWS; i++) {
-        for (j = 0; j < SIZE_COLUMNS; j++) {
-            if (squares[i][j]->solvable == 0) {  // Fix comparison
-                updateSudoku(squares, i, j);
-                updateBoxes(squares, i, j);
-                UNSOLVED--;
-            }
-        }
-    }
-    return createSudoku(squares, boxes);  // Return Sudoku structure
+void destroySudoku(Sudoku *sudoku) {
+    if (!sudoku) return;
+    destroySquares(sudoku->squares);
+    destroyBoxes(sudoku->boxes);
+    free(sudoku);
 }
 
-int checkPuzzle(Square*** sudoku, Box** boxes) {
+Sudoku *setUpPuzzle(int **puzzle) {
+    Square ***squares = NULL;
+    Box **boxes = NULL;
+    Sudoku *sudoku = NULL;
+    int i, j, x;
+    if (!puzzle) return NULL;
+
+    squares = calloc(9, sizeof(*squares));
+    boxes = createBoxes();
+    if (!squares || !boxes) goto fail;
+
+    for (i = 0; i < 9; ++i) {
+        int currentBox = (i / 3) * 3;
+        if (!puzzle[i]) goto fail;
+        squares[i] = calloc(9, sizeof(*squares[i]));
+        if (!squares[i]) goto fail;
+        for (j = 0; j < 9; ++j) {
+            Square *square;
+            int boxIndex = currentBox + j / 3;
+            if (puzzle[i][j] < 0 || puzzle[i][j] > 9) goto fail;
+            square = calloc(1, sizeof(*square));
+            if (!square) goto fail;
+            square->number = puzzle[i][j];
+            square->row = i;
+            square->column = j;
+            square->solvable = square->number == 0 ? 9 : 0;
+            square->box = boxes[boxIndex];
+            for (x = 0; x < 9; ++x) square->possible[x] = 0;
+            squares[i][j] = square;
+            boxes[boxIndex]->squares[boxes[boxIndex]->numbers++] = square;
+        }
+    }
+
+    UNSOLVED = 81;
+    for (i = 0; i < 9; ++i) {
+        for (j = 0; j < 9; ++j) {
+            if (squares[i][j]->number != 0) {
+                --UNSOLVED;
+                updateSudoku(squares, i, j);
+                updateBoxes(squares, i, j);
+            }
+        }
+    }
+    sudoku = createSudoku(squares, boxes);
+    if (!sudoku) goto fail;
+    return sudoku;
+
+fail:
+    destroySquares(squares);
+    destroyBoxes(boxes);
+    return NULL;
+}
+
+int checkPuzzle(Square ***squares, Box **boxes) {
     int i, j;
-    for (i = 0; i < SIZE_ROWS; i++) {
-        for (j = 0; j < SIZE_COLUMNS; j++) {
-            if(sudoku[i][j] -> solvable == 1) {
-                solveSquare(sudoku[i][j]);
-                updateSudoku(sudoku, i, j);
-                updateBoxes(sudoku, i, j);
+    for (i = 0; i < 9; ++i) {
+        for (j = 0; j < 9; ++j) {
+            if (squares[i][j]->number == 0 && squares[i][j]->solvable == 1) {
+                if (!solveSquare(squares[i][j])) return 0;
+                updateSudoku(squares, i, j);
+                updateBoxes(squares, i, j);
                 return 1;
             }
         }
     }
-    if (boxSingles(sudoku, boxes)) {
-        return 1;
-    }
-    return checkRows(sudoku, boxes);
+    if (boxSingles(squares, boxes)) return 1;
+    return checkRows(squares, boxes);
 }
 
-int ** createPuzzle() {
-    int ** puzzle;
+int **createPuzzle(void) {
+    static const int arr[9][9] = {
+        {3, 0, 0, 0, 0, 0, 0, 2, 0},
+        {0, 8, 0, 4, 3, 2, 0, 1, 0},
+        {0, 5, 0, 0, 0, 0, 6, 0, 0},
+        {0, 7, 4, 8, 6, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 8},
+        {0, 3, 0, 1, 0, 0, 7, 0, 0},
+        {0, 0, 0, 2, 9, 6, 8, 7, 1},
+        {6, 0, 0, 0, 0, 0, 3, 4, 0},
+        {1, 9, 0, 7, 0, 0, 0, 0, 6}
+    };
+    int **puzzle = calloc(9, sizeof(*puzzle));
     int i, j;
-
-    int arr[9][9] = {3, 0, 0,   0, 0, 0,    0, 2, 0,
-                     0, 8, 0,   4, 3, 2,    0, 1, 0,
-                     0, 5, 0,   0, 0, 0,    6, 0, 0,
-
-                     0, 7, 4,   8, 6, 0,    0, 0, 0,
-                     0, 0, 0,   0, 0, 0,    0, 0, 8,
-                     0, 3, 0,   1, 0, 0,    7, 0, 0,
-
-                     0, 0, 0,   2, 9, 6,    8, 7, 1,
-                     6, 0, 0,   0, 0, 0,    3, 4, 0,
-                     1, 9, 0,   7, 0, 0,    0, 0, 6,};
-
-    puzzle = (int**)malloc(sizeof(int*)*9);
-    for (i = 0; i < 9; i++) {
-        puzzle[i] = (int*)malloc(sizeof(int)*9);
-
-        for (j = 0; j < 9; j++) {
-            puzzle[i][j] = arr[i][j];
+    if (!puzzle) return NULL;
+    for (i = 0; i < 9; ++i) {
+        puzzle[i] = malloc(9 * sizeof(**puzzle));
+        if (!puzzle[i]) {
+            destroyPuzzle(puzzle);
+            return NULL;
         }
+        for (j = 0; j < 9; ++j) puzzle[i][j] = arr[i][j];
     }
     return puzzle;
 }
 
-int updateSudoku(Square*** sudoku, int row, int col) {
-    int x;
-    int number = sudoku[row][col] -> number;
+void destroyPuzzle(int **puzzle) {
+    int i;
+    if (!puzzle) return;
+    for (i = 0; i < 9; ++i) free(puzzle[i]);
+    free(puzzle);
+}
 
-    for (x = 0; x < SIZE_ROWS; x++) {
-        if (sudoku[x][col] -> possible[number - 1] == 0) {
-            sudoku[x][col] -> solvable--;
+int updateSudoku(Square ***squares, int row, int col) {
+    int x, number;
+    if (!squares || row < 0 || row >= 9 || col < 0 || col >= 9 || !squares[row] || !squares[row][col]) return 0;
+    number = squares[row][col]->number;
+    if (number < 1 || number > 9) return 0;
+    for (x = 0; x < 9; ++x) {
+        Square *columnPeer = squares[x][col];
+        Square *rowPeer = squares[row][x];
+        if (columnPeer->number == 0 && columnPeer->possible[number - 1] == 0) {
+            columnPeer->possible[number - 1] = 1;
+            --columnPeer->solvable;
         }
-        sudoku[x][col] -> possible[number - 1] = 1;
-    }
-
-    for (x = 0; x < SIZE_COLUMNS; x++) {
-        if (sudoku[row][x] -> possible[number - 1] == 0) {
-            sudoku[row][x] -> solvable--;
+        if (rowPeer->number == 0 && rowPeer->possible[number - 1] == 0) {
+            rowPeer->possible[number - 1] = 1;
+            --rowPeer->solvable;
         }
-        sudoku[row][x] -> possible[number - 1] = 1;
     }
     return 1;
 }
 
-void printPuzzle(Square*** puzzle) {
+void printPuzzle(Square ***puzzle) {
     int i, j;
-
-    printf("Puzzle:\n");
-    printf("-------------------------------\n");
-    for (i = 0; i < SIZE_ROWS; i++) {
-        printf("|");
-        //print each row
-        for (j = 0; j < SIZE_COLUMNS; j++) {
-            printf(" %d ", puzzle[i][j] -> number);
-            if((j +1) % 3 == 0) {
-                printf("|");
-            }
+    puts("Puzzle:");
+    puts("-------------------------------");
+    for (i = 0; i < 9; ++i) {
+        putchar('|');
+        for (j = 0; j < 9; ++j) {
+            printf(" %d ", puzzle[i][j]->number);
+            if ((j + 1) % 3 == 0) putchar('|');
         }
-        printf("\n");
-        if ((i + 1) % 3 == 0) {
-            printf("-------------------------------\n");
-        }
+        putchar('\n');
+        if ((i + 1) % 3 == 0) puts("-------------------------------");
     }
 }
