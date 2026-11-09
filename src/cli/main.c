@@ -1,11 +1,14 @@
 #include "sudoku/board.h"
 #include "sudoku/solver.h"
+#include "sudoku/generator.h"
+#include <inttypes.h>
+#include <stdint.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-typedef enum Command { CMD_VALIDATE, CMD_SOLVE, CMD_COUNT } Command;
+typedef enum Command { CMD_VALIDATE, CMD_SOLVE, CMD_COUNT, CMD_GENERATE } Command;
 typedef enum Format { FMT_TEXT, FMT_COMPACT, FMT_JSON } Format;
 
 typedef struct Options {
@@ -15,6 +18,10 @@ typedef struct Options {
     const char *input_path;
     const char *output_path;
     int quiet;
+    SudokuGenerateOptions generation;
+    int seed_supplied;
+    int difficulty_supplied;
+    int generation_option_supplied;
 } Options;
 
 typedef struct Result {
@@ -22,6 +29,7 @@ typedef struct Result {
     SudokuBoard solution;
     SudokuSolveStatus classification;
     unsigned count;
+    SudokuGenerateResult generated;
 } Result;
 
 static const char demo[] =
@@ -29,16 +37,20 @@ static const char demo[] =
     "030100700000296871600000340190700006";
 
 static void help(FILE *output) {
-    fputs("Sudoku 0.5.0 (experimental): offline exact solver\n"
+    fputs("Sudoku 0.6.0 (experimental): offline exact solver\n"
           "Usage: sudoku {validate|solve|count} (--puzzle DIGITS | --file PATH | --stdin) [OPTIONS]\n"
+          "       sudoku generate --seed UINT32 --difficulty easy|medium|hard [OPTIONS]\n"
           "       sudoku --demo | --version | --help\n"
           "Options:\n"
           "  --format text|compact|json  Result encoding (default text)\n"
           "  --output PATH               Save result to a NEW file, refuse overwrite; '-' is stdout\n"
           "  --quiet                     Suppress non-unique solution warning\n"
+          "Generate: --symmetry none|rotational (default none)\n"
+          "          --max-attempts 1..100 (default 20), --max-checks 1..10000 (default 2000)\n"
+          "          --max-nodes 1..1000000 (default 50000), --max-ms 1..60000 (default 5000)\n"
           "Input: exactly 81 ASCII digits 0..9, optional ASCII whitespace; 0 is empty.\n"
           "       --file - is equivalent to --stdin. Input limit: 1 MiB.\n"
-          "Exit: 0 success, 2 usage, 3 invalid input/board, 4 I/O error, 5 no solution for solve.\n"
+          "Exit: 0 success, 2 usage, 3 invalid input/board, 4 I/O error, 5 no solution, 6 generation budget.\n"
           "JSON success schema: docs/CLI_JSON_SCHEMA.md (schema_version=1).\n"
           "Errors go to stderr, never to JSON/stdout; count 0 is successful.\n",
           output);
@@ -49,14 +61,37 @@ static int usage_error(const char *detail) {
     return 2;
 }
 
+/* Strict, locale-independent unsigned decimal parsing: reject signs, overflow
+ * and all trailing bytes. Bounded values are checked before casting. */
+static int parse_unsigned(const char *value, uint64_t maximum, uint64_t *out) {
+    uint64_t x = 0;
+    const unsigned char *p = (const unsigned char *)value;
+    if (!*p) return 0;
+    while (*p) {
+        unsigned digit;
+        if (*p < '0' || *p > '9') return 0;
+        digit = (unsigned)(*p++ - '0');
+        if (x > (maximum - digit) / 10u) return 0;
+        x = x * 10u + digit;
+    }
+    *out = x;
+    return 1;
+}
+
 static int parse_options(int argc, char **argv, Options *opt) {
     int i;
     int format_seen = 0;
     int output_seen = 0;
+    int symmetry_seen = 0, attempts_seen = 0, checks_seen = 0, nodes_seen = 0, ms_seen = 0;
+    opt->generation.max_attempts = 20u;
+    opt->generation.max_checks = 2000u;
+    opt->generation.max_nodes = UINT64_C(50000);
+    opt->generation.max_cpu_ms = 5000u;
     if (argc < 3) return usage_error("missing command or input");
     if (strcmp(argv[1], "validate") == 0) opt->command = CMD_VALIDATE;
     else if (strcmp(argv[1], "solve") == 0) opt->command = CMD_SOLVE;
     else if (strcmp(argv[1], "count") == 0) opt->command = CMD_COUNT;
+    else if (strcmp(argv[1], "generate") == 0) opt->command = CMD_GENERATE;
     else return usage_error("unknown command");
     for (i = 2; i < argc; ++i) {
         const char *arg = argv[i];
@@ -89,13 +124,60 @@ static int parse_options(int argc, char **argv, Options *opt) {
                 return usage_error("missing or repeated output path");
             output_seen = 1;
             opt->output_path = argv[i];
+        } else if (strcmp(arg, "--seed") == 0 ||
+                   strcmp(arg, "--max-attempts") == 0 ||
+                   strcmp(arg, "--max-checks") == 0 ||
+                   strcmp(arg, "--max-nodes") == 0 ||
+                   strcmp(arg, "--max-ms") == 0) {
+            uint64_t parsed;
+            unsigned is_seed = strcmp(arg, "--seed") == 0;
+            unsigned is_attempts = strcmp(arg, "--max-attempts") == 0;
+            unsigned is_checks = strcmp(arg, "--max-checks") == 0;
+            unsigned is_nodes = strcmp(arg, "--max-nodes") == 0;
+            unsigned is_ms = strcmp(arg, "--max-ms") == 0;
+            uint64_t max = is_seed ? UINT32_MAX : is_attempts ? 100u : is_checks ? 10000u : is_nodes ? 1000000u : 60000u;
+            if ((is_seed && opt->seed_supplied) || (is_attempts && attempts_seen) ||
+                (is_checks && checks_seen) || (is_nodes && nodes_seen) || (is_ms && ms_seen) ||
+                ++i >= argc || !parse_unsigned(argv[i], max, &parsed))
+                return usage_error("invalid or repeated generation limit/seed");
+            if (!is_seed && parsed == 0u) return usage_error("generation limits must be positive");
+            if (is_seed) { opt->seed_supplied = 1; opt->generation.seed = (uint32_t)parsed; }
+            if (is_attempts) { attempts_seen = 1; opt->generation.max_attempts = (unsigned)parsed; }
+            if (is_checks) { checks_seen = 1; opt->generation.max_checks = (unsigned)parsed; }
+            if (is_nodes) { nodes_seen = 1; opt->generation.max_nodes = parsed; }
+            if (is_ms) { ms_seen = 1; opt->generation.max_cpu_ms = (unsigned)parsed; }
+            opt->generation_option_supplied = 1;
+        } else if (strcmp(arg, "--difficulty") == 0) {
+            if (opt->difficulty_supplied || ++i >= argc) return usage_error("missing or repeated difficulty");
+            opt->difficulty_supplied = 1;
+            if (strcmp(argv[i], "easy") == 0) opt->generation.difficulty = SUDOKU_DIFFICULTY_EASY;
+            else if (strcmp(argv[i], "medium") == 0) opt->generation.difficulty = SUDOKU_DIFFICULTY_MEDIUM;
+            else if (strcmp(argv[i], "hard") == 0) opt->generation.difficulty = SUDOKU_DIFFICULTY_HARD;
+            else return usage_error("difficulty must be easy, medium or hard");
+            opt->generation_option_supplied = 1;
+        } else if (strcmp(arg, "--symmetry") == 0) {
+            if (symmetry_seen || ++i >= argc) return usage_error("missing or repeated symmetry");
+            symmetry_seen = 1;
+            if (strcmp(argv[i], "none") == 0) opt->generation.rotational = 0;
+            else if (strcmp(argv[i], "rotational") == 0) opt->generation.rotational = 1;
+            else return usage_error("symmetry must be none or rotational");
+            opt->generation_option_supplied = 1;
         } else if (strcmp(arg, "--quiet") == 0) {
             if (opt->quiet) return usage_error("repeated --quiet");
             opt->quiet = 1;
         } else return usage_error("unknown option");
     }
-    if (opt->puzzle == NULL && opt->input_path == NULL)
-        return usage_error("specify --puzzle, --file or --stdin");
+    if (opt->command == CMD_GENERATE) {
+        if (opt->puzzle != NULL || opt->input_path != NULL || opt->quiet)
+            return usage_error("generate takes no puzzle input or --quiet");
+        if (!opt->seed_supplied || !opt->difficulty_supplied)
+            return usage_error("generate requires --seed and --difficulty");
+    } else {
+        if (opt->generation_option_supplied)
+            return usage_error("generation options are valid only for generate");
+        if (opt->puzzle == NULL && opt->input_path == NULL)
+            return usage_error("specify --puzzle, --file or --stdin");
+    }
     return 0;
 }
 
@@ -190,7 +272,16 @@ static const char *classification(SudokuSolveStatus status) {
 static void print_json(FILE *stream, const Options *opt, const Result *result) {
     char puzzle[82], solution[82];
     sudoku_board_compact(&result->board, puzzle);
-    if (opt->command == CMD_VALIDATE) {
+    if (opt->command == CMD_GENERATE) {
+        sudoku_board_compact(&result->generated.solution, solution);
+        fprintf(stream, "{\"schema_version\":1,\"command\":\"generate\",\"status\":\"unique\",\"puzzle\":\"%s\",\"solution\":\"%s\",\"solutions_found\":1,\"seed\":%" PRIu32 ",\"difficulty\":\"%s\",\"symmetry\":\"%s\",\"clues\":%u,\"naked_singles\":%u,\"hidden_singles\":%u,\"attempts\":%u,\"checks\":%u}\n",
+                puzzle, solution, opt->generation.seed,
+                sudoku_difficulty_text(result->generated.rated),
+                opt->generation.rotational ? "rotational" : "none",
+                result->generated.clues, result->generated.naked_singles,
+                result->generated.hidden_singles, result->generated.attempts,
+                result->generated.checks);
+    } else if (opt->command == CMD_VALIDATE) {
         fprintf(stream, "{\"schema_version\":1,\"command\":\"validate\",\"status\":\"valid\",\"puzzle\":\"%s\"}\n", puzzle);
     } else if (opt->command == CMD_SOLVE) {
         sudoku_board_compact(&result->solution, solution);
@@ -215,7 +306,13 @@ static void print_result(FILE *stream, const Options *opt, const Result *result)
         fprintf(stream, "%s\n", compact);
         return;
     }
-    if (opt->command == CMD_COUNT) {
+    if (opt->command == CMD_GENERATE) {
+        fprintf(stream, "Generated puzzle (seed=%" PRIu32 ", difficulty=%s, clues=%u, symmetry=%s, checks=%u):\n",
+                opt->generation.seed, sudoku_difficulty_text(result->generated.rated),
+                result->generated.clues, opt->generation.rotational ? "rotational" : "none",
+                result->generated.checks);
+        display(stream, &result->board);
+    } else if (opt->command == CMD_COUNT) {
         fprintf(stream, "Solutions: %s (counted %u%s)\n",
                 sudoku_solve_status_text(result->classification), result->count,
                 result->count == 2u ? "+" : "");
@@ -259,7 +356,7 @@ int main(int argc, char **argv) {
     int parsed, status;
     if (argc == 2 && strcmp(argv[1], "--help") == 0) { help(stdout); return 0; }
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-        puts("Sudoku 0.5.0 (experimental)"); return 0;
+        puts("Sudoku 0.6.0 (experimental)"); return 0;
     }
     if (argc == 2 && strcmp(argv[1], "--demo") == 0) {
         SudokuBoard example, solution;
@@ -279,6 +376,18 @@ int main(int argc, char **argv) {
     parsed = parse_options(argc, argv, &opt);
     if (parsed == -1) return 0;
     if (parsed != 0) return parsed;
+    if (opt.command == CMD_GENERATE) {
+        SudokuGenerateStatus generated = sudoku_generate(&opt.generation, &result.generated);
+        if (generated != SUDOKU_GENERATE_OK) {
+            fprintf(stderr, "Generation failed: %s\n", sudoku_generate_status_text(generated));
+            return generated == SUDOKU_GENERATE_INVALID ? 2 : 6;
+        }
+        result.board = result.generated.puzzle;
+        result.solution = result.generated.solution;
+        result.count = 1;
+        result.classification = SUDOKU_SOLVE_UNIQUE;
+        return publish_result(&opt, &result);
+    }
     status = load_puzzle(&opt, &result.board);
     if (status != 0) return status;
     if (opt.command != CMD_VALIDATE) {

@@ -10,6 +10,8 @@ typedef struct Search {
     uint16_t cols[9];
     uint16_t boxes[9];
     unsigned solutions;
+    uint64_t nodes, limit;
+    int exhausted;
 } Search;
 
 static unsigned box_of(unsigned row, unsigned col) {
@@ -58,7 +60,9 @@ static void search_solutions(Search *search) {
     uint16_t allowed = 0;
     int pos;
     unsigned row, col, box, digit;
-    if (search->solutions >= 2u) return;
+    if (search->solutions >= 2u || search->exhausted) return;
+    if (search->nodes >= search->limit) { search->exhausted = 1; return; }
+    ++search->nodes;
     pos = choose_cell(search, &allowed);
     if (pos == -2) return;
     if (pos == -1) {
@@ -81,16 +85,19 @@ static void search_solutions(Search *search) {
         search->rows[row] &= (uint16_t)~bit;
         search->cols[col] &= (uint16_t)~bit;
         search->boxes[box] &= (uint16_t)~bit;
-        if (search->solutions >= 2u) return;
+        if (search->solutions >= 2u || search->exhausted) return;
     }
 }
 
-SudokuSolveStatus sudoku_analyze(const SudokuBoard *givens,
+SudokuSolveStatus sudoku_analyze_bounded(const SudokuBoard *givens,
                                  SudokuBoard *first_solution,
-                                 unsigned *solutions_up_to_two) {
+                                 unsigned *solutions_up_to_two,
+                                 uint64_t max_nodes, uint64_t *nodes_visited) {
     Search search = {0};
     unsigned i;
     if (solutions_up_to_two != NULL) *solutions_up_to_two = 0;
+    if (nodes_visited != NULL) *nodes_visited = 0;
+    search.limit = max_nodes;
     if (givens == NULL || sudoku_board_validate(givens, NULL) != SUDOKU_OK)
         return SUDOKU_SOLVE_INVALID;
     search.board = *givens;
@@ -108,10 +115,19 @@ SudokuSolveStatus sudoku_analyze(const SudokuBoard *givens,
         search.boxes[box] |= bit;
     }
     search_solutions(&search);
+    if (nodes_visited != NULL) *nodes_visited = search.nodes;
+    if (search.exhausted) return SUDOKU_SOLVE_BUDGET;
     if (solutions_up_to_two != NULL) *solutions_up_to_two = search.solutions;
     if (search.solutions == 0u) return SUDOKU_SOLVE_UNSOLVABLE;
     if (first_solution != NULL) *first_solution = search.first;
     return search.solutions == 1u ? SUDOKU_SOLVE_UNIQUE : SUDOKU_SOLVE_MULTIPLE;
+}
+
+SudokuSolveStatus sudoku_analyze(const SudokuBoard *givens,
+                                 SudokuBoard *first_solution,
+                                 unsigned *solutions_up_to_two) {
+    return sudoku_analyze_bounded(givens, first_solution, solutions_up_to_two,
+                                  UINT64_MAX, NULL);
 }
 
 SudokuSolveStatus sudoku_solve_first(const SudokuBoard *givens,
@@ -131,6 +147,7 @@ const char *sudoku_solve_status_text(SudokuSolveStatus result) {
         case SUDOKU_SOLVE_UNSOLVABLE: return "no solution";
         case SUDOKU_SOLVE_UNIQUE: return "unique solution";
         case SUDOKU_SOLVE_MULTIPLE: return "multiple solutions";
+        case SUDOKU_SOLVE_BUDGET: return "search node budget exhausted";
         default: return "unknown solver status";
     }
 }

@@ -59,3 +59,14 @@ Errors are **not** JSON documents in v1: failures produce no JSON/standard-outpu
 - `tests/cli_golden.py` checks byte-accurate JSON, schema semantics, stderr separation, exit codes, binary/oversized input, CRLF, stdin, output refusal and safe preservation of existing files.
 - The CTest golden test is enabled when Python 3 is installed; core CTest checks remain available without Python.
 - Compiler testing performed on Linux with Clang 17 (Release) and GCC 14 (ASan/UBSan). Windows and macOS **have not yet been validated**; platform-specific release support is planned for v0.8.0.
+
+
+## v0.6.0 additive `generate` response
+
+`generate` accepts required `--seed UINT32 --difficulty easy|medium|hard`, optional `--symmetry none|rotational` and resource budgets, instead of an input board. It introduces the following additive JSON **schema_version 1** success payload (key order is stable but consumers must not rely on it):
+
+```json
+{"schema_version":1,"command":"generate","status":"unique","puzzle":"650070080000500047430900100005730829740020061289015400004008015920006000010040098","solution":"651473982892561347437982156165734829743829561289615473374298615928156734516347298","solutions_found":1,"seed":42,"difficulty":"easy","symmetry":"rotational","clues":39,"naked_singles":42,"hidden_singles":0,"attempts":1,"checks":22}
+```
+
+The response is returned **only** after exact uniqueness verification. `solution` is present for external verification but should be concealed in player-facing interfaces. Difficulty is a deterministic, narrow naked/hidden singles rubric (see [GENERATION_AND_DIFFICULTY.md](GENERATION_AND_DIFFICULTY.md)), not a measured human solving-time rating. Budget exhaustion has **exit code 6**, stderr diagnostic, no stdout and no created output file. Limits are documented in the generator specification. No changes are made to existing command schemas.
