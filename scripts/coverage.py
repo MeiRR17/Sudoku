@@ -22,7 +22,7 @@ def main():
     totals = []
     with tempfile.TemporaryDirectory() as tmp:
         cwd = Path(tmp)
-        for name in ('board', 'solver', 'generator'):
+        for name in ('board', 'solver', 'generator', 'game'):
             file = src / 'src' / 'core' / (name + '.c')
             obj = build / 'CMakeFiles' / 'sudoku_core.dir' / 'src' / 'core' / (name + '.c.o')
             cmd = ['gcov', '--json-format', '--branch-counts', '-o', str(obj), str(file)]
