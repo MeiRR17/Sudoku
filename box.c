@@ -1,76 +1,80 @@
 #include "sudoku.h"
+#include <stdlib.h>
 
-int boxSingles(Square *** sudoku, Box ** boxes) {
-    int i, j, x;
-    int count;
-    int temp;
-
-    for (i = 0; i < 9; i++) {
-        for (j = 0; j < 9; j++) {
-            count = 0;
-            for (x = 0; x < 9; x++) {
-                if (boxes[i]->squares[x]->number != 0)
-                    continue;
-
-                if (boxes[i]->squares[x]->possible[j] == 0) {
-                    count++;
-                    temp = x;
-                }
-
-                if (count == 2)
-                    break;
-            }
-
-            if (count == 1) {
-                boxes[i]->squares[temp]->number = j + 1;
-                UNSOLVED--;
-                boxes[i]->squares[temp]->solvable = 0;
-
-                updateSudoku(sudoku, boxes[i]->squares[temp]->row, boxes[i]->squares[temp]->column);
-
-                return 1;
-            }
-        }
-    }
-
-    return 0;
-}
-
-Box ** createBoxes() {
-    int x, y;
-    Box ** boxes;
-    boxes = malloc(sizeof(Box*)*9);
-
-    for (x = 0; x < 9; x++) {
-        boxes[x] = malloc(sizeof(Box));
-        boxes[x]->squares = malloc(sizeof(Square*)*9);
-        boxes[x]->numbers = 0;
-        boxes[x]->solvable = 9;
-
-        for (y = 0; y < 9; y++) {
-            boxes[x]->possible[y] = 0;
-        }
+Box **createBoxes(void) {
+    int i;
+    Box **boxes = calloc(9, sizeof(*boxes));
+    if (!boxes) return NULL;
+    for (i = 0; i < 9; ++i) {
+        boxes[i] = calloc(1, sizeof(*boxes[i]));
+        if (!boxes[i]) { destroyBoxes(boxes); return NULL; }
+        boxes[i]->squares = calloc(9, sizeof(*boxes[i]->squares));
+        if (!boxes[i]->squares) { destroyBoxes(boxes); return NULL; }
+        boxes[i]->numbers = 0;
+        boxes[i]->solvable = 9;
     }
     return boxes;
 }
 
-/*
- * int updateBoxes(Square *** sudoku, int row, int column)
- *
- * Once a square is solved within a box, all other
- *
- */
-int updateBoxes(Square *** sudoku, int row, int column) {
-    int x;
-    int number = sudoku[row][column]->number;
-    Box * box;
-    box = sudoku[row][column]->box;
+void destroyBoxes(Box **boxes) {
+    int i;
+    if (!boxes) return;
+    for (i = 0; i < 9; ++i) {
+        if (boxes[i]) {
+            free(boxes[i]->squares);
+            free(boxes[i]);
+        }
+    }
+    free(boxes);
+}
 
-    for (x = 0; x < 9; x++) {
-        if (box->squares[x]->possible[number - 1] == 0) {
-            box->squares[x]->solvable--;
-            box->squares[x]->possible[number - 1] = 1;
+int updateBoxes(Square ***squares, int row, int column) {
+    Box *box;
+    int number, i;
+    if (!squares || row < 0 || row >= 9 || column < 0 || column >= 9 || !squares[row] || !squares[row][column]) return 0;
+    number = squares[row][column]->number;
+    if (number < 1 || number > 9) return 0;
+    box = squares[row][column]->box;
+    if (!box) return 0;
+    for (i = 0; i < 9; ++i) {
+        Square *peer = box->squares[i];
+        if (peer && peer->number == 0 && peer->possible[number - 1] == 0) {
+            peer->possible[number - 1] = 1;
+            --peer->solvable;
         }
     }
     return 1;
+}
+
+int boxSingles(Square ***squares, Box **boxes) {
+    int i, j, x;
+    for (i = 0; i < 9; ++i) {
+        for (j = 0; j < 9; ++j) {
+            int count = 0, index = -1;
+            int alreadyPlaced = 0;
+            for (x = 0; x < 9; ++x) {
+                Square *square = boxes[i]->squares[x];
+                if (square->number == j + 1) { alreadyPlaced = 1; break; }
+            }
+            if (alreadyPlaced) continue;
+            for (x = 0; x < 9; ++x) {
+                Square *square = boxes[i]->squares[x];
+                if (square->number == 0 && square->possible[j] == 0) {
+                    ++count;
+                    index = x;
+                    if (count >= 2) break;
+                }
+            }
+            if (count == 1) {
+                Square *square = boxes[i]->squares[index];
+                square->number = j + 1;
+                square->solvable = 0;
+                --UNSOLVED;
+                updateSudoku(squares, square->row, square->column);
+                updateBoxes(squares, square->row, square->column);
+                return 1;
+            }
+        }
+    }
+    return 0;
 }
