@@ -1,6 +1,6 @@
 # Sudoku — Production Roadmap (2026-11-09)
 
-**Status:** approved scope for planning; implementation has NOT started under this roadmap.  
+**Status (2026-11-09):** v0.1.0 build recovery implemented and smoke-tested locally on GCC/Clang; v0.2.0 safe board model is the next milestone. This does not establish production readiness. Verification: [docs/VERIFICATION_v0.1.0.md](docs/VERIFICATION_v0.1.0.md).  
 **Repository:** MeiRR17/Sudoku · **default branch:** master · **baseline inspected:** 2b8f43f80b2a791eeb69e2d9c344ced9d2d59bb7.  
 **Product goal:** a trustworthy, offline-first, cross-platform Sudoku engine and command-line application written in portable C11.  
 **Release target:** v1.0.0 production. **Version system:** SemVer; v0.x milestones are development milestones, not production releases.
