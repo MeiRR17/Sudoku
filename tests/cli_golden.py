@@ -89,7 +89,7 @@ for invalid in [
     args = invalid[0].split()
     run(*args, code=invalid[1], stdout="", stderr_contains="Usage error")
 run("--help", stderr_contains="" if False else None)
-run("--version", stdout="Sudoku 0.7.0 (experimental)\n")
+run("--version", stdout="Sudoku 0.8.0 (experimental)\n")
 run("solve", "--help")
 run("--demo")
 

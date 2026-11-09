@@ -19,3 +19,8 @@ CMakeCache.txt
 # Local quality gate artifacts
 .quality-build/
 quality-*/
+
+# Development packages and packaging smoke outputs
+dist/
+build-*/
+.packages/
