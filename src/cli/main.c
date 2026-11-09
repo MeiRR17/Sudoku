@@ -38,7 +38,7 @@ static const char demo[] =
     "030100700000296871600000340190700006";
 
 static void help(FILE *output) {
-    fputs("Sudoku 0.8.0 (experimental): offline exact solver\n"
+    fputs("Sudoku 0.8.1 (experimental): offline exact solver\n"
           "Usage: sudoku {validate|solve|count} (--puzzle DIGITS | --file PATH | --stdin) [OPTIONS]\n"
           "       sudoku generate --seed UINT32 --difficulty easy|medium|hard [OPTIONS]\n"
           "       sudoku play (--puzzle DIGITS | --file PATH | --resume SAVE | --seed UINT32 --difficulty easy|medium|hard) [--save PATH]\n"
@@ -184,21 +184,43 @@ static int parse_options(int argc, char **argv, Options *opt) {
 }
 
 /* Read at most 1MiB plus one byte for reliable over-limit detection. */
+/* A single bounded fread avoids retrying a stream after EOF or an I/O error.
+ * Requesting 1 MiB + 1 byte permits exact oversized-input classification. */
 static int read_all(FILE *stream, unsigned char **out, size_t *length) {
     const size_t capacity = SUDOKU_MAX_INPUT_BYTES + 1u;
     unsigned char *data = malloc(capacity);
-    size_t len = 0;
+    size_t count;
     if (data == NULL) { errno = ENOMEM; return -1; }
-    while (len < capacity) {
-        size_t n = fread(data + len, 1u, capacity - len, stream);
-        len += n;
-        if (n == 0u) {
-            if (ferror(stream)) { free(data); return -1; }
-            break;
-        }
-    }
+    count = fread(data, 1u, capacity, stream);
+    if (ferror(stream)) { free(data); return -1; }
     *out = data;
-    *length = len;
+    *length = count;
+    return 0;
+}
+
+/* Keep ownership of a newly opened stream inside a dedicated helper.
+ * fclose runs on both successful and failed reads; stdin is not closed. */
+static int read_from_path(const char *path, unsigned char **out, size_t *length) {
+    FILE *input = fopen(path, "rb");
+    int result, close_result;
+    int read_errno;
+    if (input == NULL) {
+        fprintf(stderr, "Input open failed: %s\n", strerror(errno));
+        return 4;
+    }
+    result = read_all(input, out, length);
+    read_errno = errno;
+    close_result = fclose(input);
+    if (result != 0) {
+        fprintf(stderr, "Input read failed: %s\n", strerror(read_errno));
+        return 4;
+    }
+    if (close_result != 0) {
+        free(*out);
+        *out = NULL;
+        fputs("Input close failed\n", stderr);
+        return 4;
+    }
     return 0;
 }
 
@@ -228,17 +250,15 @@ static int load_puzzle(const Options *opt, SudokuBoard *board) {
         source = (const unsigned char *)opt->puzzle;
         length = strlen(opt->puzzle);
     } else {
-        FILE *input = strcmp(opt->input_path, "-") == 0 ? stdin : fopen(opt->input_path, "rb");
-        if (input == NULL) { fprintf(stderr, "Input open failed: %s\n", strerror(errno)); return 4; }
-        if (read_all(input, &data, &length) != 0) {
-            fprintf(stderr, "Input read failed: %s\n", strerror(errno));
-            if (input != stdin) (void)fclose(input);
-            return 4;
-        }
-        if (input != stdin && fclose(input) != 0) {
-            fputs("Input close failed\n", stderr);
-            free(data);
-            return 4;
+        int result;
+        if (strcmp(opt->input_path, "-") == 0) {
+            if (read_all(stdin, &data, &length) != 0) {
+                fprintf(stderr, "Input read failed: %s\n", strerror(errno));
+                return 4;
+            }
+        } else {
+            result = read_from_path(opt->input_path, &data, &length);
+            if (result != 0) return result;
         }
         source = data;
     }
@@ -359,7 +379,7 @@ int main(int argc, char **argv) {
     if (argc >= 2 && strcmp(argv[1], "play") == 0) return sudoku_play_main(argc,argv);
     if (argc == 2 && strcmp(argv[1], "--help") == 0) { help(stdout); return 0; }
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-        puts("Sudoku 0.8.0 (experimental)"); return 0;
+        puts("Sudoku 0.8.1 (experimental)"); return 0;
     }
     if (argc == 2 && strcmp(argv[1], "--demo") == 0) {
         SudokuBoard example, solution;

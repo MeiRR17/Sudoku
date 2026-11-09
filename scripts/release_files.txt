@@ -20,6 +20,7 @@ docs/VERIFICATION_v0.5.0.md
 docs/VERIFICATION_v0.6.0.md
 docs/VERIFICATION_v0.7.0.md
 docs/VERIFICATION_v0.8.0.md
+docs/VERIFICATION_v0.8.1.md
 include/sudoku/board.h
 include/sudoku/game.h
 include/sudoku/generator.h
@@ -31,6 +32,8 @@ scripts/package_release.py
 scripts/quality_gate.py
 scripts/release_files.txt
 scripts/run_fuzz.py
+scripts/static_analysis.py
+scripts/verify_runner_platform.py
 src/cli/main.c
 src/cli/play.c
 src/core/board.c

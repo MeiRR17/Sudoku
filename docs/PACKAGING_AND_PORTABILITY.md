@@ -1,4 +1,4 @@
-# v0.8.0 packaging and portability — technical delivery, acceptance HOLD
+# v0.8.0–v0.8.1 packaging and portability — technical delivery, acceptance HOLD
 
 **Status (2026-11-09):** local Linux packaging infrastructure implemented and tested. **Not an official production or public distribution release.** The exit criteria in GitHub issue #10 are **not met**: owner has not approved a license and native Windows x64 / macOS arm64 acceptance runs are missing.
 
@@ -24,10 +24,10 @@ To uninstall an **isolated** custom prefix, remove that prefix directory. For a 
 
 `package_release.py` writes five items to `dist/` on each host:
 
-- `sudoku-v0.8.0-{linux|windows|macos}-{x86_64|arm64}.tar.gz`
-- `sudoku-v0.8.0-{linux|windows|macos}-{x86_64|arm64}.zip`
-- `sudoku-v0.8.0-source.tar.gz`
-- `sudoku-v0.8.0-source.zip`
+- `sudoku-v0.8.1-{linux|windows|macos}-{x86_64|arm64}.tar.gz`
+- `sudoku-v0.8.1-{linux|windows|macos}-{x86_64|arm64}.zip`
+- `sudoku-v0.8.1-source.tar.gz`
+- `sudoku-v0.8.1-source.zip`
 - `SHA256SUMS` (four lowercase SHA-256 hex digests, sorted by filename)
 
 The platform label is detected from the **actual packaging host**, not inferred from a remote target. Script rejects unsupported hosts. Source archive membership is explicit in `scripts/release_files.txt`; build outputs, personal saves, `.git` metadata and archives are not listed. Both archive formats use sorted file order, fixed 1980-01-01 timestamps, fixed owner/group IDs where available and deterministic compression settings. This guarantees **repackaging determinism when the staged bytes are identical**, NOT necessarily identical executable bytes across different compilers, machines, runtime linkers or build paths. We separately compare binary hashes for independent local builds when possible. `--verify-only` validates the SHA manifest and checks that archive member paths are safe and sorted; SHA-256 checks corruption, **not authenticity**. No signature/attestation exists.
@@ -43,6 +43,10 @@ Before checking off issue #10 and publishing any release:
 3. **macOS arm64 (native Apple Clang):** use a genuine Apple Silicon runner, run `ctest` including package/game tests, extract into a clean prefix, test save/resume with malformed save, verify SHA-256 and collect CPU/OS/toolchain and binary hashes. `macos-latest` by itself does **not** prove an arm64 run; record the actual machine architecture. **Not run as of 2026-11-09.**
 4. **Licensing:** the owner must explicitly choose and approve a license after checking intellectual-property ownership and third-party notices. See [LICENSE_DECISION_PENDING.md](LICENSE_DECISION_PENDING.md). No LICENSE file is auto-created by v0.8.0.
 5. **Release engineering:** check static-analysis/security review; verify clean builds from the exact merged commit, download artifact hashes, document reproducibility conditions and rollback, consider signing and a formal tag/release only after all blockers close.
+
+The v0.8.1 input-stream repair resolves the three previously reported Clang `unix.Stream` warnings in the six production translation units. Evidence and reproduction commands: [v0.8.1 verification](VERIFICATION_v0.8.1.md). This does **not** substitute for native Windows/macOS testing.
+
+The manual workflow checks the actual OS/architecture against the selected runner. A macOS runner that reports Intel/x86-64 **fails** the arm64 gate instead of being counted as Apple Silicon evidence. An appropriately labeled workflow is **not** a substitute for a completed run.
 
 The existing GitHub workflow `.github/workflows/manual-quality.yml` is **manual-only**, deliberately without push/PR/cron triggers to conserve Actions quota. To obtain native evidence, run it **separately** on Windows and Apple Silicon runners after confirming their actual platform. Merely adding a workflow is not evidence that tests ran.
 
