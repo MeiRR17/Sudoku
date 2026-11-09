@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sudoku VERSION 0.8.2 LANGUAGES C)
+project(Sudoku VERSION 0.8.3 LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -121,6 +121,11 @@ if(BUILD_TESTING)
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_smoke.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
             add_test(NAME sudoku_package_integrity
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_integrity.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
+            if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+                add_test(NAME sudoku_save_fault_injection
+                    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/save_faults.py"
+                        "$<TARGET_FILE:sudoku>" "${CMAKE_CURRENT_SOURCE_DIR}/tests/fault_inject.c" "${CMAKE_C_COMPILER}")
+            endif()
         endif()
         add_test(NAME sudoku_game_e2e
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/game_e2e.py" "$<TARGET_FILE:sudoku>" "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")

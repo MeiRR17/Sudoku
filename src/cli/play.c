@@ -210,6 +210,10 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             if(!path){puts("Error: supply a path, e.g. save puzzle.save");continue;}
             if(strlen(path)>4096u){puts("Error: save path too long");continue;}
             status=sudoku_game_save(game,path);
+            if(status==SUDOKU_GAME_DURABILITY_UNCERTAIN){
+                printf("Warning: %s\n",sudoku_game_status_text(status));
+                continue;
+            }
             if(status!=SUDOKU_GAME_OK)printf("Error: %s\n",sudoku_game_status_text(status));
             else{
                 /* Paths extracted by strtok point into reused input line. */

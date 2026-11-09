@@ -12,7 +12,8 @@ typedef enum SudokuGameStatus {
     SUDOKU_GAME_OK = 0, SUDOKU_GAME_INVALID, SUDOKU_GAME_UNSOLVABLE,
     SUDOKU_GAME_MULTIPLE, SUDOKU_GAME_GIVEN, SUDOKU_GAME_CONFLICT,
     SUDOKU_GAME_RANGE, SUDOKU_GAME_NOT_EMPTY, SUDOKU_GAME_NO_HISTORY,
-    SUDOKU_GAME_CORRUPT, SUDOKU_GAME_IO
+    SUDOKU_GAME_CORRUPT, SUDOKU_GAME_IO,
+    SUDOKU_GAME_DURABILITY_UNCERTAIN
 } SudokuGameStatus;
 
 typedef struct SudokuGameSnapshot {
@@ -45,9 +46,12 @@ int sudoku_game_won(const SudokuGame *game);
 uint64_t sudoku_game_elapsed(const SudokuGame *game);
 const char *sudoku_game_status_text(SudokuGameStatus status);
 
-/* Versioned checksummed ASCII save; same-directory temp + atomic rename.
- * History is intentionally not persisted. All failures leave game unchanged.
- * Save writes/close are checked; fsync is performed where supported. */
+/* Versioned checksummed ASCII save, same-directory staging and rename.
+ * On POSIX, both file contents and parent-directory metadata are fsynced.
+ * On DURABILITY_UNCERTAIN the rename DID succeed but the subsequent parent
+ * directory fsync failed: check the target; no power-loss promise is made.
+ * The caller-owned game is never changed by saving. Undo history is not saved.
+ * Windows uses _commit and MoveFileExA(WRITE_THROUGH), still unverified. */
 SudokuGameStatus sudoku_game_save(const SudokuGame *game, const char *path);
 SudokuGameStatus sudoku_game_load(SudokuGame *game, const char *path);
 #endif

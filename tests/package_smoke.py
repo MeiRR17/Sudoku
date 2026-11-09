@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory(prefix='sudoku-package-e2e-') as tmp:
     exe = root / 'bin' / ('sudoku.exe' if platform.system() == 'Windows' else 'sudoku')
     if platform.system() != 'Windows':
         exe.chmod(0o755)  # zip extraction permissions vary by host
-    assert call(exe, '--version').stdout.strip() == 'Sudoku 0.8.2 (experimental)'
+    assert call(exe, '--version').stdout.strip() == 'Sudoku 0.8.3 (experimental)'
     result = call(exe, 'solve', '--file', ROOT / 'tests/fixtures/unique.txt', '--format', 'compact')
     assert result.stdout.strip() == EXPECTED
     assert 'Usage' in call(exe, '--help').stdout

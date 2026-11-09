@@ -1,6 +1,6 @@
-# Sudoku — C11 exact solver, CLI and quality gates (`v0.8.2`, experimental)
+# Sudoku — C11 exact solver, CLI and quality gates (`v0.8.3`, experimental)
 
-A fully offline Sudoku engine with deterministic exact solving, solution classification, validation and a scriptable CLI. **This is a development milestone, not a production release.** v0.7.0 added playable terminal Sudoku with notes, bounded undo/redo, check/reset, completion detection and checksummed atomic save/resume. v0.8.0 added development packaging; v0.8.1 hardened the input-stream lifecycle and makes the Clang static analyzer part of the full local quality gate. Native Windows/macOS validation, license approval and an official release remain pending. The manual CI workflow now fails if its actual OS/CPU architecture does not match the requested native platform.
+A fully offline Sudoku engine with deterministic exact solving, solution classification, validation and a scriptable CLI. **This is a development milestone, not a production release.** v0.7.0 added playable terminal Sudoku with notes, bounded undo/redo, check/reset, completion detection and checksummed atomic save/resume. v0.8.0 added development packaging; v0.8.3 adds POSIX save-directory metadata syncing and Linux fault-injection regression tests; v0.8.2 hardens the input-stream lifecycle and makes the Clang static analyzer part of the full local quality gate. Native Windows/macOS validation, license approval and an official release remain pending. The manual CI workflow now fails if its actual OS/CPU architecture does not match the requested native platform.
 
 ## Build and use
 
@@ -32,11 +32,11 @@ Exit codes: **0** successful validation/solving/counting (including count=0), **
 
 ## Offline interactive play and saves
 
-Start a uniquely solvable imported puzzle (`sudoku play --file tests/fixtures/unique.txt`), a generated puzzle (`sudoku play --seed 42 --difficulty easy`) or resume a saved session (`sudoku play --resume my-game.save`). Type `help` for ASCII-only commands including `set ROW COL DIGIT`, `erase ROW COL`, `note ROW COL DIGIT`, `notes ROW COL`, `undo`, `redo`, `reset`, `check`, `status`, `show`, `save [PATH]`, `quit`. Use `--save PATH` when starting a game to establish its default save destination. **Quitting never implicitly saves.** The current board and notes persist, but the previous undo/redo history intentionally resets on load. Save files use the checksummed `SUDOKU_SAVE_V1` format with same-directory temporary write and atomic replace. The checksum is not authentication, and full power-loss durability is not guaranteed. The save format and complete terminal command contract are described in [Gameplay and save format](docs/GAMEPLAY_AND_SAVE.md).
+Start a uniquely solvable imported puzzle (`sudoku play --file tests/fixtures/unique.txt`), a generated puzzle (`sudoku play --seed 42 --difficulty easy`) or resume a saved session (`sudoku play --resume my-game.save`). Type `help` for ASCII-only commands including `set ROW COL DIGIT`, `erase ROW COL`, `note ROW COL DIGIT`, `notes ROW COL`, `undo`, `redo`, `reset`, `check`, `status`, `show`, `save [PATH]`, `quit`. Use `--save PATH` when starting a game to establish its default save destination. **Quitting never implicitly saves.** The current board and notes persist, but the previous undo/redo history intentionally resets on load. Save files use the checksummed `SUDOKU_SAVE_V1` format with same-directory temporary write and atomic replace. The checksum is not authentication. On POSIX v0.8.3 now also fsyncs the parent directory after a successful rename; if this last step fails, the game prints a dedicated **durability uncertainty warning**, because the target may already have been replaced. Power-loss durability is still **not guaranteed** across all filesystems, hardware or unverified Windows/macOS targets. The save format and complete terminal command contract are described in [Gameplay and save format](docs/GAMEPLAY_AND_SAVE.md).
 
 ## Stage and verify a development package
 
-`v0.8.0` and `v0.8.1` introduced relocatable CMake install/export metadata, deterministic ZIP/TGZ packaging,
+`v0.8.0` and `v0.8.2` include relocatable CMake install/export metadata, deterministic ZIP/TGZ packaging,
 SHA-256 checksums and local install/extract/smoke tests. These are **development
 artifacts only**, not an official GitHub Release. They are not signed; no owner-approved
 open-source license exists and native Windows x64 / macOS arm64 acceptance is pending.
@@ -78,8 +78,8 @@ A GitHub Actions quality gate is available through **manual `workflow_dispatch` 
 - [CLI JSON and exit-code contract](docs/CLI_JSON_SCHEMA.md)
 - [v0.7.0 gameplay verification](docs/VERIFICATION_v0.7.0.md)
 - [v0.8.0 technical packaging verification](docs/VERIFICATION_v0.8.0.md)
-- [v0.8.1 input-safety and static-analysis verification](docs/VERIFICATION_v0.8.1.md)
-- [v0.8.2 package integrity verification](docs/VERIFICATION_v0.8.2.md)
+- [v0.8.2 input-safety and static-analysis verification](docs/VERIFICATION_v0.8.2.md)
+- [v0.8.3 save durability and failure injection verification](docs/VERIFICATION_v0.8.3.md)
 - [Interactive gameplay, commands and versioned save format](docs/GAMEPLAY_AND_SAVE.md)
 - [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 

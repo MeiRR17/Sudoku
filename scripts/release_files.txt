@@ -22,6 +22,7 @@ docs/VERIFICATION_v0.7.0.md
 docs/VERIFICATION_v0.8.0.md
 docs/VERIFICATION_v0.8.1.md
 docs/VERIFICATION_v0.8.2.md
+docs/VERIFICATION_v0.8.3.md
 include/sudoku/board.h
 include/sudoku/game.h
 include/sudoku/generator.h
@@ -54,12 +55,14 @@ tests/fixtures/unique.txt
 tests/fixtures/unsolvable.txt
 tests/fixtures/valid.txt
 tests/fuzz_parser.c
+tests/fault_inject.c
 tests/fuzz_solver.c
 tests/game_e2e.py
 tests/generator_golden.py
 tests/package_smoke.py
 tests/package_integrity.py
 tests/run_stdin.cmake
+tests/save_faults.py
 tests/test_board.c
 tests/test_game.c
 tests/test_generator.c

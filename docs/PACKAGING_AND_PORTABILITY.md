@@ -64,3 +64,8 @@ The packager performs strict verification of canonical file paths, safe regular-
 This is an **integrity gate, not a signature**: a party able to replace both archive formats and the unsigned manifest can still forge a self-consistent package. Production requires provenance/authentication and the owner's explicit license decision. Native Windows and Apple Silicon testing remain separate open gates.
 
 The v0.8.2 extracted-source ZIP is also configured and built in an independent temporary directory by `tests/package_smoke.py`, with `BUILD_TESTING=OFF`; a known puzzle must solve correctly from that fresh build. Packaging parity tests execute only for uninstrumented Release builds; GCC sanitizer/coverage builds retain their usual 19 unit/integration checks.
+
+
+## v0.8.3 — POSIX save-directory metadata sync and rollback fault evidence
+
+Linux test-only `LD_PRELOAD` interposition induces file-`fsync`, rename and directory-`fsync` failures during an interactive save. Before rename, the previous save remains byte-for-byte unchanged and staging files are removed. A failure after rename produces a **durability uncertainty warning**, not a claim that the older save survived; the new target remains loadable. The parent directory is synced following successful POSIX renames. This is not a real power-loss/fault-tolerant filesystem certification; disk-controller caches, mount options and non-POSIX hosts remain outside the evidence. Native Windows/macOS package and save E2E, license decision and official release acceptance stay OPEN.
