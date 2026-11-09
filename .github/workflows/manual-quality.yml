@@ -1,0 +1,37 @@
+name: Sudoku manual quality gate
+# Intentionally no push/pull_request/cron triggers: conserve CI minutes.
+# Run manually in Actions, selecting exactly one platform per invocation.
+on:
+  workflow_dispatch:
+    inputs:
+      runner_os:
+        description: Host runner to test (one platform per invocation)
+        required: true
+        type: choice
+        default: ubuntu-latest
+        options:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+      full_linux_gate:
+        description: Run GCC/Clang/Sanitizers/coverage/benchmark (Linux only)
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ${{ inputs.runner_os }}
+    timeout-minutes: 20
+    steps:
+      - name: Check out code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Fast CMake/CTest gate (no external Python deps)
+        if: ${{ !inputs.full_linux_gate || inputs.runner_os != 'ubuntu-latest' }}
+        run: python scripts/quality_gate.py --mode fast
+      - name: Full Linux gate (may consume more CI minutes)
+        if: ${{ inputs.full_linux_gate && inputs.runner_os == 'ubuntu-latest' }}
+        run: python scripts/quality_gate.py --mode full
