@@ -1,6 +1,6 @@
-# Sudoku — C11 exact solver, CLI and quality gates (`v0.7.0`, experimental)
+# Sudoku — C11 exact solver, CLI and quality gates (`v0.8.0`, experimental)
 
-A fully offline Sudoku engine with deterministic exact solving, solution classification, validation and a scriptable CLI. **This is a development milestone, not a production release.** v0.7.0 adds playable terminal Sudoku with notes, bounded undo/redo, check/reset, completion detection and checksummed atomic save/resume. Verified cross-platform release packages remain future milestones.
+A fully offline Sudoku engine with deterministic exact solving, solution classification, validation and a scriptable CLI. **This is a development milestone, not a production release.** v0.7.0 added playable terminal Sudoku with notes, bounded undo/redo, check/reset, completion detection and checksummed atomic save/resume. v0.8.0 adds development packaging, but clean Windows/macOS validation, license approval and official release remain pending.
 
 ## Build and use
 
@@ -34,6 +34,24 @@ Exit codes: **0** successful validation/solving/counting (including count=0), **
 
 Start a uniquely solvable imported puzzle (`sudoku play --file tests/fixtures/unique.txt`), a generated puzzle (`sudoku play --seed 42 --difficulty easy`) or resume a saved session (`sudoku play --resume my-game.save`). Type `help` for ASCII-only commands including `set ROW COL DIGIT`, `erase ROW COL`, `note ROW COL DIGIT`, `notes ROW COL`, `undo`, `redo`, `reset`, `check`, `status`, `show`, `save [PATH]`, `quit`. Use `--save PATH` when starting a game to establish its default save destination. **Quitting never implicitly saves.** The current board and notes persist, but the previous undo/redo history intentionally resets on load. Save files use the checksummed `SUDOKU_SAVE_V1` format with same-directory temporary write and atomic replace. The checksum is not authentication, and full power-loss durability is not guaranteed. The save format and complete terminal command contract are described in [Gameplay and save format](docs/GAMEPLAY_AND_SAVE.md).
 
+## Stage and verify a development package
+
+`v0.8.0` includes relocatable CMake install/export metadata, deterministic ZIP/TGZ packaging,
+SHA-256 checksums and local install/extract/smoke tests. These are **development
+artifacts only**, not an official GitHub Release. They are not signed; no owner-approved
+open-source license exists and native Windows x64 / macOS arm64 acceptance is pending.
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+python3 scripts/package_release.py --build build --output dist
+python3 scripts/package_release.py --verify-only --output dist
+```
+
+See [Packaging and platform gates](docs/PACKAGING_AND_PORTABILITY.md),
+[local packaging verification](docs/VERIFICATION_v0.8.0.md), and
+[license decision record](docs/LICENSE_DECISION_PENDING.md).
+
 ## Run quality checks
 
 For the current platform (including Windows with MSVC, provided CMake/CTest/Python and a compiler are installed):
@@ -58,7 +76,8 @@ A GitHub Actions quality gate is available through **manual `workflow_dispatch` 
 - [Architecture and ownership](docs/ARCHITECTURE.md)
 - [Production release requirements](docs/PRODUCTION_READINESS.md)
 - [CLI JSON and exit-code contract](docs/CLI_JSON_SCHEMA.md)
-- [v0.7.0 verification and benchmark](docs/VERIFICATION_v0.7.0.md)
+- [v0.7.0 gameplay verification](docs/VERIFICATION_v0.7.0.md)
+- [v0.8.0 technical packaging verification](docs/VERIFICATION_v0.8.0.md)
 - [Interactive gameplay, commands and versioned save format](docs/GAMEPLAY_AND_SAVE.md)
 - [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sudoku VERSION 0.7.0 LANGUAGES C)
+project(Sudoku VERSION 0.8.0 LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -10,7 +10,10 @@ if(SUDOKU_ENABLE_COVERAGE AND NOT CMAKE_C_COMPILER_ID STREQUAL "GNU")
 endif()
 
 add_library(sudoku_core STATIC src/core/board.c src/core/solver.c src/core/generator.c src/core/game.c)
-target_include_directories(sudoku_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+include(GNUInstallDirs)
+target_include_directories(sudoku_core PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 add_executable(sudoku src/cli/main.c src/cli/play.c)
 target_link_libraries(sudoku PRIVATE sudoku_core)
 
@@ -110,6 +113,13 @@ if(BUILD_TESTING)
     set_tests_properties(sudoku_solve_unsolvable PROPERTIES WILL_FAIL TRUE)
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
+        # Packaging is validated only on an uninstrumented Release build; the
+        # exported core archive in a sanitizer build needs sanitizer runtime
+        # linkage from a consumer and is not a distribution artifact.
+        if(NOT SUDOKU_ENABLE_SANITIZERS AND NOT SUDOKU_ENABLE_COVERAGE)
+            add_test(NAME sudoku_package_e2e
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_smoke.py" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
+        endif()
         add_test(NAME sudoku_game_e2e
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/game_e2e.py" "$<TARGET_FILE:sudoku>" "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
         add_test(NAME sudoku_generator_golden
@@ -118,4 +128,31 @@ if(BUILD_TESTING)
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_golden.py" "$<TARGET_FILE:sudoku>" "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
     endif()
 endif()
-install(TARGETS sudoku RUNTIME DESTINATION bin)
+# Export CLI/core with relocatable CMake package metadata.
+include(CMakePackageConfigHelpers)
+install(TARGETS sudoku sudoku_core EXPORT SudokuTargets
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(DIRECTORY include/sudoku DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(FILES README.md CHANGELOG.md SECURITY.md
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/sudoku")
+install(EXPORT SudokuTargets FILE SudokuTargets.cmake NAMESPACE Sudoku::
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Sudoku")
+configure_package_config_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/SudokuConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/SudokuConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Sudoku")
+write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/SudokuConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}" COMPATIBILITY SameMajorVersion)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/SudokuConfig.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/SudokuConfigVersion.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Sudoku")
+
+# CPack archives are development artifacts, NOT signed production releases.
+set(CPACK_PACKAGE_NAME "Sudoku")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VENDOR "MeiRR17 Sudoku")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Experimental offline C11 Sudoku CLI")
+set(CPACK_GENERATOR "TGZ;ZIP")
+set(CPACK_PACKAGE_CHECKSUM "SHA256")
+include(CPack)

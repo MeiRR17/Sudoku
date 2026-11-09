@@ -4,7 +4,14 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [Unreleased]
 
-- Upcoming v0.8.0: cross-platform release packaging, owner license decision and binary smoke tests.
+- Pending: cross-platform acceptance on Windows x64 and macOS arm64, license decision by owner, signing and official release.
+
+## [0.8.0] — 2026-11-09 (technical delivery, acceptance HOLD)
+
+- Added relocatable CMake install/export and version metadata for CLI and core library.
+- Added deterministic development ZIP/TGZ packaging, SHA-256 manifest, secure archive verification and install/extract/smoke regression tests.
+- Added packaging documentation and a license decision record. **No license was selected; no official Release was published.**
+- Platform verification **remains open** on Windows x64 / MSVC and macOS arm64 / Clang, including player save/resume behavior.
 
 ## [0.7.0] — 2026-11-09
 

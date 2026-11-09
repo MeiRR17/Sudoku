@@ -27,6 +27,8 @@ jobs:
     runs-on: ${{ inputs.runner_os }}
     timeout-minutes: 20
     steps:
+      - name: Report actual host architecture (platform claims require evidence)
+        run: python -c "import platform; print(platform.platform(), platform.machine())"
       - name: Check out code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Fast CMake/CTest gate (no external Python deps)
@@ -35,3 +37,13 @@ jobs:
       - name: Full Linux gate (may consume more CI minutes)
         if: ${{ inputs.full_linux_gate && inputs.runner_os == 'ubuntu-latest' }}
         run: python scripts/quality_gate.py --mode full
+      - name: Verify deterministic development archives on selected OS
+        if: ${{ !inputs.full_linux_gate || inputs.runner_os != 'ubuntu-latest' }}
+        run: |
+          python scripts/package_release.py --build .quality-build/native --output dist
+          python scripts/package_release.py --verify-only --output dist
+      - name: Verify full Linux development archives
+        if: ${{ inputs.full_linux_gate && inputs.runner_os == 'ubuntu-latest' }}
+        run: |
+          python scripts/package_release.py --build .quality-build/clang --output dist
+          python scripts/package_release.py --verify-only --output dist
