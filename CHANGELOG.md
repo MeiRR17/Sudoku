@@ -4,7 +4,14 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [Unreleased]
 
-- Upcoming v0.6.0: seeded generation of uniqueness-checked puzzles and difficulty calibration.
+- Upcoming v0.7.0: offline terminal play, notes, undo and save/resume.
+
+## [0.6.0] — 2026-11-09
+
+- Added deterministic seed-driven fully solved grid randomization, clue removal with exact unique-solution checks and optional rotational clue symmetry.
+- Added a transparent technique-based difficulty proxy (naked singles, hidden singles, and beyond-single fallback) with bounded generation attempts, checks, solver nodes and a best-effort CPU deadline.
+- Extended the CLI with `generate`, JSON schema v1 success output and code 6 for exhausted generation budgets. Output files are created only on success.
+- Added 72 generator property fixtures, independent solver cross-checks and CLI golden fixtures. Extended coverage collection to include generator core.
 
 ## [0.5.0] — 2026-11-09
 

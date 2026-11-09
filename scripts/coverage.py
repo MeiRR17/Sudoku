@@ -1,4 +1,4 @@
-"""Measure core/parser line coverage with GCC gcov's compressed JSON output.
+"""Measure core/parser/solver/generator line coverage with GCC gcov's compressed JSON output.
 
 Usage: python3 scripts/coverage.py build-coverage --min-percent 90
 No third-party dependencies. Run after ctest on a GCC --coverage build.
@@ -22,7 +22,7 @@ def main():
     totals = []
     with tempfile.TemporaryDirectory() as tmp:
         cwd = Path(tmp)
-        for name in ('board', 'solver'):
+        for name in ('board', 'solver', 'generator'):
             file = src / 'src' / 'core' / (name + '.c')
             obj = build / 'CMakeFiles' / 'sudoku_core.dir' / 'src' / 'core' / (name + '.c.o')
             cmd = ['gcov', '--json-format', '--branch-counts', '-o', str(obj), str(file)]
