@@ -29,7 +29,7 @@ static const char demo[] =
     "030100700000296871600000340190700006";
 
 static void help(FILE *output) {
-    fputs("Sudoku 0.4.0 (experimental): offline exact solver\n"
+    fputs("Sudoku 0.5.0 (experimental): offline exact solver\n"
           "Usage: sudoku {validate|solve|count} (--puzzle DIGITS | --file PATH | --stdin) [OPTIONS]\n"
           "       sudoku --demo | --version | --help\n"
           "Options:\n"
@@ -259,7 +259,7 @@ int main(int argc, char **argv) {
     int parsed, status;
     if (argc == 2 && strcmp(argv[1], "--help") == 0) { help(stdout); return 0; }
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-        puts("Sudoku 0.4.0 (experimental)"); return 0;
+        puts("Sudoku 0.5.0 (experimental)"); return 0;
     }
     if (argc == 2 && strcmp(argv[1], "--demo") == 0) {
         SudokuBoard example, solution;
