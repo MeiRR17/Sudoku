@@ -34,7 +34,7 @@ Linux x86_64, 2026-11-09, Clang 17.0.0 and GCC 14.2.0:
 | GCC gcov Debug CMake/CTest | **19/19 PASS** |
 | Clang Static Analyzer | **6/6 production C translation units PASS**, zero diagnostics |
 | Measured core line coverage | **580/607 = 95.55%** (board 82/87, solver 91/94, generator 170/176, game 237/250) |
-| Save failure injection E2E | **7 assertions/checkpoints PASS** across pre-rename fsync failure, rename failure, post-rename directory fsync failure and recovery |
+| Save failure injection E2E | **11 checks PASS** across pre-rename fsync failure, rename failure, post-rename directory fsync failure and recovery |
 | Archive integrity/packaging | **4/4** ZIP/TAR.GZ types and parity / SHA256 verification PASS |
 | Package extraction | **14 files** in each Linux native archive, **69 source files** in each source archive; compiled and executed the extracted source archive via independent CMake build |
 
