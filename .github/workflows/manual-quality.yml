@@ -33,7 +33,9 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Refuse to certify a runner with the wrong CPU architecture
         run: python scripts/verify_runner_platform.py --expected "${{ inputs.runner_os }}"
+      - name: Test acceptance guards without C toolchain
+        run: python -B -m unittest discover -s tests -p platform_acceptance_unit.py -v
       - name: Build, verify development archives, and emit exact-commit receipt
         # A receipt exists only after the quality gate and package verification
         # succeed on the selected host; this workflow remains manual-only.
-        run: python scripts/platform_acceptance.py --expected "${{ inputs.runner_os }}" --mode "${{ inputs.full_linux_gate && inputs.runner_os == 'ubuntu-latest' && 'full' || 'fast' }}"
+        run: python scripts/platform_acceptance.py --expected "${{ inputs.runner_os }}" --mode "${{ inputs.full_linux_gate && inputs.runner_os == 'ubuntu-latest' && 'full' || 'fast' }}" --require-sha "${{ github.sha }}"

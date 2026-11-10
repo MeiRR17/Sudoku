@@ -21,7 +21,7 @@ python3 scripts/platform_acceptance.py --expected ubuntu-latest
 # Or on Apple Silicon: python3 scripts/platform_acceptance.py --expected macos-latest
 ```
 
-The script runs the full fast CMake/CTest gate, verifies all four development archives, and writes an unsigned `dist/platform-receipt.json` bound to exact Git HEAD **only on success**. Existing receipts are not overwritten. On Windows, compiler identity **MSVC** is required. The manual-only Actions workflow calls this command; it has not been dispatched or run as part of this update. A receipt alone cannot authorize a release or establish authenticity.
+The script runs the full fast CMake/CTest gate, verifies all four development archives, and writes an unsigned `dist/platform-receipt.json` bound to exact Git HEAD **only on success**. It requires the exact Actions `GITHUB_SHA` (or optional `--require-sha`), rejects tracked/untracked source changes, and rechecks the checkout after the build and package gates. Standard ignored build caches remain outside source tracking. Run `python -B -m unittest discover -s tests -p platform_acceptance_unit.py -v` for fast guard-unit checks. Existing receipts are not overwritten. On Windows, compiler identity **MSVC** is required. The manual-only Actions workflow calls this command; it has not been dispatched or run as part of this update. A receipt alone cannot authorize a release or establish authenticity.
 
 **Observed isolated checks in this update:** `platform_acceptance.py` passed Python bytecode compilation, CLI help parsing, four C compiler identity fixture checks (MSVC, AppleClang, GNU and missing-identity rejection), and a negative guard refusing `--mode full` for Windows. **No Sudoku CMake/CTest or packaging execution occurred.**
 

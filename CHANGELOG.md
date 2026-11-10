@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Bind native platform evidence to an explicitly required Git SHA (`GITHUB_SHA` in manual Actions), reject untracked/modified source files before and after the gate, and add fast stdlib guard tests for incorrect SHAs, dirty trees and compiler identities.
+
 - Add a fail-closed per-platform acceptance runner (`scripts/platform_acceptance.py`): it invokes the scoped CMake/CTest gate and deterministic packaging verification, checks the actual host architecture and C compiler (MSVC on Windows), and emits a local unsigned JSON receipt bound to the clean Git HEAD and four archive SHA-256 hashes **only after success**. Replace duplicated manual Actions steps with the runner; no automatic CI triggers or official release publishing.
 
 - Create POSIX save staging files using exclusive `open(..., O_CREAT | O_EXCL, 0600)` so they are private **from creation**, not only after `fchmod`. Preserve atomic replacement, fail-closed mode checks, and add Linux fault-injection that verifies the inode starts private even under `umask(000)`. Windows ACLs remain unverified.
