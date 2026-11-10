@@ -11,6 +11,18 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+/* Linux-only test shim: inject an atomic stage-create failure.
+ * mkostemp implements the same six-X filename substitution and mode 0600,
+ * without calling our interposed mkstemp again. Production uses mkstemp. */
+int mkstemp(char *pattern) {
+    const char *fault = getenv("SUDOKU_TEST_FAULT");
+    if (fault != NULL && strcmp(fault, "stage-create") == 0) {
+        errno = EACCES;
+        return -1;
+    }
+    return mkostemp(pattern, 0);
+}
+
 int fsync(int fd) {
     const char *fault = getenv("SUDOKU_TEST_FAULT");
     struct stat st;
