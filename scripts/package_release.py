@@ -335,29 +335,29 @@ def _ensure_safe_archive(path, expected_prefix):
             with gzip.GzipFile(fileobj=compressed, mode='rb') as decoder:
                 bounded = _BoundedTarGzipReader(decoder)
                 with tarfile.open(fileobj=bounded, mode='r|') as archive:
-                for item in archive:
-                    if len(names) >= MAX_ARCHIVE_FILES:
+                    for item in archive:
+                        if len(names) >= MAX_ARCHIVE_FILES:
+                            raise ValueError('invalid number of TAR members')
+                        if not item.isfile() or item.size < 0:
+                            raise ValueError('non-regular TAR member')
+                        rel = _safe_member_name(item.name, expected_prefix)
+                        if rel in members:
+                            raise ValueError('archive entries empty, duplicated or not sorted')
+                        claim_portable_path(rel, seen_portable)
+                        unpacked += item.size
+                        if unpacked > MAX_UNPACKED_BYTES:
+                            raise ValueError('TAR unpacked content exceeds size budget')
+                        stream = archive.extractfile(item)
+                        if stream is None:
+                            raise ValueError('unreadable TAR member')
+                        with stream:
+                            payload = stream.read(item.size + 1)
+                        if len(payload) != item.size:
+                            raise ValueError('TAR member length mismatch')
+                        members[rel] = payload
+                        names.append(item.name)
+                    if not names:
                         raise ValueError('invalid number of TAR members')
-                    if not item.isfile() or item.size < 0:
-                        raise ValueError('non-regular TAR member')
-                    rel = _safe_member_name(item.name, expected_prefix)
-                    if rel in members:
-                        raise ValueError('archive entries empty, duplicated or not sorted')
-                    claim_portable_path(rel, seen_portable)
-                    unpacked += item.size
-                    if unpacked > MAX_UNPACKED_BYTES:
-                        raise ValueError('TAR unpacked content exceeds size budget')
-                    stream = archive.extractfile(item)
-                    if stream is None:
-                        raise ValueError('unreadable TAR member')
-                    with stream:
-                        payload = stream.read(item.size + 1)
-                    if len(payload) != item.size:
-                        raise ValueError('TAR member length mismatch')
-                    members[rel] = payload
-                    names.append(item.name)
-                if not names:
-                    raise ValueError('invalid number of TAR members')
                 while True:
                     padding = bounded.read(65536)
                     if not padding:
