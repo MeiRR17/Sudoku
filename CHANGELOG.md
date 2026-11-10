@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Bind unsigned cross-platform acceptance receipts to **actual extracted source members**: the matrix now verifies canonical source ZIP and TAR.GZ contents and exact embedded `release_files.txt` membership, then recalculates the receipt's canonical source-tree SHA-256. Reject forged matching receipt digests, ZIP/TAR divergence and undeclared source members even when archive SHA256SUMS values were regenerated. Added four regression cases, and adjusted test fixtures to real deterministic archives. An isolated six-case archive/control-flow harness passed; full project tests and native acceptance are still pending.
+
 - Harden the v0.8.4 three-platform evidence matrix: read and SHA-256 hash all 12 locally supplied archives rather than comparing two unsigned text records; reject missing, symlinked or >80 MiB archives, plus >16 KiB receipt JSON and >4 KiB checksum manifests. Six negative regressions added. This is consistency validation, not publisher authentication or native acceptance.
 
 - Add an offline `clear-notes` command to erase every pencil annotation in one undoable operation, preserving placed digits; an empty note set causes no history change. Extend game API, C unit checks, terminal E2E and gameplay documentation. Isolated GCC/Clang C11 + UBSan behavior checks passed; full Sudoku CMake/CTest and native platform acceptance are still pending.
