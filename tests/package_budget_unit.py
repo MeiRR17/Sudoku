@@ -133,6 +133,18 @@ class PackageBudgetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'symlink in installation tree'):
             packager.installed_paths(stage)
 
+    def test_windows_device_path_in_staged_install_rejected(self):
+        stage = self.install()
+        (stage / 'CON.txt').write_bytes(b'device-name')
+        with self.assertRaisesRegex(ValueError, 'unsafe installed path'):
+            packager.installed_paths(stage)
+
+    def test_windows_punctuation_in_staged_install_rejected(self):
+        stage = self.install()
+        (stage / 'bad:stream').write_bytes(b'adstream')
+        with self.assertRaisesRegex(ValueError, 'unsafe installed path'):
+            packager.installed_paths(stage)
+
     def test_changed_file_length_rejected_after_metadata_preflight(self):
         class ChangingFile:
             def stat(self):
