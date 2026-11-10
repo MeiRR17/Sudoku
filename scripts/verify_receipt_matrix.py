@@ -184,15 +184,32 @@ def verify_matrix(folders, sha, version):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--require-sha', required=True)
-    parser.add_argument('--linux', type=Path, required=True)
-    parser.add_argument('--windows', type=Path, required=True)
-    parser.add_argument('--macos', type=Path, required=True)
+    parser.add_argument('--require-sha', required=True,
+                        help='Exact 40-character lowercase Git commit SHA')
+    parser.add_argument('--local', type=Path,
+                        help='Verify one platform bundle before its archives are discarded')
+    parser.add_argument('--expected', choices=tuple(PLATFORMS),
+                        help='Required host label when checking --local')
+    parser.add_argument('--linux', type=Path)
+    parser.add_argument('--windows', type=Path)
+    parser.add_argument('--macos', type=Path)
     args = parser.parse_args()
+    if SHA_RE.fullmatch(args.require_sha) is None:
+        parser.error('--require-sha must be an exact 40-character lowercase Git SHA')
     cmake = (ROOT / 'CMakeLists.txt').read_text(encoding='utf-8')
     match = re.search(r'project\(Sudoku VERSION ([0-9]+\.[0-9]+\.[0-9]+) LANGUAGES C\)', cmake)
     if match is None:
         raise ValueError('CMake project version missing')
+    folders = (args.linux, args.windows, args.macos)
+    if args.local is not None:
+        if args.expected is None or any(folder is not None for folder in folders):
+            parser.error('--local requires --expected and forbids matrix folders')
+        receipt = verify_one(args.local, args.expected, args.require_sha, match.group(1))
+        print('LOCAL EVIDENCE CONSISTENT:', args.expected, receipt['git_commit_sha'])
+        print('NOT RELEASE APPROVAL: unsigned development evidence; no cross-host claim')
+        return
+    if args.expected is not None or any(folder is None for folder in folders):
+        parser.error('matrix mode requires --linux --windows --macos, without --expected')
     receipts = verify_matrix({'ubuntu-latest': args.linux,
                               'windows-latest': args.windows,
                               'macos-latest': args.macos}, args.require_sha,
