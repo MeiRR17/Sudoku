@@ -63,6 +63,7 @@ tests/game_e2e.py
 tests/generator_golden.py
 tests/package_smoke.py
 tests/platform_acceptance_unit.py
+tests/quality_gate_unit.py
 tests/package_integrity.py
 tests/run_stdin.cmake
 tests/save_faults.py

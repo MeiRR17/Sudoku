@@ -69,3 +69,8 @@ These tests validate the **Python receipt writer only** on Linux. No Sudoku C11 
 ### Strict save-quote parser focused check (2026-11-10)
 
 An isolated C11 harness using the relevant source normalization/quote validation logic was compiled locally with `cc -std=c11 -Wall -Wextra -Wpedantic -Werror -O2` and executed: **10/10 focused cases PASS** (unquoted/quoted paths with spaces, empty/unclosed/nested/stray quotes, CRLF and whitespace). This is an isolated *extraction*, **not** a build of `src/cli/play.c` or the complete Sudoku application. The actual `tests/game_e2e.py` was extended with three subprocess-driven malformed-save regressions, but these full executable tests have **not** been run. No Windows/macOS native acceptance or CTest is claimed.
+
+
+## CTest inventory fail-closed gate (source implementation; native run pending)
+
+`scripts/quality_gate.py` now obtains a machine-readable `ctest --show-only=json-v1` inventory after configuring/building and before running `ctest --output-on-failure`. It refuses success when any required named unit, CLI, golden, gameplay or packaging test is missing (e.g. because CMake failed to discover Python). Native Release requires **22 Linux checks** or **21 Windows/macOS checks**; sanitizer and coverage builds require **19** because instrumented packaging is intentionally excluded. Malformed JSON, duplicate names and unnamed tests also fail. `tests/quality_gate_unit.py` exercises these invariants without a C compiler. The manual-only workflow runs both Python `*_unit.py` test modules before the build. This gate does **not** constitute a successful native CMake/CTest run until it is actually executed against this PR SHA.

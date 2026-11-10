@@ -85,3 +85,8 @@ This receipt is **unsigned, self-reported execution evidence** for one exact Git
 #### Receipt publication integrity (v0.8.4)
 
 Acceptance receipts are written locally through an exclusively created mode-0600 temporary file and fsynced before being published with a same-directory hard link. This refuses to overwrite an existing receipt even in a concurrent race, and refuses a pre-existing temporary file or symlink. Unsupported hard-link filesystems fail closed; there is no fallback that claims release readiness. The test-only Linux validation of this writer passed 14/14 targeted Python unit tests. The receipt remains unsigned, is neither an artifact signature nor full provenance, and native Windows/macOS filesystem behavior still requires acceptance.
+
+
+#### Fail-closed CTest registration (v0.8.4)
+
+The fast/full quality gate checks CTest's JSON test inventory **before running tests**. CMake can otherwise produce a passing exit code while silently omitting Python-dependent end-to-end tests on a misconfigured runner. Required counts: 22 Linux native Release; 21 Windows x64/MSVC and macOS arm64 native Release; 19 Linux sanitizer/coverage. Each required test is verified by exact name, not just a count. Malformed/missing/duplicate test entries fail the gate. This source implementation is not evidence of native platform execution.

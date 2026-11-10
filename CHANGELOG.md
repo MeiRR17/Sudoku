@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Enforce CTest test-discovery completeness before running any test: native Release requires 22 named checks on Linux and 21 on Windows/macOS; sanitizer/coverage modes require 19. Previously, missing Python E2E registration could leave CTest green without the intended regressions. Added 11 focused unit tests and wired them into the manual Actions gate.
+
 - Reject unpaired or embedded double quotes in interactive `save` filenames; only an optional matched outer quote pair is accepted. Add regression coverage proving malformed paths do not create unexpected files or overwrite the configured default save.
 
 - Harden local platform-receipt publication: exclusive mode-0600 staging, flushed and fsynced JSON, and atomic no-overwrite publication via same-directory hard link. Existing receipt or staging symlink cannot be clobbered; unsupported hard links fail closed. Added five isolated regressions (14/14 total Python acceptance-guard unit tests passed on Linux); native platform release gates remain open.
