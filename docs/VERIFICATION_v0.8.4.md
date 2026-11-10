@@ -64,3 +64,8 @@ The acceptance receipt writer now creates the local staging file with `os.open(O
 **Observed Linux tests:** `python -B -m unittest discover -s tests -p platform_acceptance_unit.py -v` ran **14 tests; all passed** (0.006 seconds on the measured repeat). The five new cases check private file mode, no-overwrite behavior, symlink refusal, hardlink-not-supported cleanup and failed-serialization cleanup. Source copies match the exact GitHub Git blob hashes `207bc0c6cd28a4234e75a1da835d3f7cfe41e7ad` for `scripts/platform_acceptance.py` and `273fc5b478565855697c21900e7353cc23097534` for `tests/platform_acceptance_unit.py`.
 
 These tests validate the **Python receipt writer only** on Linux. No Sudoku C11 project compilation/CTest, full platform acceptance receipt, macOS arm64 or Windows/MSVC test was performed. Receipt-file hardlink behavior on those native platforms remains unverified.
+
+
+### Strict save-quote parser focused check (2026-11-10)
+
+An isolated C11 harness using the relevant source normalization/quote validation logic was compiled locally with `cc -std=c11 -Wall -Wextra -Wpedantic -Werror -O2` and executed: **10/10 focused cases PASS** (unquoted/quoted paths with spaces, empty/unclosed/nested/stray quotes, CRLF and whitespace). This is an isolated *extraction*, **not** a build of `src/cli/play.c` or the complete Sudoku application. The actual `tests/game_e2e.py` was extended with three subprocess-driven malformed-save regressions, but these full executable tests have **not** been run. No Windows/macOS native acceptance or CTest is claimed.
