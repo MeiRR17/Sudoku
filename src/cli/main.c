@@ -1,3 +1,6 @@
+#if !defined(_WIN32)
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "sudoku/board.h"
 #include "sudoku/solver.h"
 #include "sudoku/generator.h"
@@ -8,6 +11,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#if defined(_WIN32)
+#include <windows.h>
+#include <io.h>
+#else
+#include <unistd.h>
+#include <sys/stat.h>
+#endif
 
 typedef enum Command { CMD_VALIDATE, CMD_SOLVE, CMD_COUNT, CMD_GENERATE } Command;
 typedef enum Format { FMT_TEXT, FMT_COMPACT, FMT_JSON } Format;
@@ -347,27 +358,105 @@ static void print_result(FILE *stream, const Options *opt, const Result *result)
     }
 }
 
-/* Refuse to overwrite an existing file; only publish results after the command succeeds.
- * C11 'x' mode creates exclusively, including failure for an existing symlink.
- * Delete newly created file if an output write/close fails. */
+/* Stage complete CLI output before an atomic, no-overwrite publication.
+ * POSIX mkstemp creates a mode-0600 sibling; link refuses any existing
+ * destination including symlinks. Windows MoveFileEx without REPLACE_EXISTING
+ * similarly rejects an existing destination. A crash before publication can
+ * leave an orphaned temp file, but never a partial final output. */
+static FILE *open_result_stage(const char *path, char *stage, size_t capacity) {
+#if defined(_WIN32)
+    static unsigned serial = 0;
+    unsigned attempt;
+    for (attempt = 0; attempt < 64u; ++attempt) {
+        FILE *file;
+        (void)snprintf(stage, capacity, "%s.tmp.%08lX.%08X",
+                       path, (unsigned long)time(NULL), ++serial);
+        file = fopen(stage, "wbx");
+        if (file != NULL) return file;
+        if (errno != EEXIST) return NULL;
+    }
+    errno = EEXIST;
+    return NULL;
+#else
+    int fd;
+    FILE *file;
+    (void)snprintf(stage, capacity, "%s.tmp.XXXXXX", path);
+    fd = mkstemp(stage);
+    if (fd < 0) return NULL;
+    file = fdopen(fd, "wb");
+    if (file == NULL) {
+        int reason = errno;
+        (void)close(fd);
+        (void)remove(stage);
+        errno = reason;
+        return NULL;
+    }
+    /* mkstemp creates an owner-only inode; reassert mode 0600 even
+     * if umask removed the owner's access, before writing result bytes. */
+    if (fchmod(fileno(file), S_IRUSR | S_IWUSR) != 0) {
+        int reason = errno;
+        (void)fclose(file);
+        (void)remove(stage);
+        errno = reason;
+        return NULL;
+    }
+    return file;
+#endif
+}
+
 static int publish_result(const Options *opt, const Result *result) {
     FILE *output = stdout;
-    int failure;
-    int new_file = 0;
-    if (opt->output_path != NULL && strcmp(opt->output_path, "-") != 0) {
-        output = fopen(opt->output_path, "wbx");
-        if (output == NULL) {
-            fprintf(stderr, "Output create failed (existing files are never overwritten): %s\n", strerror(errno));
+    char *stage = NULL;
+    int failure, publish_failed = 0;
+    int new_file = opt->output_path != NULL && strcmp(opt->output_path, "-") != 0;
+    if (new_file) {
+        size_t length = strlen(opt->output_path);
+        if (length > 4096u) {
+            fputs("Output create failed: path too long\n", stderr);
             return 4;
         }
-        new_file = 1;
+        stage = malloc(length + 64u);
+        if (stage == NULL) {
+            fputs("Output create failed: out of memory\n", stderr);
+            return 4;
+        }
+        output = open_result_stage(opt->output_path, stage, length + 64u);
+        if (output == NULL) {
+            fprintf(stderr, "Output create failed (existing files are never overwritten): %s\n",
+                    strerror(errno));
+            free(stage);
+            return 4;
+        }
     }
     print_result(output, opt, result);
     failure = ferror(output) != 0;
     if (new_file) {
+        if (!failure && fflush(output) != 0) failure = 1;
+#if defined(_WIN32)
+        if (!failure && _commit(_fileno(output)) != 0) failure = 1;
+#else
+        if (!failure && fsync(fileno(output)) != 0) failure = 1;
+#endif
         if (fclose(output) != 0) failure = 1;
-        if (failure) (void)remove(opt->output_path);
-    } else if (fflush(output) != 0) failure = 1;
+        if (!failure) {
+#if defined(_WIN32)
+            /* No MOVEFILE_REPLACE_EXISTING: never clobber a concurrent writer. */
+            publish_failed = MoveFileExA(stage, opt->output_path,
+                                        MOVEFILE_WRITE_THROUGH) == 0;
+#else
+            /* An atomic link cannot replace a concurrent destination. */
+            publish_failed = link(stage, opt->output_path) != 0;
+#endif
+        }
+        (void)remove(stage);
+        free(stage);
+    } else if (fflush(output) != 0) {
+        failure = 1;
+    }
+    if (publish_failed) {
+        fputs("Output create failed (existing files are never overwritten)\n", stderr);
+        return 4;
+    }
     if (failure) { fputs("Output write failed\n", stderr); return 4; }
     return 0;
 }
