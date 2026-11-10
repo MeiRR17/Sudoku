@@ -31,6 +31,8 @@ MAX_UNPACKED_BYTES = 64 * 1024 * 1024  # Bound untrusted archive verification me
 MAX_SOURCE_MANIFEST_BYTES = 256 * 1024  # Refuse oversized manifest before decoding.
 MAX_ZIP_ARCHIVE_BYTES = MAX_UNPACKED_BYTES + 16 * 1024 * 1024
 MAX_ZIP_DIRECTORY_BYTES = 8 * 1024 * 1024
+MAX_TAR_ARCHIVE_BYTES = MAX_UNPACKED_BYTES + 16 * 1024 * 1024
+MAX_CHECKSUM_MANIFEST_BYTES = 4096
 MAX_PORTABLE_PATH_BYTES = 4096  # Avoid pathological component-prefix expansion.
 MAX_PORTABLE_PATH_PARTS = 64
 
@@ -296,6 +298,10 @@ def ensure_safe_archive(path, expected_prefix):
     seen_portable = {}
     unpacked = 0
     if path.name.endswith('.tar.gz'):
+        # A huge sparse/compressed container should not be streamed for
+        # hashing or parsing merely because its unpacked members are small.
+        if path.stat().st_size > MAX_TAR_ARCHIVE_BYTES:
+            raise ValueError('TAR container exceeds compressed size budget')
         # r|gz reads one member at a time. getmembers() would eagerly
         # materialize attacker-controlled metadata before applying the
         # MAX_ARCHIVE_FILES limit, defeating bounded-memory verification.
@@ -402,7 +408,16 @@ def verify_packages(dest):
     manifest = dest / 'SHA256SUMS'
     if not manifest.is_file() or manifest.is_symlink():
         raise ValueError('missing or unsafe SHA256SUMS')
-    lines = manifest.read_text(encoding='ascii').splitlines()
+    # Never decode an untrusted checksum manifest without a byte ceiling.
+    # Four canonical records are far below 4 KiB on supported platforms.
+    with manifest.open('rb') as stream:
+        raw = stream.read(MAX_CHECKSUM_MANIFEST_BYTES + 1)
+    if len(raw) > MAX_CHECKSUM_MANIFEST_BYTES:
+        raise ValueError('SHA256SUMS exceeds size budget')
+    try:
+        lines = raw.decode('ascii').splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValueError('SHA256SUMS must be ASCII') from exc
     if len(lines) != 4 or len(lines) != len(set(lines)):
         raise ValueError('expected four distinct archive checksums')
     parsed = {}
@@ -411,7 +426,15 @@ def verify_packages(dest):
             raise ValueError('invalid SHA256SUMS record')
         digest, name = line.split('  ', 1)
         file = dest / name
-        if not file.is_file() or file.is_symlink() or file_hash(file) != digest:
+        if not file.is_file() or file.is_symlink():
+            raise ValueError(f'checksum mismatch: {name}')
+        # Bounds must precede even the streaming SHA-256 pass: a single
+        # sparse archive could otherwise consume unbounded I/O and time.
+        limit = (MAX_TAR_ARCHIVE_BYTES if name.endswith('.tar.gz')
+                 else MAX_ZIP_ARCHIVE_BYTES)
+        if file.stat().st_size > limit:
+            raise ValueError(f'archive exceeds compressed size budget: {name}')
+        if file_hash(file) != digest:
             raise ValueError(f'checksum mismatch: {name}')
         ext = '.tar.gz' if name.endswith('.tar.gz') else '.zip' if name.endswith('.zip') else ''
         if not ext:
