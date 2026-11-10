@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Verify the **complete GZIP trailer** for TAR.GZ releases: Python's streaming TAR iterator can finish reading every member without consuming the gzip CRC32/ISIZE footer, silently accepting a truncated or corrupt compressed package. Switch to a bounded GzipFile-backed streaming TAR reader; after reading file members, drain the decoder within a total 64 MiB payload + 8 MiB metadata/padding budget, require zero TAR padding and thereby validate the GZIP footer. Added four real archive regressions. Four focused Linux archive/trailer tests passed; full CMake/CTest and native acceptance remain pending.
+
 - Reject forged encrypted ZIP members (traditional/strong encryption flags) and unsupported compressor IDs before extracting payloads. Prevents raw Python RuntimeError/NotImplementedError from escaping archive verification. Added three central+local-header mutation regressions; isolated real-ZIP tests passed (2 tests, 5 subcases). Canonical DEFLATE and stored entries remain valid; release HOLD remains.
 
 - Normalize malformed ZIP and TAR.GZ decoder exceptions at the single `ensure_safe_archive` boundary: truncated gzip data, invalid TAR headers and ZIP CRC corruption now produce deterministic `ValueError('malformed archive container')` instead of leaking backend-specific `ReadError`/`BadZipFile`/decompressor exceptions. Original semantic `ValueError` checks remain unchanged. Added three real-archive corruption regression tests. Six focused isolated Linux decoder scenarios passed, not the full CTest or native matrix; release remains HOLD.
