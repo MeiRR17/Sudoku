@@ -64,16 +64,35 @@ static void display(const SudokuGame *game) {
     if(sudoku_game_won(game))puts("SOLVED! Congratulations: all 81 cells match the unique solution.");
 }
 static int puzzle_file(const char *path,SudokuBoard *board){
-    unsigned char bytes[SUDOKU_MAX_INPUT_BYTES+1u];
+    /* Never reserve >1 MiB on the call stack (notably Windows' default stack).
+     * One extra byte still distinguishes an oversized file from the limit. */
+    const size_t capacity = (size_t)SUDOKU_MAX_INPUT_BYTES + 1u;
+    unsigned char *bytes;
     SudokuError error;
     size_t n;
     SudokuStatus valid;
     FILE *f=fopen(path,"rb");
     if(!f){fprintf(stderr,"Puzzle open failed: %s\n",strerror(errno));return 4;}
-    n=fread(bytes,1u,sizeof bytes,f);
-    if(ferror(f)){fclose(f);fputs("Puzzle read failed\n",stderr);return 4;}
-    if(fclose(f)!=0){fputs("Puzzle close failed\n",stderr);return 4;}
+    bytes=malloc(capacity);
+    if(!bytes){
+        (void)fclose(f);
+        fputs("Puzzle buffer allocation failed\n",stderr);
+        return 4;
+    }
+    n=fread(bytes,1u,capacity,f);
+    if(ferror(f)){
+        free(bytes);
+        (void)fclose(f);
+        fputs("Puzzle read failed\n",stderr);
+        return 4;
+    }
+    if(fclose(f)!=0){
+        free(bytes);
+        fputs("Puzzle close failed\n",stderr);
+        return 4;
+    }
     valid=sudoku_board_parse(board,bytes,n,&error);
+    free(bytes);
     if(valid!=SUDOKU_OK){fprintf(stderr,"Invalid puzzle: %s\n",sudoku_status_text(valid));return 3;}
     return 0;
 }
