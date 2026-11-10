@@ -42,6 +42,21 @@ static int check_game(void){
         CHECK(sudoku_game_erase(game,1,3)==SUDOKU_GAME_OK);
         CHECK(game->history_cursor==cursor && game->history_len==length);
     }
+    /* One command clears notes in multiple cells; one undo restores both.
+     * An already-cleared game must not create phantom undo history. */
+    CHECK(sudoku_game_note(game,1,3,4)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_note(game,1,4,9)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_clear_notes(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==0u && game->state.notes[3]==0u);
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==(1u<<4) && game->state.notes[3]==(1u<<9));
+    CHECK(sudoku_game_redo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==0u && game->state.notes[3]==0u);
+    {
+        unsigned cursor=game->history_cursor, length=game->history_len;
+        CHECK(sudoku_game_clear_notes(game)==SUDOKU_GAME_OK);
+        CHECK(game->history_cursor==cursor && game->history_len==length);
+    }
     CHECK(sudoku_game_note(game,1,3,4)==SUDOKU_GAME_OK);
     CHECK(game->state.notes[2] == (1u<<4));
     CHECK(sudoku_game_note(game,1,3,8)==SUDOKU_GAME_OK);
