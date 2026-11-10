@@ -51,6 +51,33 @@ class ZipPreflightTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'invalid number of ZIP members'):
                 package.ensure_safe_archive(self.path, self.prefix)
 
+    def test_forged_small_count_does_not_hide_extra_central_records(self):
+        self.archive(('a.txt', 'b.txt'))
+        self.change_trailer(8, '<H', 1)
+        self.change_trailer(10, '<H', 1)
+        with patch.object(package.zipfile, 'ZipFile',
+                          side_effect=AssertionError('ZipFile must not open')):
+            with self.assertRaisesRegex(ValueError, 'central directory entry count mismatch'):
+                package.ensure_safe_archive(self.path, self.prefix)
+
+    def test_corrupt_central_record_header_rejected(self):
+        self.archive()
+        data = bytearray(self.path.read_bytes())
+        directory_start = struct.unpack_from('<I', data, len(data) - 22 + 16)[0]
+        data[directory_start:directory_start + 4] = b'XXXX'
+        self.path.write_bytes(data)
+        with self.assertRaisesRegex(ValueError, 'central directory entry count mismatch'):
+            package.preflight_zip_directory(self.path)
+
+    def test_central_directory_zip64_sentinel_rejected(self):
+        self.archive()
+        data = bytearray(self.path.read_bytes())
+        directory_start = struct.unpack_from('<I', data, len(data) - 22 + 16)[0]
+        struct.pack_into('<I', data, directory_start + 20, 0xffffffff)
+        self.path.write_bytes(data)
+        with self.assertRaisesRegex(ValueError, 'ZIP64 entries are not canonical'):
+            package.preflight_zip_directory(self.path)
+
     def test_zero_members_rejected(self):
         self.archive()
         self.change_trailer(8, '<H', 0)
