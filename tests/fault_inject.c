@@ -1,5 +1,5 @@
 /* Test-only Linux LD_PRELOAD interposer. It is NEVER linked into Sudoku.
- * Inject permission/fsync/rename faults and check private mode at birth.
+ * Inject mode/fsync/rename/link faults and check private mode at birth.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -30,6 +30,17 @@ int rename(const char *source, const char *target) {
         return -1;
     }
     return renameat(AT_FDCWD, source, AT_FDCWD, target);
+}
+
+/* A successfully written CLI --output stage must never be installed if the
+ * no-overwrite publication fails. Game saves use rename, not link. */
+int link(const char *source, const char *target) {
+    const char *fault = getenv("SUDOKU_TEST_FAULT");
+    if (fault != NULL && strcmp(fault, "publish-link") == 0) {
+        errno = EIO;
+        return -1;
+    }
+    return (int)syscall(SYS_linkat, AT_FDCWD, source, AT_FDCWD, target, 0);
 }
 
 /* Mode-setting must happen before the save is written or renamed. Test-only
