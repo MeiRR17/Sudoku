@@ -32,6 +32,7 @@ sudoku_invalid_row sudoku_stdin sudoku_count_unsolvable sudoku_solve_unsolvable
 sudoku_game_e2e sudoku_generator_golden sudoku_cli_golden
 '''.split())
 PACKAGE_TESTS = frozenset(('sudoku_package_e2e', 'sudoku_package_integrity'))
+WINDOWS_TESTS = frozenset(('sudoku_windows_save_concurrency',))
 
 
 def validate_test_manifest(raw, sanitizer=False, coverage=False, system=None):
@@ -49,6 +50,8 @@ def validate_test_manifest(raw, sanitizer=False, coverage=False, system=None):
     if len(set(names)) != len(names):
         raise ValueError('CTest JSON inventory contains duplicate test names')
     required = set(BASE_TESTS)
+    if (system or platform.system()) == 'Windows':
+        required.update(WINDOWS_TESTS)
     if not sanitizer and not coverage:
         required.update(PACKAGE_TESTS)
         if (system or platform.system()) == 'Linux':
