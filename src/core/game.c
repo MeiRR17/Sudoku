@@ -105,9 +105,18 @@ SudokuGameStatus sudoku_game_redo(SudokuGame *game) {
 }
 SudokuGameStatus sudoku_game_reset(SudokuGame *game) {
     SudokuGameSnapshot cleared = {0};
+    unsigned i;
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
     cleared.board = game->givens;
-    if (memcmp(&cleared, &game->state, sizeof cleared) == 0) return SUDOKU_GAME_OK;
+    /* Compare meaningful state rather than struct bytes: the snapshot
+     * contains ABI padding between the 81-byte board and uint16_t notes.
+     * Comparing padding can turn an already-cleared reset into an undo step. */
+    if (memcmp(game->state.board.cells, game->givens.cells,
+               sizeof game->givens.cells) == 0) {
+        for (i = 0; i < SUDOKU_CELL_COUNT; ++i)
+            if (game->state.notes[i] != 0u) break;
+        if (i == SUDOKU_CELL_COUNT) return SUDOKU_GAME_OK;
+    }
     game->state = cleared;
     remember(game);
     return SUDOKU_GAME_OK;
