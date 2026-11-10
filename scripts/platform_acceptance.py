@@ -51,6 +51,28 @@ def verify_checkout(required_sha=None):
     return sha
 
 
+
+def write_receipt(output, receipt):
+    """Write one private, fully flushed receipt without clobbering any file.
+
+    The exclusive temporary file prevents symlink following; linking the
+    completed inode to a not-yet-existing destination is atomic and refuses
+    to replace a receipt created concurrently. Both paths share a directory.
+    Unsupported hardlinks fail closed; no release evidence is fabricated.
+    """
+    output.parent.mkdir(parents=True, exist_ok=True)
+    stage = output.with_name(output.name + '.tmp')
+    fd = os.open(stage, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8', newline='\n') as file:
+            json.dump(receipt, file, indent=2, sort_keys=True)
+            file.write('\n')
+            file.flush()
+            os.fsync(file.fileno())
+        os.link(stage, output)
+    finally:
+        stage.unlink()
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--expected', required=True,
@@ -120,10 +142,7 @@ def main():
         'archive_sha256': dict(sorted(checksums.items())),
         'created_utc': datetime.now(timezone.utc).isoformat(timespec='seconds'),
     }
-    output.parent.mkdir(parents=True, exist_ok=True)
-    stage = output.with_name(output.name + '.tmp')
-    stage.write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n', encoding='utf-8')
-    stage.replace(output)
+    write_receipt(output, receipt)
     print('PLATFORM ACCEPTANCE RECEIPT PASS:', output, flush=True)
     print(json.dumps(receipt, sort_keys=True), flush=True)
 
