@@ -1,5 +1,6 @@
 """Package source/install memory-budget regressions; stdlib and temp files only."""
 import importlib.util
+import itertools
 from pathlib import Path
 import tempfile
 import unittest
@@ -100,6 +101,37 @@ class PackageBudgetTests(unittest.TestCase):
         with patch.object(packager, 'MAX_ARCHIVE_FILES', 1):
             with self.assertRaisesRegex(ValueError, 'installation exceeds file count budget'):
                 packager.installed_paths(stage)
+
+    def test_installed_tree_is_sorted_after_streaming(self):
+        stage = self.install(b'sudoku')
+        (stage / 'z.txt').write_bytes(b'z')
+        (stage / 'a.txt').write_bytes(b'a')
+        self.assertEqual([name for name, _, _ in packager.installed_paths(stage)],
+                         ['a.txt', 'bin/sudoku', 'z.txt'])
+
+    def test_install_file_enumeration_stops_on_unbounded_iterator(self):
+        stage = self.install()
+        # A sorted(rglob(...)) implementation would attempt to exhaust this
+        # infinite iterator before validating the archive size.
+        with patch.object(Path, 'rglob', return_value=itertools.repeat(stage / 'bin' / 'sudoku')):
+            with self.assertRaisesRegex(ValueError, 'installation exceeds file count budget'):
+                packager.installed_paths(stage)
+
+    def test_install_directory_enumeration_stops_on_unbounded_iterator(self):
+        stage = self.install()
+        with patch.object(Path, 'rglob', return_value=itertools.repeat(stage / 'bin')):
+            with self.assertRaisesRegex(ValueError, 'installation exceeds entry count budget'):
+                packager.installed_paths(stage)
+
+    def test_install_symlinks_still_fail_closed(self):
+        stage = self.install()
+        link = stage / 'linked-sudoku'
+        try:
+            link.symlink_to(stage / 'bin' / 'sudoku')
+        except (OSError, NotImplementedError):
+            self.skipTest('symbolic links unavailable')
+        with self.assertRaisesRegex(ValueError, 'symlink in installation tree'):
+            packager.installed_paths(stage)
 
     def test_changed_file_length_rejected_after_metadata_preflight(self):
         class ChangingFile:
