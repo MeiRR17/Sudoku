@@ -82,3 +82,4 @@ tests/test_generator.c
 tests/test_generator_clock.c
 tests/test_properties.c
 tests/test_solver.c
+tests/test_windows_save_concurrency.c
