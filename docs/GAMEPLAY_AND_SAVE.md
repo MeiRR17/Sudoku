@@ -27,7 +27,7 @@ The `--file` argument reads a puzzle file (max 1 MiB), not a saved game. `--resu
 | `reset` | Restore original givens and clear notes. Can be undone while history remains. |
 | `check` | Count empty and incorrect cells without printing the answer. |
 | `status` | Filled cells, incorrect entries, time spent, available undo and redo steps. |
-| `save [PATH]` | Persist state to a supplied path or the previous `--save`/`--resume` path. The rest of the command line is interpreted as a filename, so spaces work; optional surrounding double quotes are removed. |
+| `save [PATH]` | Persist state to a supplied path or the previous `--save`/`--resume` path. The rest of the command line is interpreted as a filename, so spaces work; optional surrounding double quotes are removed. Empty quoted filenames and unmatched opening quotes are rejected without overwriting the previous save. |
 | `quit` / `exit` | Leave without an implicit save. |
 | `help` | Show the interactive command summary. |
 
