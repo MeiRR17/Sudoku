@@ -18,26 +18,26 @@ def inventory(names):
 
 
 class InventoryTests(unittest.TestCase):
-    def test_full_linux_release_requires_22(self):
+    def test_full_linux_release_requires_23(self):
         names = set(quality.BASE_TESTS) | set(quality.PACKAGE_TESTS)
         names.add('sudoku_save_fault_injection')
         self.assertEqual(quality.validate_test_manifest(inventory(sorted(names)),
-                                                         system='Linux'), 22)
+                                                         system='Linux'), 23)
 
-    def test_windows_and_macos_release_require_21(self):
+    def test_windows_and_macos_release_require_22(self):
         names = set(quality.BASE_TESTS) | set(quality.PACKAGE_TESTS)
         for system in ('Windows', 'Darwin'):
             with self.subTest(system=system):
                 self.assertEqual(quality.validate_test_manifest(inventory(sorted(names)),
-                                                                 system=system), 21)
+                                                                 system=system), 22)
 
-    def test_sanitizer_build_requires_19_not_packaging(self):
+    def test_sanitizer_build_requires_20_not_packaging(self):
         self.assertEqual(quality.validate_test_manifest(
-            inventory(sorted(quality.BASE_TESTS)), sanitizer=True, system='Linux'), 19)
+            inventory(sorted(quality.BASE_TESTS)), sanitizer=True, system='Linux'), 20)
 
-    def test_coverage_build_requires_19_not_packaging(self):
+    def test_coverage_build_requires_20_not_packaging(self):
         self.assertEqual(quality.validate_test_manifest(
-            inventory(sorted(quality.BASE_TESTS)), coverage=True, system='Linux'), 19)
+            inventory(sorted(quality.BASE_TESTS)), coverage=True, system='Linux'), 20)
 
     def test_omitted_python_tests_are_fatal(self):
         names = set(quality.BASE_TESTS) | set(quality.PACKAGE_TESTS)
