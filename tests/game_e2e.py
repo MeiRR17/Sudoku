@@ -2,7 +2,9 @@
 
 Portable stdlib, no tty/color dependency. The child receives commands on stdin.
 """
+import os
 import pathlib
+import stat
 import subprocess
 import sys
 import tempfile
@@ -36,6 +38,24 @@ with tempfile.TemporaryDirectory() as directory:
     checks += 1
     assert not list(folder.glob(saved.name + '.tmp.*'))
     checks += 1
+    # POSIX save mode must never become world/group readable, even under
+    # a permissive process umask or when replacing an older permissive save.
+    if os.name == 'posix':
+        private_save = folder / 'private game.save'
+        old_umask = os.umask(0)
+        try:
+            stdout, stderr = run(['--puzzle', near_win, '--save', private_save],
+                                 'save\nquit\n')
+        finally:
+            os.umask(old_umask)
+        assert 'Saved to' in stdout and not stderr
+        assert stat.S_IMODE(private_save.stat().st_mode) == 0o600
+        checks += 1
+        private_save.chmod(0o666)
+        stdout, stderr = run(['--resume', private_save], 'save\nquit\n')
+        assert 'Saved to' in stdout and not stderr
+        assert stat.S_IMODE(private_save.stat().st_mode) == 0o600
+        checks += 1
     # Interactive save accepts paths with spaces and makes them the default.
     explicit = folder / 'manual save with spaces.save'
     stdout, stderr = run(['--puzzle', near_win],
