@@ -74,6 +74,7 @@ tests/run_stdin.cmake
 tests/save_faults.py
 tests/package_budget_unit.py
 tests/source_manifest_unit.py
+tests/source_membership_unit.py
 tests/source_tree_unit.py
 tests/test_board.c
 tests/test_game.c
