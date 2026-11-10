@@ -20,7 +20,7 @@ The `--file` argument reads a puzzle file (max 1 MiB), not a saved game. `--resu
 |---|---|
 | `show` | Print the complete board and progress. Zero cells appear as `.`. |
 | `set ROW COL DIGIT` | Fill an editable cell, coordinates and digit 1–9. Sudoku rule conflicts are rejected. |
-| `erase ROW COL` | Erase an editable cell. |
+| `erase ROW COL` | Clear the placed digit **and all pencil notes** from an editable cell. Erasing a blank cell with notes is undoable; repeating erase on a blank note-free cell is a no-op. |
 | `note ROW COL DIGIT` | Toggle a pencil note 1–9 on an empty editable cell. |
 | `notes ROW COL` | List the pencil notes for one cell. |
 | `undo`, `redo` | Revert or replay a placement, erasure, note or reset. New edits discard the redo branch. |
@@ -32,6 +32,8 @@ The `--file` argument reads a puzzle file (max 1 MiB), not a saved game. `--resu
 | `help` | Show the interactive command summary. |
 
 The game uses 1-based row/column coordinates. The givens are immutable. Pencil notes are intentionally independent of the authoritative engine candidates: they are personal annotations, not automatic hints. The player may enter an incorrect digit as long as it does not directly violate row, column or box constraints; `check` compares it with the **verified unique solution**. Completion is detected only when the board matches all 81 digits of that solution, not merely when all cells are nonempty.
+
+Erasing an editable cell now clears **both** any placed digit and its note mask. This fixes the former no-op behavior when an empty cell still contained pencil marks, without adding a second command: `undo` restores the erased notes, `redo` clears them again, and no history step is created if there was nothing to erase. Given cells remain immutable.
 
 Undo/redo in memory is bounded to the most recent **127 state transitions** (128 snapshots, one base state). Each snapshot contains board and notes; reset is a single undoable step **only when the board or notes actually change**. Repeating reset on an already-cleared board creates no new undo/redo history. A freshly loaded game resumes the current board and notes with a **new undo history**; previous history is intentionally not serialized. Timer tracks active session wall-clock seconds and persists elapsed seconds on save. Time while the program is closed does **not** count; clock changes may affect elapsed seconds.
 
