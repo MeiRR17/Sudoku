@@ -1,5 +1,7 @@
 """Check canonical source tree hashes without requiring a native compiler."""
 import hashlib
+import io
+import tarfile
 import importlib.util
 from pathlib import Path
 import unittest
@@ -27,6 +29,28 @@ class SourceTreeDigestTests(unittest.TestCase):
                             acceptance.source_tree_digest({'ab': b'c'}))
         self.assertNotEqual(acceptance.source_tree_digest({'a': b'bc'}),
                             acceptance.source_tree_digest({'a': b'b', 'c': b''}))
+
+    def test_real_compressor_variants_share_source_digest(self):
+        files = {'README.md': b'Hello world\n',
+                 'src/main.c': b'int main(void) { return 0; }\n'}
+
+        def packed(compression):
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode='w:gz', compresslevel=compression) as tar:
+                for name, data in sorted(files.items()):
+                    member = tarfile.TarInfo(name)
+                    member.size = len(data)
+                    member.mtime = 0
+                    tar.addfile(member, io.BytesIO(data))
+            raw = buffer.getvalue()
+            with tarfile.open(fileobj=io.BytesIO(raw), mode='r:gz') as tar:
+                extracted = {member.name: tar.extractfile(member).read() for member in tar}
+            return hashlib.sha256(raw).hexdigest(), acceptance.source_tree_digest(extracted)
+
+        compressed_fast, source_fast = packed(1)
+        compressed_small, source_small = packed(9)
+        self.assertNotEqual(compressed_fast, compressed_small)
+        self.assertEqual(source_fast, source_small)
 
     def test_digest_is_domain_separated_from_ordinary_payload_sha(self):
         plain = hashlib.sha256(b'alpha').hexdigest()
