@@ -300,17 +300,37 @@ SudokuGameStatus sudoku_game_save(const SudokuGame *game, const char *path) {
         unsigned id=++serial;
         (void)snprintf(temp,len+64u,"%s.tmp.%08lX.%08X",path,
                        (unsigned long)time(NULL),id);
+#if defined(_WIN32)
         file=fopen(temp,"wbx");
         if(file)break;
-        if(errno!=EEXIST){ free(temp);return SUDOKU_GAME_IO; }
+        if(errno!=EEXIST){free(temp);return SUDOKU_GAME_IO;}
+#else
+        /* Create the staging inode owner-only from the first instant.
+         * fopen("wbx") normally starts at 0666 & umask, exposing a race
+         * before a later fchmod on permissively configured systems. */
+        {
+            int fd=open(temp,O_WRONLY|O_CREAT|O_EXCL,S_IRUSR|S_IWUSR);
+            if(fd<0){
+                if(errno!=EEXIST){free(temp);return SUDOKU_GAME_IO;}
+                continue;
+            }
+            file=fdopen(fd,"wb");
+            if(!file){
+                (void)close(fd);
+                (void)remove(temp);
+                free(temp);
+                return SUDOKU_GAME_IO;
+            }
+            break;
+        }
+#endif
     }
     if(!file){free(temp);return SUDOKU_GAME_IO;}
     ok=1;
 #if !defined(_WIN32)
-    /* fopen("wbx") honors umask, which can create mode 0666. Even when
-     * replacing a previously private save, rename installs the *new* file's
-     * mode. Set 0600 before writing any game data, fail closed if this is
-     * impossible, and preserve the previous target on failure. */
+    /* The O_EXCL descriptor was created with mode 0600. Reassert that
+     * mode after umask (which can only remove permissions), before writing.
+     * Failure aborts without renaming over a previous target. */
     ok=fchmod(fileno(file), S_IRUSR | S_IWUSR)==0;
 #endif
     if(ok)ok=fwrite(bytes,1u,n,file)==n;

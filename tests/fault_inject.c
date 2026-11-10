@@ -1,5 +1,5 @@
 /* Test-only Linux LD_PRELOAD interposer. It is NEVER linked into Sudoku.
- * Inject file permission, file-fsync, directory-fsync and rename failures.
+ * Inject permission/fsync/rename faults and check private mode at birth.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -37,10 +37,13 @@ int rename(const char *source, const char *target) {
 int fchmod(int fd, mode_t mode) {
     const char *fault = getenv("SUDOKU_TEST_FAULT");
     struct stat st;
-    if (fault != NULL && strcmp(fault, "file-mode") == 0 &&
-        fstat(fd, &st) == 0 && S_ISREG(st.st_mode)) {
-        errno = EPERM;
-        return -1;
+    if (fault != NULL && fstat(fd, &st) == 0 && S_ISREG(st.st_mode)) {
+        if (strcmp(fault, "file-mode") == 0 ||
+            (strcmp(fault, "check-created-mode") == 0 &&
+             (st.st_mode & 0777u) != 0600u)) {
+            errno = EPERM;
+            return -1;
+        }
     }
     return (int)syscall(SYS_fchmod, fd, mode);
 }

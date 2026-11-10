@@ -76,6 +76,19 @@ with tempfile.TemporaryDirectory(prefix='sudoku-fault-') as directory:
     assert manual.is_file() and not list(root.glob(manual.name + '.tmp.*'))
     checks += 1
 
+    # Verify the staging inode is already 0600 *before* its fchmod call,
+    # including under umask(000). This catches the old fopen("wbx") race.
+    born_private = root / 'private from birth.save'
+    previous_umask = os.umask(0)
+    try:
+        output = play(born_private, 'save\nquit\n', 'check-created-mode', library)
+    finally:
+        os.umask(previous_umask)
+    assert 'Saved to' in output and born_private.exists()
+    assert (born_private.stat().st_mode & 0o777) == 0o600
+    assert not list(root.glob(born_private.name + '.tmp.*'))
+    checks += 1
+
     resume = subprocess.run([str(EXE), 'play', '--resume', str(save)], input='status\nquit\n',
                             text=True, capture_output=True, timeout=15)
     assert resume.returncode == 0 and 'SOLVED!' in resume.stdout
