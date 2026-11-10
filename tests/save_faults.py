@@ -62,6 +62,20 @@ with tempfile.TemporaryDirectory(prefix='sudoku-fault-') as directory:
     assert not list(root.glob(save.name + '.tmp.*'))
     checks += 1
 
+    # When explicit save replaces a target but directory sync fails, it must
+    # still become the default so the next bare 'save' never fails for no path.
+    manual = root / 'manual save with spaces.save'
+    env = os.environ.copy()
+    env['LD_PRELOAD'] = str(library)
+    env['SUDOKU_TEST_FAULT'] = 'dir-sync'
+    manual_run = subprocess.run([str(EXE), 'play', '--puzzle', PUZZLE],
+                                input=f'save {manual}\\nsave\\nquit\\n'.replace('\\n', '\n'),
+                                text=True, capture_output=True, env=env, timeout=15)
+    assert manual_run.returncode == 0 and not manual_run.stderr
+    assert manual_run.stdout.count('Warning: save replaced target') == 2
+    assert manual.is_file() and not list(root.glob(manual.name + '.tmp.*'))
+    checks += 1
+
     resume = subprocess.run([str(EXE), 'play', '--resume', str(save)], input='status\nquit\n',
                             text=True, capture_output=True, timeout=15)
     assert resume.returncode == 0 and 'SOLVED!' in resume.stdout
