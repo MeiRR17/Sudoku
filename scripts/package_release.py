@@ -47,16 +47,29 @@ def target_platform():
 
 
 def source_paths():
+    # A source manifest is itself part of the release trust boundary.
+    if SOURCE_LIST.is_symlink():
+        raise ValueError('symlinked source manifest refused')
     raw = SOURCE_LIST.read_text(encoding='utf-8').splitlines()
     files = []
     for line in raw:
         if not line or line.startswith('#'):
             continue
         name = PurePosixPath(line)
-        if name.is_absolute() or '..' in name.parts or str(name) != line or line.startswith('.') and line == '.':
+        # A POSIX-only name check is insufficient on Windows: backslashes
+        # become path separators and colons can select a drive or NTFS
+        # alternate data stream. Forbid both on every host.
+        if ('\\' in line or ':' in line or name.is_absolute()
+                or '..' in name.parts or str(name) != line or line == '.'):
             raise ValueError(f'unsafe source path: {line}')
-        path = ROOT.joinpath(*name.parts)
-        if not path.is_file() or path.is_symlink():
+        # Refuse *every* symlink component, not just a symlink at the leaf.
+        # Otherwise a tracked directory symlink could package external data.
+        path = ROOT
+        for part in name.parts:
+            path = path / part
+            if path.is_symlink():
+                raise ValueError(f'symlink in source manifest path: {line}')
+        if not path.is_file():
             raise ValueError(f'not a regular source file: {line}')
         files.append((str(name), path.read_bytes(), 0o644))
     if len(files) != len(set(x[0] for x in files)):
