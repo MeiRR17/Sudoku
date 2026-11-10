@@ -1,5 +1,6 @@
 """Pure-Python negative/positive tests for unsigned cross-host receipt consistency."""
 from datetime import datetime, timezone
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -24,9 +25,15 @@ class ReceiptMatrixTests(unittest.TestCase):
         for label, (system, arches, compilers, suffix) in MATRIX.PLATFORMS.items():
             folder = Path(self.temp.name) / label
             folder.mkdir()
-            archives = {f'sudoku-v{VERSION}-{kind}{ext}': 'b' * 64
-                        for kind in ('source', suffix)
-                        for ext in ('.tar.gz', '.zip')}
+            archives = {}
+            for kind in ('source', suffix):
+                for ext in ('.tar.gz', '.zip'):
+                    name = f'sudoku-v{VERSION}-{kind}{ext}'
+                    # The matrix checks SHA bytes. Native package acceptance
+                    # is separately responsible for ZIP/TAR structure checks.
+                    payload = f'{label}:{kind}:{ext}'.encode('ascii')
+                    (folder / name).write_bytes(payload)
+                    archives[name] = hashlib.sha256(payload).hexdigest()
             receipt = {
                 'schema_version': 2, 'status': 'passed', 'scope': 'unsigned development evidence',
                 'git_commit_sha': SHA, 'project_version': VERSION,
@@ -85,12 +92,57 @@ class ReceiptMatrixTests(unittest.TestCase):
             self.check()
 
     def test_different_compressed_source_archives_are_allowed(self):
-        # Compression-library differences do not imply different source files.
-        self.receipts['macos-latest']['archive_sha256'][f'sudoku-v{VERSION}-source.zip'] = 'd' * 64
-        self.receipts['windows-latest']['archive_sha256'][f'sudoku-v{VERSION}-source.tar.gz'] = 'e' * 64
-        self.write('macos-latest')
-        self.write('windows-latest')
+        # Native archive bytes may differ while the source digest agrees.
+        for label, ext in (('macos-latest', '.zip'), ('windows-latest', '.tar.gz')):
+            name = f'sudoku-v{VERSION}-source{ext}'
+            payload = f'different compression from {label}'.encode('ascii')
+            (self.folders[label] / name).write_bytes(payload)
+            self.receipts[label]['archive_sha256'][name] = hashlib.sha256(payload).hexdigest()
+            self.write(label)
         self.assertEqual(len(self.check()), 3)
+
+    def test_archive_tampering_after_receipt_rejected(self):
+        name = f'sudoku-v{VERSION}-linux-x86_64.zip'
+        (self.folders['ubuntu-latest'] / name).write_bytes(b'altered archive')
+        with self.assertRaisesRegex(ValueError, 'archive hash mismatch'):
+            self.check()
+
+    def test_missing_claimed_archive_rejected(self):
+        name = f'sudoku-v{VERSION}-linux-x86_64.zip'
+        (self.folders['ubuntu-latest'] / name).unlink()
+        with self.assertRaisesRegex(ValueError, 'missing or unsafe archive'):
+            self.check()
+
+    def test_symlinked_archive_rejected(self):
+        folder = self.folders['ubuntu-latest']
+        name = f'sudoku-v{VERSION}-linux-x86_64.zip'
+        target = folder / 'original-package.zip'
+        (folder / name).rename(target)
+        try:
+            (folder / name).symlink_to(target)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f'file symlinks unavailable: {exc}')
+        with self.assertRaisesRegex(ValueError, 'missing or unsafe archive'):
+            self.check()
+
+    def test_oversized_archive_rejected_before_hashing(self):
+        name = f'sudoku-v{VERSION}-linux-x86_64.zip'
+        with (self.folders['ubuntu-latest'] / name).open('wb') as stream:
+            stream.truncate(MATRIX.MAX_ARCHIVE_BYTES + 1)
+        with self.assertRaisesRegex(ValueError, 'archive exceeds size budget'):
+            self.check()
+
+    def test_oversized_receipt_rejected_before_json_parse(self):
+        (self.folders['ubuntu-latest'] / 'platform-receipt.json').write_bytes(
+            b' ' * (MATRIX.MAX_RECEIPT_BYTES + 1))
+        with self.assertRaisesRegex(ValueError, 'evidence file exceeds size budget'):
+            self.check()
+
+    def test_oversized_checksum_manifest_rejected_before_parse(self):
+        (self.folders['ubuntu-latest'] / 'SHA256SUMS').write_bytes(
+            b' ' * (MATRIX.MAX_MANIFEST_BYTES + 1))
+        with self.assertRaisesRegex(ValueError, 'evidence file exceeds size budget'):
+            self.check()
 
     def test_source_tree_digest_disagreement_rejected(self):
         self.receipts['macos-latest']['source_tree_sha256'] = 'd' * 64
