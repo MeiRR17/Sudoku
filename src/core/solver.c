@@ -98,7 +98,12 @@ SudokuSolveStatus sudoku_analyze_bounded(const SudokuBoard *givens,
     if (solutions_up_to_two != NULL) *solutions_up_to_two = 0;
     if (nodes_visited != NULL) *nodes_visited = 0;
     search.limit = max_nodes;
-    if (givens == NULL || sudoku_board_validate(givens, NULL) != SUDOKU_OK)
+    /* The API promises that givens are immutable. A caller could otherwise
+     * pass the same public board pointer for input and first_solution; the
+     * final output assignment would silently overwrite the puzzle. Refuse
+     * this alias before searching or publishing any solver output. */
+    if (givens == NULL || first_solution == givens ||
+        sudoku_board_validate(givens, NULL) != SUDOKU_OK)
         return SUDOKU_SOLVE_INVALID;
     search.board = *givens;
     for (i = 0; i < SUDOKU_CELL_COUNT; ++i) {
