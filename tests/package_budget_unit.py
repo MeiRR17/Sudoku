@@ -115,7 +115,9 @@ class PackageBudgetTests(unittest.TestCase):
         # A sorted(rglob(...)) implementation would attempt to exhaust this
         # infinite iterator before validating the archive size.
         with patch.object(Path, 'rglob', return_value=itertools.repeat(stage / 'bin' / 'sudoku')):
-            with self.assertRaisesRegex(ValueError, 'installation exceeds file count budget'):
+            # The portable-path registry now rejects the second identical
+            # file immediately; both errors prevent any unbounded walk.
+            with self.assertRaisesRegex(ValueError, 'nonportable path collision|installation exceeds file count budget'):
                 packager.installed_paths(stage)
 
     def test_install_directory_enumeration_stops_on_unbounded_iterator(self):
