@@ -69,3 +69,7 @@ The v0.8.2 extracted-source ZIP is also configured and built in an independent t
 ## v0.8.3 — POSIX save-directory metadata sync and rollback fault evidence
 
 Linux test-only `LD_PRELOAD` interposition induces file-`fsync`, rename and directory-`fsync` failures during an interactive save. Before rename, the previous save remains byte-for-byte unchanged and staging files are removed. A failure after rename produces a **durability uncertainty warning**, not a claim that the older save survived; the new target remains loadable. The parent directory is synced following successful POSIX renames. This is not a real power-loss/fault-tolerant filesystem certification; disk-controller caches, mount options and non-POSIX hosts remain outside the evidence. Native Windows/macOS package and save E2E, license decision and official release acceptance stay OPEN.
+
+## v0.8.4 — interactive save path recovery (development only)
+
+The interactive command parser accepts entire save paths containing spaces, with optional surrounding double quotes. Successful replacement and post-rename durability warnings both retain explicitly chosen destinations for the next bare `save`; pre-rename failures do not change the default destination. Portable scripted game E2E and the Linux-only directory-fsync fault harness contain focused regressions. This does not establish durability under power loss or pass the pending Windows/macOS/license release gates.
