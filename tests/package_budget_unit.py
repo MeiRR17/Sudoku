@@ -1,6 +1,7 @@
 """Package source/install memory-budget regressions; stdlib and temp files only."""
 import importlib.util
 import itertools
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -134,16 +135,32 @@ class PackageBudgetTests(unittest.TestCase):
             packager.installed_paths(stage)
 
     def test_windows_device_path_in_staged_install_rejected(self):
+        if os.name == 'nt':
+            self.skipTest('Windows cannot create a reserved DOS device filename')
         stage = self.install()
         (stage / 'CON.txt').write_bytes(b'device-name')
         with self.assertRaisesRegex(ValueError, 'unsafe installed path'):
             packager.installed_paths(stage)
 
     def test_windows_punctuation_in_staged_install_rejected(self):
+        if os.name == 'nt':
+            self.skipTest('Windows cannot create an NTFS alternate stream as a file')
         stage = self.install()
         (stage / 'bad:stream').write_bytes(b'adstream')
         with self.assertRaisesRegex(ValueError, 'unsafe installed path'):
             packager.installed_paths(stage)
+
+    def test_portable_names_rejected_on_all_hosts(self):
+        invalid = ('CON', 'CON.txt', 'nul.log', 'COM9.bin', 'LPT².txt',
+                   'CONIN$', 'bad:name', 'bad?.txt', 'bad|name',
+                   'trailing.', 'trailing ', 'a//b', 'a/../b',
+                   'bad\\name', 'tab\tname')
+        for value in invalid:
+            with self.subTest(value=value):
+                self.assertFalse(packager.portable_relative_name(value))
+        for value in ('README.md', '.github/workflows/manual-quality.yml',
+                      'src/core/game.c', 'bin/sudoku.exe'):
+            self.assertTrue(packager.portable_relative_name(value), value)
 
     def test_changed_file_length_rejected_after_metadata_preflight(self):
         class ChangingFile:
