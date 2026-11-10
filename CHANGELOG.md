@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Fix unbounded **installation-tree path enumeration** in the packager: `sorted(prefix.rglob('*'))` previously materialized every path before the 1,024-file limit. Iterate lazily, refuse more than 4,096 directory/file entries or 1,024 regular files, and sort only the bounded output for deterministic archives. Four additional regressions cover true deterministic ordering, unbounded file/directory iterators and symlink rejection; all 14 package-budget cases plus nine manifest-path cases passed in an isolated exact-function harness.
+
 - Fail closed when the portable C generator CPU clock is unavailable or runs backward; perform clock subtraction as floating-point values to avoid signed `clock_t` subtraction overflow. Check elapsed CPU budget after the expensive solver/rating call before publishing a generated puzzle. Add a deterministic C clock fault test in CMake/CTest, enforced by `quality_gate.py` across native/sanitized/coverage builds; scoped GCC and Clang UBSan checks passed 6/6 each. This is development hardening, not native release approval.
 
 - Bound development packaging **before file contents enter memory**, not only during archive verification: both listed source files and staged installation files now respect 1,024 entries and a cumulative 64 MiB limit, while source manifests are capped at 256 KiB before decoding. A size-preflight plus bounded `size+1` read detects growth/truncation during collection. Add ten stdlib regression cases, including a sparse 64 MiB+1 file; isolated exact-function checks 10/10 PASS, prior source-path checks 9/9 PASS.
