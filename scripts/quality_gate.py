@@ -25,6 +25,7 @@ def run(*args):
 # silently omits the E2E regressions. Require the actual named test suite.
 BASE_TESTS = frozenset('''
 sudoku_board_unit sudoku_properties sudoku_game_unit sudoku_generator_unit
+sudoku_generator_clock
 sudoku_solver_unit sudoku_count_unique sudoku_solve_unique sudoku_help
 sudoku_version sudoku_demo_smoke sudoku_validate_compact sudoku_validate_file
 sudoku_invalid_row sudoku_stdin sudoku_count_unsolvable sudoku_solve_unsolvable
