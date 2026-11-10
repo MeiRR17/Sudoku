@@ -59,6 +59,23 @@ static int test_all(void) {
     unsigned count = 99, i, digit;
     char zeros[82];
     CHECK(check_unique(classic, solution) == 0);
+    /* An output pointer aliasing the original givens must not overwrite the
+     * caller's puzzle, even when a unique solution exists. All overloads
+     * must reject the alias transactionally with zero count/node outputs. */
+    CHECK(sudoku_board_parse(&board, (const unsigned char *)classic, 81, NULL) == SUDOKU_OK);
+    before = board;
+    count = 99;
+    {
+        uint64_t nodes = 99;
+        CHECK(sudoku_analyze_bounded(&board, &board, &count, UINT64_MAX, &nodes)
+              == SUDOKU_SOLVE_INVALID);
+        CHECK(nodes == 0 && count == 0);
+    }
+    CHECK(memcmp(&board, &before, sizeof board) == 0);
+    CHECK(sudoku_solve_first(&board, &board) == SUDOKU_SOLVE_INVALID);
+    CHECK(memcmp(&board, &before, sizeof board) == 0);
+    CHECK(sudoku_analyze(&board, &board, &count) == SUDOKU_SOLVE_INVALID);
+    CHECK(count == 0 && memcmp(&board, &before, sizeof board) == 0);
     CHECK(check_unique(escargot, NULL) == 0);
     CHECK(check_unique(diabolical, NULL) == 0);
     CHECK(sudoku_board_parse(&board, (const unsigned char *)solution, 81, NULL) == SUDOKU_OK);
