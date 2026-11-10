@@ -342,6 +342,13 @@ def _ensure_safe_archive(path, expected_prefix):
                 mode = item.external_attr >> 16
                 if item.is_dir() or item.create_system != 3 or not stat.S_ISREG(mode):
                     raise ValueError('non-regular ZIP member')
+                # Forged metadata can request encryption or compressors our
+                # development writer never emits. Reject before ZipExtFile
+                # raises RuntimeError or NotImplementedError on open().
+                if item.flag_bits & 0x41:
+                    raise ValueError('encrypted ZIP member is not supported')
+                if item.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                    raise ValueError('unsupported ZIP compression method')
                 rel = _safe_member_name(item.filename, expected_prefix)
                 if rel in members:
                     raise ValueError('archive entries empty, duplicated or not sorted')
