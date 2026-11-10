@@ -1,5 +1,5 @@
 /* Test-only Linux LD_PRELOAD interposer. It is NEVER linked into Sudoku.
- * Inject file-fsync, directory-fsync and rename failures deterministically.
+ * Inject file permission, file-fsync, directory-fsync and rename failures.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -30,4 +30,17 @@ int rename(const char *source, const char *target) {
         return -1;
     }
     return renameat(AT_FDCWD, source, AT_FDCWD, target);
+}
+
+/* Mode-setting must happen before the save is written or renamed. Test-only
+ * syscall delegation avoids recursion through the interposed libc symbol. */
+int fchmod(int fd, mode_t mode) {
+    const char *fault = getenv("SUDOKU_TEST_FAULT");
+    struct stat st;
+    if (fault != NULL && strcmp(fault, "file-mode") == 0 &&
+        fstat(fd, &st) == 0 && S_ISREG(st.st_mode)) {
+        errno = EPERM;
+        return -1;
+    }
+    return (int)syscall(SYS_fchmod, fd, mode);
 }
