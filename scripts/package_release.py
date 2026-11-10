@@ -110,7 +110,13 @@ def source_paths():
 def installed_paths(prefix):
     files = []
     total = 0
-    for file in sorted(prefix.rglob('*')):
+    seen = 0
+    # Walk lazily: sorting rglob() before applying count budgets allocates
+    # an unbounded path list, even when the eventual archive has few files.
+    for file in prefix.rglob('*'):
+        seen += 1
+        if seen > MAX_ARCHIVE_FILES * 4:
+            raise ValueError('installation exceeds entry count budget')
         if file.is_symlink():
             raise ValueError('symlink in installation tree, refusing to package')
         if not file.is_file():
@@ -124,7 +130,7 @@ def installed_paths(prefix):
         files.append((rel, payload, mode))
     if not any(p.startswith('bin/sudoku') for p, _, _ in files):
         raise ValueError('sudoku executable missing from staged installation')
-    return files
+    return sorted(files)
 
 
 def create_tar(dest, prefix, files):
