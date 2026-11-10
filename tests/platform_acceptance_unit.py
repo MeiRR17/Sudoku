@@ -136,7 +136,7 @@ class ReceiptWriteTests(unittest.TestCase):
             with self.assertRaises(TypeError):
                 acceptance.write_receipt(dest, {'value': object()})
             self.assertFalse(dest.exists())
-            self.assertFalse(dest.with_name(dest.name + '.tmp').exists()
+            self.assertFalse(dest.with_name(dest.name + '.tmp').exists())
 
 
 if __name__ == '__main__':
