@@ -8,6 +8,7 @@ import importlib.util
 from pathlib import Path
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -93,6 +94,18 @@ with tempfile.TemporaryDirectory(prefix='sudoku-integrity-') as td:
         writer(incomplete / filename, source_prefix, source_without_test)
         update_checksum(incomplete, filename)
     tested_fail(incomplete, 'source archive manifest mismatch')
+
+    # ZIP central-directory counts must be bounded *before* ZipFile
+    # materializes the entry list. Recompute SHA256SUMS so this checks the
+    # structural preflight, rather than just the outer archive checksum.
+    inflated_index = scenario('zip-eocd-count')
+    tampered_zip = inflated_index / archive_name
+    blob = bytearray(tampered_zip.read_bytes())
+    struct.pack_into('<H', blob, len(blob) - 22 + 8, PACKAGE.MAX_ARCHIVE_FILES + 1)
+    struct.pack_into('<H', blob, len(blob) - 22 + 10, PACKAGE.MAX_ARCHIVE_FILES + 1)
+    tampered_zip.write_bytes(blob)
+    update_checksum(inflated_index, archive_name)
+    tested_fail(inflated_index, 'invalid number of ZIP members')
 
     symlink = scenario('symlink')
     def set_symlink(index, item, data):
