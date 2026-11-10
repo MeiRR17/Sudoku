@@ -83,6 +83,21 @@ if(BUILD_TESTING)
         target_link_options(sudoku_game_tests PRIVATE --coverage)
     endif()
     add_test(NAME sudoku_game_unit COMMAND sudoku_game_tests)
+    if(WIN32)
+        # Windows save staging uses an atomic per-process counter and
+        # exclusive-create temporary files. Exercise shared-target saves.
+        add_executable(sudoku_windows_save_concurrency_tests
+            tests/test_windows_save_concurrency.c)
+        target_link_libraries(sudoku_windows_save_concurrency_tests PRIVATE sudoku_core)
+        if(MSVC)
+            target_compile_options(sudoku_windows_save_concurrency_tests PRIVATE /W4 /WX)
+        else()
+            target_compile_options(sudoku_windows_save_concurrency_tests PRIVATE
+                -Wall -Wextra -Wpedantic -Werror)
+        endif()
+        add_test(NAME sudoku_windows_save_concurrency
+            COMMAND sudoku_windows_save_concurrency_tests)
+    endif()
     add_test(NAME sudoku_generator_unit COMMAND sudoku_generator_tests)
     # Compile the actual generator unit with a deterministic clock override.
     add_executable(sudoku_generator_clock_tests tests/test_generator_clock.c)
