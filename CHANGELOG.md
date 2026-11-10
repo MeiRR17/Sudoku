@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Stream TAR.GZ verification one member at a time instead of collecting all archive headers in memory. Enforce a maximum of 1,024 members before reading the next payload; reject duplicate member names early. Added 8 executable Python unit tests (normal, exact limit, one over limit, empty, duplicates, unsorted, symlink, traversal). Measured 8/8 passing in isolated exact-function validation; full native Sudoku CTest is still outstanding.
+
 - Fix `sudoku play` reset idempotence: compare the 81 board cells and 81 pencil-note masks, not the snapshot's ABI padding bytes. A reset of an untouched/already-cleared game no longer creates phantom undo steps. Add core unit and scripted gameplay regressions for repeat resets and undo restoration.
 
 - Strictly validate the save-file elapsed-time field: only canonical decimal numbers (no leading zeroes) are accepted, even when a tampered file carries a correctly recalculated FNV checksum. Saturate elapsed-time arithmetic before subtraction and perform clock differences without signed `time_t` overflow. Add game E2E tamper and core timer-boundary regressions.

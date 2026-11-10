@@ -44,6 +44,7 @@ src/core/board.c
 src/core/game.c
 src/core/generator.c
 src/core/solver.c
+tests/archive_stream_unit.py
 tests/cli_golden.py
 tests/corpus/parser/bad-character.txt
 tests/corpus/parser/blank-board.txt
