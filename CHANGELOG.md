@@ -2,6 +2,12 @@
 
 Versions under 1.0 are development milestones, **not** supported Production releases. Dates follow ISO 8601.
 
+## [0.8.4] — 2026-11-10 (development patch; release HOLD)
+
+- Allow interactive `save PATH` to accept paths containing spaces, with or without enclosing double quotes; reject overlong commands instead of splitting one path into separate arguments.
+- Remember a new explicit save destination even when POSIX directory sync fails **after** a successful rename, so the next bare `save` retries the new destination rather than reporting no configured path.
+- Add portable scripted game E2E and Linux fault-injection regressions. No native Windows/macOS acceptance or user-approved license is asserted; issue #10 remains open.
+
 ## [0.8.3] — 2026-11-09
 
 - On POSIX, game saves now fsync their **parent directory after successful rename**, in addition to syncing the temporary file first.
