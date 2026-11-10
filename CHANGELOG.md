@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Enforce Windows-portable path components consistently across source manifest inputs, staged install paths and ZIP/TAR.GZ archive verification. Reject DOS device basenames (CON, PRN, AUX, NUL, COM1–9, LPT1–9, CONIN$/CONOUT$), NTFS alternate-stream colons, invalid punctuation/control characters and trailing dots/spaces. Preserve normal nested relative paths and deterministic archive order. Add cross-platform and POSIX-only regression coverage; focused exact-source checks 29/29 PASS.
+
 - Fix unbounded **installation-tree path enumeration** in the packager: `sorted(prefix.rglob('*'))` previously materialized every path before the 1,024-file limit. Iterate lazily, refuse more than 4,096 directory/file entries or 1,024 regular files, and sort only the bounded output for deterministic archives. Four additional regressions cover true deterministic ordering, unbounded file/directory iterators and symlink rejection; all 14 package-budget cases plus nine manifest-path cases passed in an isolated exact-function harness.
 
 - Fail closed when the portable C generator CPU clock is unavailable or runs backward; perform clock subtraction as floating-point values to avoid signed `clock_t` subtraction overflow. Check elapsed CPU budget after the expensive solver/rating call before publishing a generated puzzle. Add a deterministic C clock fault test in CMake/CTest, enforced by `quality_gate.py` across native/sanitized/coverage builds; scoped GCC and Clang UBSan checks passed 6/6 each. This is development hardening, not native release approval.
