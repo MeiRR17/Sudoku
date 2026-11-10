@@ -72,6 +72,31 @@ with tempfile.TemporaryDirectory() as directory:
                          f'save "{incomplete}\nquit\n')
     assert 'Error: malformed quoted save path' in stdout and not incomplete.exists() and not stderr
     checks += 1
+    # Gameplay file loading must use bounded heap storage instead of a >1 MiB
+    # stack frame (especially relevant for the default Windows/MSVC stack).
+    copied = folder / 'unique puzzle from file with spaces.txt'
+    copied.write_text(near_win + '\n', encoding='ascii')
+    stdout, stderr = run(['--file', copied], 'status\nquit\n')
+    assert 'Started new game' in stdout and 'Progress:' in stdout and not stderr
+    checks += 1
+    empty_file = folder / 'empty puzzle.txt'
+    empty_file.write_bytes(b'')
+    stdout, stderr = run(['--file', empty_file], exit_code=3)
+    assert not stdout and 'Invalid puzzle:' in stderr
+    checks += 1
+    bad_file = folder / 'binary puzzle.txt'
+    bad_file.write_bytes(b'\\x00' + near_win.encode('ascii'))
+    stdout, stderr = run(['--file', bad_file], exit_code=3)
+    assert not stdout and 'Invalid puzzle:' in stderr
+    checks += 1
+    oversized = folder / 'oversized puzzle.txt'
+    oversized.write_bytes(b'0' * (1024 * 1024 + 1))
+    stdout, stderr = run(['--file', oversized], exit_code=3)
+    assert not stdout and 'Invalid puzzle:' in stderr
+    checks += 1
+    stdout, stderr = run(['--file', folder / 'missing puzzle.txt'], exit_code=4)
+    assert not stdout and 'Puzzle open failed:' in stderr
+    checks += 1
     first = saved.read_bytes()
     assert first.startswith(b'SUDOKU_SAVE_V1\n') and b'\nC=' in first
     checks += 1
