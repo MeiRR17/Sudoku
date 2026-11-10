@@ -73,6 +73,22 @@ class InventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'unnamed'):
             quality.validate_test_manifest(data, sanitizer=True, system='Linux')
 
+    def test_required_disabled_test_fails_closed(self):
+        tests = [{'name': name} for name in quality.BASE_TESTS]
+        tests[0]['properties'] = [{'name': 'DISABLED', 'value': True}]
+        with self.assertRaisesRegex(ValueError, 'disabled or skippable'):
+            quality.validate_test_manifest(json.dumps({'tests': tests}),
+                                           sanitizer=True, system='Linux')
+
+    def test_required_skip_policy_fails_closed(self):
+        for prop in ('SKIP_RETURN_CODE', 'SKIP_REGULAR_EXPRESSION'):
+            with self.subTest(prop=prop):
+                tests = [{'name': name} for name in quality.BASE_TESTS]
+                tests[0]['properties'] = [{'name': prop, 'value': 77}]
+                with self.assertRaisesRegex(ValueError, 'disabled or skippable'):
+                    quality.validate_test_manifest(json.dumps({'tests': tests}),
+                                                   sanitizer=True, system='Linux')
+
     def test_ctest_query_is_scoped_to_actual_build(self):
         result = SimpleNamespace(stdout=inventory(sorted(quality.BASE_TESTS)))
         build = Path('my-build')
