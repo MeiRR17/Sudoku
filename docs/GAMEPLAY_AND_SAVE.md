@@ -44,11 +44,11 @@ SUDOKU_SAVE_V1
 G=<exactly 81 ASCII digits, original givens>
 B=<exactly 81 ASCII digits, current board>
 N=<exactly 243 uppercase hex digits, 3 hex digits per 9-bit note mask>
-E=<decimal elapsed seconds, 0..315360000>
+E=<canonical decimal elapsed seconds, 0..315360000; no leading zeroes except exactly 0>
 C=<16 uppercase hexadecimal digits: FNV-1a 64 of all bytes preceding the C line>
 ```
 
-Each note mask uses only digit bits 1–9 (`0x000`–`0x3FE`); bit zero must be clear. Original clues and filled cells must not have notes. The current board must be Sudoku-rule-consistent and must preserve all givens. The original puzzle must have a unique exact solution. **The checksum detects accidental truncation or corruption; it is not cryptographic authentication** and does not defend against deliberate malicious modification. The parser rejects any extra or missing byte, invalid checksum, illegal note bit, contradictory number or altered original clue. Failed loading leaves any caller-owned game unchanged. There is no compatibility promise for unknown future save versions.
+Each note mask uses only digit bits 1–9 (`0x000`–`0x3FE`); bit zero must be clear. Original clues and filled cells must not have notes. The current board must be Sudoku-rule-consistent and must preserve all givens. The original puzzle must have a unique exact solution. **The checksum detects accidental truncation or corruption; it is not cryptographic authentication** and does not defend against deliberate malicious modification. The parser rejects any extra or missing byte, invalid checksum, illegal note bit, contradictory number or altered original clue. It also rejects noncanonical elapsed-time decimal encodings such as `E=00` or `E=0012`, **even with an otherwise valid checksum**. The elapsed-time getter clamps unexpected out-of-range public structure values to the documented 315360000-second bound. Failed loading leaves any caller-owned game unchanged. There is no compatibility promise for unknown future save versions.
 
 ### Atomic save strategy
 
