@@ -67,6 +67,21 @@ with tempfile.TemporaryDirectory(prefix='sudoku-integrity-') as td:
         shutil.copytree(good, dest)
         return dest
 
+    # Fail before decoding a maliciously large checksum file, even though
+    # a valid four-archive distribution exists next to it.
+    oversized_manifest = scenario('oversized-checksum-manifest')
+    (oversized_manifest / 'SHA256SUMS').write_bytes(
+        b'X' * (PACKAGE.MAX_CHECKSUM_MANIFEST_BYTES + 1))
+    tested_fail(oversized_manifest, 'SHA256SUMS exceeds size budget')
+
+    # Fail before computing SHA-256 over an oversized sparse archive, not
+    # only after entering the TAR stream decoder.
+    oversized_tar = scenario('oversized-tar-container')
+    target_tar = next(oversized_tar.glob('*-source.tar.gz'))
+    with target_tar.open('wb') as output:
+        output.truncate(PACKAGE.MAX_TAR_ARCHIVE_BYTES + 1)
+    tested_fail(oversized_tar, 'archive exceeds compressed size budget')
+
     altered = scenario('checksum')
     with (altered / archive_name).open('ab') as file:
         file.write(b'bad')
