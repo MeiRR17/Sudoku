@@ -39,7 +39,7 @@ static int use(const char *message){
 }
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
-    puts("          notes ROW COL, undo, redo, reset, check, status,");
+    puts("          notes ROW COL, clear-notes, undo, redo, reset, check, status,");
     puts("          save [PATH], help, quit");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'note' toggles pencil candidates. No color, network or special keys required.");
@@ -294,7 +294,8 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             if(sudoku_game_won(game))puts("SOLVED!");
             continue;
         }
-        if(strcmp(command,"undo")==0&&!a)status=sudoku_game_undo(game);
+        if(strcmp(command,"clear-notes")==0&&!a)status=sudoku_game_clear_notes(game);
+        else if(strcmp(command,"undo")==0&&!a)status=sudoku_game_undo(game);
         else if(strcmp(command,"redo")==0&&!a)status=sudoku_game_redo(game);
         else if(strcmp(command,"reset")==0&&!a)status=sudoku_game_reset(game);
         else if(strcmp(command,"check")==0&&!a){
