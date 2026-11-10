@@ -96,6 +96,18 @@ SudokuGameStatus sudoku_game_note(SudokuGame *game, unsigned row, unsigned col, 
     remember(game);
     return SUDOKU_GAME_OK;
 }
+/* Clear all pencil marks in one undoable step, without changing placed
+ * digits or givens. A second clear is history-neutral. */
+SudokuGameStatus sudoku_game_clear_notes(SudokuGame *game) {
+    unsigned i;
+    if (!valid_game(game)) return SUDOKU_GAME_INVALID;
+    for (i = 0u; i < SUDOKU_CELL_COUNT; ++i)
+        if (game->state.notes[i] != 0u) break;
+    if (i == SUDOKU_CELL_COUNT) return SUDOKU_GAME_OK;
+    memset(game->state.notes, 0, sizeof game->state.notes);
+    remember(game);
+    return SUDOKU_GAME_OK;
+}
 SudokuGameStatus sudoku_game_undo(SudokuGame *game) {
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
     if (game->history_cursor == 0u) return SUDOKU_GAME_NO_HISTORY;
