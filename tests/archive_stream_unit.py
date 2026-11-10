@@ -1,6 +1,8 @@
 """Test streaming TAR archive bounds without building the Sudoku executable."""
 import importlib.util
 import gzip
+from unittest.mock import patch
+import gzip
 import io
 from pathlib import Path
 import tarfile
@@ -60,6 +62,37 @@ class StreamedTarVerificationTests(unittest.TestCase):
         self.path.write_bytes(self.path.read_bytes()[:18])
         with self.assertRaisesRegex(ValueError, 'malformed archive container'):
             package.ensure_safe_archive(self.path, PREFIX)
+
+    def test_missing_gzip_trailer_rejected_even_with_intact_tar_members(self):
+        self.archive(['a.txt'], payload=b'hello')
+        # Removing just CRC32+ISIZE leaves all TAR records readable. The
+        # decoder must be drained past the TAR end marker to notice this.
+        original = self.path.read_bytes()
+        self.path.write_bytes(original[:-8])
+        with self.assertRaisesRegex(ValueError, 'malformed archive container'):
+            package.ensure_safe_archive(self.path, PREFIX)
+
+    def test_corrupt_gzip_trailer_rejected_even_with_intact_tar_members(self):
+        self.archive(['a.txt'], payload=b'hello')
+        corrupt = bytearray(self.path.read_bytes())
+        corrupt[-8] ^= 1  # GZIP CRC32 bit, not member/TAR bytes.
+        self.path.write_bytes(corrupt)
+        with self.assertRaisesRegex(ValueError, 'malformed archive container'):
+            package.ensure_safe_archive(self.path, PREFIX)
+
+    def test_concatenated_gzip_with_nonzero_extra_tar_data_rejected(self):
+        self.archive(['a.txt'], payload=b'hello')
+        self.path.write_bytes(self.path.read_bytes() + gzip.compress(b'hidden-data'))
+        with self.assertRaisesRegex(ValueError, 'non-zero trailing TAR data'):
+            package.ensure_safe_archive(self.path, PREFIX)
+
+    def test_decoded_tar_padding_budget_is_enforced(self):
+        self.archive(['a.txt'], payload=b'hello')
+        # Standard TAR has at least 10 KiB of data and zero padding; a
+        # smaller synthetic budget must fail during the actual decoder read.
+        with patch.object(package, 'MAX_TAR_DECODED_BYTES', 1024):
+            with self.assertRaisesRegex(ValueError, 'TAR decoded stream exceeds size budget'):
+                package.ensure_safe_archive(self.path, PREFIX)
 
     def test_empty_tar_is_rejected(self):
         self.archive([])
