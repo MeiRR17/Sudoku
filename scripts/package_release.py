@@ -123,14 +123,18 @@ def ensure_safe_archive(path, expected_prefix):
     names = []
     unpacked = 0
     if path.name.endswith('.tar.gz'):
-        with tarfile.open(path, 'r:gz') as archive:
-            infos = archive.getmembers()
-            if not 1 <= len(infos) <= MAX_ARCHIVE_FILES:
-                raise ValueError('invalid number of TAR members')
-            for item in infos:
+        # r|gz reads one member at a time. getmembers() would eagerly
+        # materialize attacker-controlled metadata before applying the
+        # MAX_ARCHIVE_FILES limit, defeating bounded-memory verification.
+        with tarfile.open(path, 'r|gz') as archive:
+            for item in archive:
+                if len(names) >= MAX_ARCHIVE_FILES:
+                    raise ValueError('invalid number of TAR members')
                 if not item.isfile() or item.size < 0:
                     raise ValueError('non-regular TAR member')
                 rel = _safe_member_name(item.name, expected_prefix)
+                if rel in members:
+                    raise ValueError('archive entries empty, duplicated or not sorted')
                 unpacked += item.size
                 if unpacked > MAX_UNPACKED_BYTES:
                     raise ValueError('TAR unpacked content exceeds size budget')
@@ -143,6 +147,8 @@ def ensure_safe_archive(path, expected_prefix):
                     raise ValueError('TAR member length mismatch')
                 members[rel] = payload
                 names.append(item.name)
+            if not names:
+                raise ValueError('invalid number of TAR members')
     else:
         with zipfile.ZipFile(path) as archive:
             infos = archive.infolist()
