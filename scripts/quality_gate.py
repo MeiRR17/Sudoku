@@ -6,6 +6,7 @@ full: Linux/macOS GCC+Clang builds where available, GCC sanitizer, GCC coverage
 No network or package installation; all artifacts stay in --build-root.
 """
 import argparse
+import json
 import pathlib
 import platform
 import shutil
@@ -20,6 +21,51 @@ def run(*args):
     subprocess.run(list(map(str, args)), check=True, cwd=ROOT)
 
 
+# A passing CTest exit code is insufficient when optional Python discovery
+# silently omits the E2E regressions. Require the actual named test suite.
+BASE_TESTS = frozenset('''
+sudoku_board_unit sudoku_properties sudoku_game_unit sudoku_generator_unit
+sudoku_solver_unit sudoku_count_unique sudoku_solve_unique sudoku_help
+sudoku_version sudoku_demo_smoke sudoku_validate_compact sudoku_validate_file
+sudoku_invalid_row sudoku_stdin sudoku_count_unsolvable sudoku_solve_unsolvable
+sudoku_game_e2e sudoku_generator_golden sudoku_cli_golden
+'''.split())
+PACKAGE_TESTS = frozenset(('sudoku_package_e2e', 'sudoku_package_integrity'))
+
+
+def validate_test_manifest(raw, sanitizer=False, coverage=False, system=None):
+    """Fail closed on absent/duplicate named CTest checks before executing any."""
+    try:
+        manifest = json.loads(raw)
+    except (ValueError, TypeError) as error:
+        raise ValueError('CTest JSON inventory unreadable') from error
+    tests = manifest.get('tests') if isinstance(manifest, dict) else None
+    if not isinstance(tests, list):
+        raise ValueError('CTest JSON inventory has no tests array')
+    names = [test.get('name') for test in tests if isinstance(test, dict)]
+    if len(names) != len(tests) or any(not isinstance(n, str) for n in names):
+        raise ValueError('CTest JSON inventory contains unnamed tests')
+    if len(set(names)) != len(names):
+        raise ValueError('CTest JSON inventory contains duplicate test names')
+    required = set(BASE_TESTS)
+    if not sanitizer and not coverage:
+        required.update(PACKAGE_TESTS)
+        if (system or platform.system()) == 'Linux':
+            required.add('sudoku_save_fault_injection')
+    missing = sorted(required.difference(names))
+    if missing:
+        raise ValueError('Required CTest checks missing: ' + ', '.join(missing))
+    print(f'CTEST INVENTORY PASS: {len(required)} mandatory / {len(names)} listed', flush=True)
+    return len(required)
+
+
+def verify_ctest_inventory(path, sanitizer=False, coverage=False):
+    command = ['ctest', '--test-dir', str(path), '-C', 'Release', '--show-only=json-v1']
+    print('+', ' '.join(command), flush=True)
+    result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=True)
+    validate_test_manifest(result.stdout, sanitizer=sanitizer, coverage=coverage)
+
+
 def build(path, compiler=None, sanitizer=False, coverage=False):
     command = ['cmake', '-S', ROOT, '-B', path, '-DCMAKE_BUILD_TYPE=Debug' if (sanitizer or coverage) else '-DCMAKE_BUILD_TYPE=Release']
     if compiler:
@@ -30,6 +76,7 @@ def build(path, compiler=None, sanitizer=False, coverage=False):
         command.append('-DSUDOKU_ENABLE_COVERAGE=ON')
     run(*command)
     run('cmake', '--build', path, '--config', 'Release', '--parallel', '2')
+    verify_ctest_inventory(path, sanitizer=sanitizer, coverage=coverage)
     run('ctest', '--test-dir', path, '-C', 'Release', '--output-on-failure')
 
 
