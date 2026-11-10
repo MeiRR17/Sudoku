@@ -29,16 +29,25 @@ class ReceiptMatrixTests(unittest.TestCase):
         self.receipts = {}
         self.source_entries = {
             'README.md': b'Canonical Sudoku source fixture\n',
-            'scripts/release_files.txt': b'README.md\nscripts/release_files.txt\n',
+            'CMakeLists.txt': b'project(Sudoku VERSION 0.8.4 LANGUAGES C)\n',
+            'src/core/solver.c': b'solver unit source placeholder\n',
+            'src/core/game.c': b'game unit source placeholder\n',
+            'scripts/package_release.py': b'packager source placeholder\n',
+            'scripts/release_files.txt': b'',
         }
+        self.source_entries['scripts/release_files.txt'] = (
+            '\n'.join(sorted(self.source_entries)) + '\n').encode('ascii')
         self.source_digest = MATRIX.ACCEPTANCE.source_tree_digest(self.source_entries)
         for label, (system, arches, compilers, suffix) in MATRIX.PLATFORMS.items():
             folder = Path(self.temp.name) / label
             folder.mkdir()
             archives = {}
             for kind in ('source', suffix):
+                exe = 'bin/sudoku.exe' if label == 'windows-latest' else 'bin/sudoku'
                 entries = (self.source_entries if kind == 'source' else
-                           {'bin/sudoku': f'binary fixture from {label}'.encode('ascii')})
+                           {exe: f'binary fixture from {label}'.encode('ascii'),
+                            'include/sudoku/board.h': b'board header fixture',
+                            'include/sudoku/game.h': b'game header fixture'})
                 prefix = f'sudoku-v{VERSION}-{kind}'
                 records = [(name, content, 0o755 if name.startswith('bin/') else 0o644)
                            for name, content in sorted(entries.items())]
@@ -269,6 +278,54 @@ class ReceiptMatrixTests(unittest.TestCase):
             self.receipts[label]['archive_sha256'][name] = hashlib.sha256(dest.read_bytes()).hexdigest()
         self.write(label)
         with self.assertRaisesRegex(ValueError, 'source archive manifest mismatch'):
+            self.check()
+
+    def test_binary_zip_tar_content_disagreement_rejected(self):
+        label = 'ubuntu-latest'
+        name = f'sudoku-v{VERSION}-linux-x86_64.zip'
+        dest = self.folders[label] / name
+        MATRIX.PACKAGE.create_zip(dest, f'sudoku-v{VERSION}-linux-x86_64', [
+            ('bin/sudoku', b'changed binary bytes', 0o755),
+            ('include/sudoku/board.h', b'board header fixture', 0o644),
+            ('include/sudoku/game.h', b'game header fixture', 0o644),
+        ])
+        self.receipts[label]['archive_sha256'][name] = hashlib.sha256(dest.read_bytes()).hexdigest()
+        self.write(label)
+        with self.assertRaisesRegex(ValueError, 'ZIP and TAR.GZ content disagree'):
+            self.check()
+
+    def test_binary_missing_header_rejected_after_regenerated_hashes(self):
+        label = 'ubuntu-latest'
+        prefix = f'sudoku-v{VERSION}-linux-x86_64'
+        entries = [('bin/sudoku', b'same synthetic executable', 0o755),
+                   ('include/sudoku/board.h', b'board header fixture', 0o644)]
+        for ext, writer in (('.zip', MATRIX.PACKAGE.create_zip),
+                            ('.tar.gz', MATRIX.PACKAGE.create_tar)):
+            name = prefix + ext
+            dest = self.folders[label] / name
+            writer(dest, prefix, entries)
+            self.receipts[label]['archive_sha256'][name] = hashlib.sha256(dest.read_bytes()).hexdigest()
+        self.write(label)
+        with self.assertRaisesRegex(ValueError, 'missing mandatory release content'):
+            self.check()
+
+    def test_binary_zip_symlink_rejected_after_regenerated_hash(self):
+        label = 'ubuntu-latest'
+        name = f'sudoku-v{VERSION}-linux-x86_64.zip'
+        dest = self.folders[label] / name
+        prefix = f'sudoku-v{VERSION}-linux-x86_64'
+        with zipfile.ZipFile(dest, 'w') as archive:
+            for rel, contents, mode in (
+                    ('bin/sudoku', b'linked binary', 0o120777),
+                    ('include/sudoku/board.h', b'board header fixture', 0o100644),
+                    ('include/sudoku/game.h', b'game header fixture', 0o100644)):
+                item = zipfile.ZipInfo(prefix + '/' + rel, date_time=(1980, 1, 1, 0, 0, 0))
+                item.create_system = 3
+                item.external_attr = mode << 16
+                archive.writestr(item, contents)
+        self.receipts[label]['archive_sha256'][name] = hashlib.sha256(dest.read_bytes()).hexdigest()
+        self.write(label)
+        with self.assertRaisesRegex(ValueError, 'non-regular ZIP member'):
             self.check()
 
     def test_source_tree_digest_disagreement_rejected(self):
