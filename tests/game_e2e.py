@@ -85,7 +85,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert not stdout and 'Invalid puzzle:' in stderr
     checks += 1
     bad_file = folder / 'binary puzzle.txt'
-    bad_file.write_bytes(b'\\x00' + near_win.encode('ascii'))
+    bad_file.write_bytes(bytes([0]) + near_win.encode('ascii'))
     stdout, stderr = run(['--file', bad_file], exit_code=3)
     assert not stdout and 'Invalid puzzle:' in stderr
     checks += 1
