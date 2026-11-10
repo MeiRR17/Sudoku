@@ -61,6 +61,28 @@ static int check_game(void){
     CHECK(game->state.board.cells[2]==0);
     CHECK(sudoku_game_note(game,1,3,7)==SUDOKU_GAME_OK);
     CHECK(sudoku_game_save(game,"game-unit.save")==SUDOKU_GAME_OK);
+    /* Public C structs may be modified without going through the safe
+     * mutators. Never replace a valid save with a checksummed record
+     * that the loader must reject. */
+    *orig=*game;
+    game->state.board.cells[0]=0; /* Erased original clue. */
+    CHECK(sudoku_game_save(game,"game-unit.save")==SUDOKU_GAME_INVALID);
+    *game=*orig;
+    game->state.board.cells[2]=5; /* Duplicate digit in first row. */
+    CHECK(sudoku_game_save(game,"game-unit.save")==SUDOKU_GAME_INVALID);
+    *game=*orig;
+    game->state.board.cells[2]=10; /* Out-of-range mutable cell. */
+    CHECK(sudoku_game_save(game,"game-unit.save")==SUDOKU_GAME_INVALID);
+    *game=*orig;
+    game->state.notes[0]=(uint16_t)(1u<<2); /* Note on filled clue. */
+    CHECK(sudoku_game_save(game,"game-unit.save")==SUDOKU_GAME_INVALID);
+    *game=*orig;
+    game->state.board.cells[2]=4; /* Filled editable cell with notes. */
+    CHECK(sudoku_game_save(game,"game-unit.save")==SUDOKU_GAME_INVALID);
+    *game=*orig;
+    game->givens.cells[2]=5; /* Invalid original clue configuration. */
+    CHECK(sudoku_game_save(game,"game-unit.save")==SUDOKU_GAME_INVALID);
+    *game=*orig;
     memset(restored,0xA6,sizeof *restored);
     CHECK(sudoku_game_load(restored,"game-unit.save")==SUDOKU_GAME_OK);
     CHECK(restored->state.notes[2]==(1u<<7));
