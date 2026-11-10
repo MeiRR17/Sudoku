@@ -2,6 +2,8 @@
 from datetime import datetime, timezone
 import hashlib
 import importlib.util
+import hashlib
+import zipfile
 import json
 from pathlib import Path
 import tempfile
@@ -22,18 +24,26 @@ class ReceiptMatrixTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.folders = {}
         self.receipts = {}
+        self.source_entries = {
+            'README.md': b'Canonical Sudoku source fixture\n',
+            'scripts/release_files.txt': b'README.md\nscripts/release_files.txt\n',
+        }
+        self.source_digest = MATRIX.ACCEPTANCE.source_tree_digest(self.source_entries)
         for label, (system, arches, compilers, suffix) in MATRIX.PLATFORMS.items():
             folder = Path(self.temp.name) / label
             folder.mkdir()
             archives = {}
             for kind in ('source', suffix):
-                for ext in ('.tar.gz', '.zip'):
-                    name = f'sudoku-v{VERSION}-{kind}{ext}'
-                    # The matrix checks SHA bytes. Native package acceptance
-                    # is separately responsible for ZIP/TAR structure checks.
-                    payload = f'{label}:{kind}:{ext}'.encode('ascii')
-                    (folder / name).write_bytes(payload)
-                    archives[name] = hashlib.sha256(payload).hexdigest()
+                entries = (self.source_entries if kind == 'source' else
+                           {'bin/sudoku': f'binary fixture from {label}'.encode('ascii')})
+                prefix = f'sudoku-v{VERSION}-{kind}'
+                records = [(name, content, 0o755 if name.startswith('bin/') else 0o644)
+                           for name, content in sorted(entries.items())]
+                for ext, writer in (('.tar.gz', MATRIX.PACKAGE.create_tar),
+                                    ('.zip', MATRIX.PACKAGE.create_zip)):
+                    name = prefix + ext
+                    writer(folder / name, prefix, records)
+                    archives[name] = hashlib.sha256((folder / name).read_bytes()).hexdigest()
             receipt = {
                 'schema_version': 2, 'status': 'passed', 'scope': 'unsigned development evidence',
                 'git_commit_sha': SHA, 'project_version': VERSION,
@@ -42,7 +52,7 @@ class ReceiptMatrixTests(unittest.TestCase):
                 'quality_gate_mode': 'full' if label == 'ubuntu-latest' else 'fast',
                 'checks': ['quality_gate', 'package_release', 'package_verify'],
                 'archive_sha256': archives,
-                'source_tree_sha256': 'c' * 64,
+                'source_tree_sha256': self.source_digest,
                 'created_utc': datetime.now(timezone.utc).isoformat(timespec='seconds'),
             }
             self.folders[label] = folder
@@ -92,13 +102,20 @@ class ReceiptMatrixTests(unittest.TestCase):
             self.check()
 
     def test_different_compressed_source_archives_are_allowed(self):
-        # Native archive bytes may differ while the source digest agrees.
-        for label, ext in (('macos-latest', '.zip'), ('windows-latest', '.tar.gz')):
-            name = f'sudoku-v{VERSION}-source{ext}'
-            payload = f'different compression from {label}'.encode('ascii')
-            (self.folders[label] / name).write_bytes(payload)
-            self.receipts[label]['archive_sha256'][name] = hashlib.sha256(payload).hexdigest()
-            self.write(label)
+        # Different compressor settings can produce other archive bytes,
+        # without changing extracted file names, bytes or source hash.
+        label = 'macos-latest'
+        name = f'sudoku-v{VERSION}-source.zip'
+        target = self.folders[label] / name
+        with zipfile.ZipFile(target, 'w') as archive:
+            for rel, content in sorted(self.source_entries.items()):
+                entry = zipfile.ZipInfo(f'sudoku-v{VERSION}-source/{rel}',
+                                        date_time=(1980, 1, 1, 0, 0, 0))
+                entry.create_system = 3
+                entry.external_attr = (0o100644 << 16)
+                archive.writestr(entry, content, compress_type=zipfile.ZIP_STORED)
+        self.receipts[label]['archive_sha256'][name] = hashlib.sha256(target.read_bytes()).hexdigest()
+        self.write(label)
         self.assertEqual(len(self.check()), 3)
 
     def test_archive_tampering_after_receipt_rejected(self):
@@ -142,6 +159,63 @@ class ReceiptMatrixTests(unittest.TestCase):
         (self.folders['ubuntu-latest'] / 'SHA256SUMS').write_bytes(
             b' ' * (MATRIX.MAX_MANIFEST_BYTES + 1))
         with self.assertRaisesRegex(ValueError, 'evidence file exceeds size budget'):
+            self.check()
+
+    def test_all_receipts_can_share_a_forged_source_digest(self):
+        # Unchanged matching receipt strings no longer pass without matching
+        # the canonical digest of actual archive contents.
+        for label in MATRIX.PLATFORMS:
+            self.receipts[label]['source_tree_sha256'] = 'd' * 64
+            self.write(label)
+        with self.assertRaisesRegex(ValueError, 'receipt source content digest mismatch'):
+            self.check()
+
+    def test_modified_source_with_recomputed_unsigned_hashes_rejected(self):
+        # Both ZIP/TAR and SHA256SUMS may be regenerated by an adversary.
+        label = 'ubuntu-latest'
+        modified = dict(self.source_entries)
+        modified['README.md'] = b'Modified code hidden behind forged receipts\n'
+        prefix = f'sudoku-v{VERSION}-source'
+        records = [(name, content, 0o644) for name, content in sorted(modified.items())]
+        for ext, writer in (('.tar.gz', MATRIX.PACKAGE.create_tar),
+                            ('.zip', MATRIX.PACKAGE.create_zip)):
+            name = prefix + ext
+            dest = self.folders[label] / name
+            writer(dest, prefix, records)
+            self.receipts[label]['archive_sha256'][name] = hashlib.sha256(dest.read_bytes()).hexdigest()
+        self.write(label)
+        with self.assertRaisesRegex(ValueError, 'receipt source content digest mismatch'):
+            self.check()
+
+    def test_zip_tar_source_member_disagreement_rejected(self):
+        label = 'ubuntu-latest'
+        prefix = f'sudoku-v{VERSION}-source'
+        name = prefix + '.tar.gz'
+        dest = self.folders[label] / name
+        changed = dict(self.source_entries)
+        changed['README.md'] = b'Changed only in source tar\n'
+        MATRIX.PACKAGE.create_tar(dest, prefix,
+            [(name, content, 0o644) for name, content in sorted(changed.items())])
+        self.receipts[label]['archive_sha256'][name] = hashlib.sha256(dest.read_bytes()).hexdigest()
+        self.write(label)
+        with self.assertRaisesRegex(ValueError, 'source ZIP and TAR.GZ contents differ'):
+            self.check()
+
+    def test_source_manifest_mismatch_rejected(self):
+        label = 'ubuntu-latest'
+        prefix = f'sudoku-v{VERSION}-source'
+        # Archive members and unsigned digests are internally consistent,
+        # but the embedded manifest deliberately omits a shipped source.
+        changed = dict(self.source_entries)
+        changed['scripts/release_files.txt'] = b'scripts/release_files.txt\n'
+        for ext, writer in (('.tar.gz', MATRIX.PACKAGE.create_tar),
+                            ('.zip', MATRIX.PACKAGE.create_zip)):
+            name = prefix + ext
+            dest = self.folders[label] / name
+            writer(dest, prefix, [(n, v, 0o644) for n, v in sorted(changed.items())])
+            self.receipts[label]['archive_sha256'][name] = hashlib.sha256(dest.read_bytes()).hexdigest()
+        self.write(label)
+        with self.assertRaisesRegex(ValueError, 'source archive manifest mismatch'):
             self.check()
 
     def test_source_tree_digest_disagreement_rejected(self):
