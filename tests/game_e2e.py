@@ -36,6 +36,19 @@ with tempfile.TemporaryDirectory() as directory:
     checks += 1
     assert not list(folder.glob(saved.name + '.tmp.*'))
     checks += 1
+    # Interactive save accepts paths with spaces and makes them the default.
+    explicit = folder / 'manual save with spaces.save'
+    stdout, stderr = run(['--puzzle', near_win],
+                         f'set 1 1 5\nsave {explicit}\nsave\nquit\n')
+    assert stdout.count(f'Saved to {explicit}') == 2 and explicit.is_file() and not stderr
+    checks += 1
+    stdout, stderr = run(['--resume', explicit], 'status\nquit\n')
+    assert 'SOLVED!' in stdout and not stderr
+    checks += 1
+    quoted = folder / 'quoted game path.save'
+    stdout, stderr = run(['--puzzle', near_win], f'save "{quoted}"\nquit\n')
+    assert f'Saved to {quoted}' in stdout and quoted.is_file() and not stderr
+    checks += 1
     first = saved.read_bytes()
     assert first.startswith(b'SUDOKU_SAVE_V1\n') and b'\nC=' in first
     checks += 1
