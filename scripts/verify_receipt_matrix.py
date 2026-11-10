@@ -5,6 +5,7 @@ Consistency checks are NOT artifact authenticity, native-run verification,
 license approval, or a production release. No network or package install.
 """
 import argparse
+import importlib.util
 import hashlib
 from datetime import datetime
 import json
@@ -20,6 +21,21 @@ PLATFORMS = {
 }
 SHA_RE = re.compile(r'[0-9a-f]{40}\Z')
 DIGEST_RE = re.compile(r'[0-9a-f]{64}\Z')
+
+
+def load_project_helper(module_name):
+    """Import bundled source validators from this exact checkout."""
+    location = ROOT / 'scripts' / (module_name + '.py')
+    spec = importlib.util.spec_from_file_location('sudoku_matrix_' + module_name, location)
+    if spec is None or spec.loader is None:
+        raise ValueError(f'cannot load bundled release helper: {module_name}')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+PACKAGE = load_project_helper('package_release')
+ACCEPTANCE = load_project_helper('platform_acceptance')
 MAX_RECEIPT_BYTES = 16 * 1024
 MAX_MANIFEST_BYTES = 4096
 MAX_ARCHIVE_BYTES = 80 * 1024 * 1024  # Same container cap as package_release.py.
@@ -135,6 +151,17 @@ def verify_one(folder, platform_name, sha, version):
     source_tree = receipt.get('source_tree_sha256')
     if not isinstance(source_tree, str) or DIGEST_RE.fullmatch(source_tree) is None:
         raise ValueError(f'{platform_name}: invalid canonical source content SHA-256')
+    # The receipt and SHA256SUMS are both unsigned and controlled by whoever
+    # supplied the bundle. Also verify actual source archive *contents* and
+    # bind the receipt's canonical source digest to those bytes.
+    prefix = f'sudoku-v{version}-source'
+    source_zip = PACKAGE.ensure_safe_archive(folder / (prefix + '.zip'), prefix)
+    source_tar = PACKAGE.ensure_safe_archive(folder / (prefix + '.tar.gz'), prefix)
+    if source_zip != source_tar:
+        raise ValueError(f'{platform_name}: source ZIP and TAR.GZ contents differ')
+    PACKAGE.verify_source_membership(source_zip)
+    if ACCEPTANCE.source_tree_digest(source_zip) != source_tree:
+        raise ValueError(f'{platform_name}: receipt source content digest mismatch')
     return receipt
 
 
