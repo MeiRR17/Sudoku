@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Fail closed when the portable C generator CPU clock is unavailable or runs backward; perform clock subtraction as floating-point values to avoid signed `clock_t` subtraction overflow. Check elapsed CPU budget after the expensive solver/rating call before publishing a generated puzzle. Add a deterministic C clock fault test in CMake/CTest, enforced by `quality_gate.py` across native/sanitized/coverage builds; scoped GCC and Clang UBSan checks passed 6/6 each. This is development hardening, not native release approval.
+
 - Bound development packaging **before file contents enter memory**, not only during archive verification: both listed source files and staged installation files now respect 1,024 entries and a cumulative 64 MiB limit, while source manifests are capped at 256 KiB before decoding. A size-preflight plus bounded `size+1` read detects growth/truncation during collection. Add ten stdlib regression cases, including a sparse 64 MiB+1 file; isolated exact-function checks 10/10 PASS, prior source-path checks 9/9 PASS.
 
 - Strengthen explicit game-save preflight: recheck that the caller-owned givens have exactly one solution and their cached solution still matches the deterministic solver. The earlier board/notes check was insufficient for a valid-but-ambiguous givens board, allowing a checksum-valid file that the strict resume loader would reject. Add C-game regression cases for nonunique givens and stale solution, preserving the prior save; exact-function isolated C11 UBSan checks 14/14 PASS under both GCC and Clang. Full Sudoku CTest still pending.

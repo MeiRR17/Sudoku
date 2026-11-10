@@ -77,5 +77,6 @@ tests/source_tree_unit.py
 tests/test_board.c
 tests/test_game.c
 tests/test_generator.c
+tests/test_generator_clock.c
 tests/test_properties.c
 tests/test_solver.c

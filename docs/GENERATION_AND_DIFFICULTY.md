@@ -38,7 +38,7 @@ To avoid trivial puzzles, generation also requires at most **40, 36, or 32 clues
 - `--max-attempts`: 1..100, default 20 randomized complete-grid attempts.
 - `--max-checks`: 1..10000, default 2000 exact uniqueness checks **total**.
 - `--max-nodes`: 1..1000000, default 50000 backtracking nodes **per check**.
-- `--max-ms`: 1..60000, default 5000 milliseconds of **best-effort process CPU time**, checked **between** exact solver calls, not a strict wall-time deadline. A slow node-bounded call may overrun. This is not a production-grade hard timeout.
+- `--max-ms`: 1..60000, default 5000 milliseconds of **best-effort process CPU time**, checked **between** exact solver calls and again after the rating pass before returning success, not a strict wall-time deadline. A slow node-bounded call may overrun. This is not a production-grade hard timeout.
 - `--format text|compact|json` and `--output PATH` behave as in v0.4. The output file is exclusive-create and refuses overwrite. `--quiet` is deliberately not accepted for `generate`.
 
 If any budget prevents achieving exactly the requested difficulty, the command exits **6**, writes an actionable error on stderr, and emits **no puzzle or output file**. Syntax/limit errors return 2.
@@ -60,3 +60,8 @@ All returned boards are 81 digits. `solutions_found:1` means the solver establis
 - A hard puzzle can still have a short human trick not implemented by the rubric, and a medium puzzle may feel easier or harder to different people.
 - The bounded solver ensures **sound results** on success, but generous user limits may still involve nontrivial CPU usage. Hard real-time preemption is not supplied.
 - Windows and macOS generator execution has not yet been verified. Production release requirements remain open.
+
+
+#### v0.8.4 CPU timer failure behavior
+
+A failed process CPU clock (`clock() == (clock_t)-1`), a backwards clock (wrap/reset), or an exhausted elapsed CPU budget is treated as a **generation-budget failure** rather than silently disabling the time limit. CPU deltas are calculated in floating-point arithmetic before subtraction to avoid signed `clock_t` overflow, and elapsed CPU time is rechecked after the solver and difficulty rating before a successful puzzle is published. Like the existing contract, a single bounded exact solver call cannot be preempted, so this remains **best effort**, not real-time enforcement. When generation returns `BUDGET`, the supplied result object remains unchanged. The new deterministic `sudoku_generator_clock` CTest injects failed/reversed clock readings without changing the production C API.
