@@ -59,6 +59,19 @@ with tempfile.TemporaryDirectory() as directory:
     stdout, stderr = run(['--puzzle', near_win], f'save "{quoted}"\nquit\n')
     assert f'Saved to {quoted}' in stdout and quoted.is_file() and not stderr
     checks += 1
+    # Invalid explicit quotes must not fall back to --save and clobber an
+    # earlier completed session. A bare 'save' remains the only fallback.
+    preserved = explicit.read_bytes()
+    stdout, stderr = run(['--puzzle', near_win, '--save', explicit],
+                         'save ""\nquit\n')
+    assert 'Error: empty save path' in stdout and 'Saved to' not in stdout and not stderr
+    assert explicit.read_bytes() == preserved
+    checks += 1
+    incomplete = folder / 'incomplete quoted path.save'
+    stdout, stderr = run(['--puzzle', near_win],
+                         f'save "{incomplete}\nquit\n')
+    assert 'Error: malformed quoted save path' in stdout and not incomplete.exists() and not stderr
+    checks += 1
     first = saved.read_bytes()
     assert first.startswith(b'SUDOKU_SAVE_V1\n') and b'\nC=' in first
     checks += 1
