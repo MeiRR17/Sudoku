@@ -221,7 +221,7 @@ class ReceiptMatrixTests(unittest.TestCase):
     def test_source_tree_digest_disagreement_rejected(self):
         self.receipts['macos-latest']['source_tree_sha256'] = 'd' * 64
         self.write('macos-latest')
-        with self.assertRaisesRegex(ValueError, 'source content differs'):
+        with self.assertRaisesRegex(ValueError, 'receipt source content digest mismatch'):
             self.check()
 
     def test_missing_source_tree_digest_rejected(self):
