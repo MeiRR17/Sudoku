@@ -53,7 +53,7 @@ Each note mask uses only digit bits 1–9 (`0x000`–`0x3FE`); bit zero must be 
 ### Atomic save strategy
 
 1. Render an entire canonical, checksummed save in memory before writing.
-2. Create a fresh, exclusive (`fopen(..., "wbx")`) temporary file **in the same directory** as the destination.
+2. Create a fresh, exclusive (`fopen(..., "wbx")`) temporary file **in the same directory** as the destination. On POSIX the temporary descriptor is explicitly restricted to owner read/write (`0600`) **before writing any save bytes**; failed `fchmod` aborts without replacing the old target. An atomic rename installs the temporary file's permissions, so the replacement is also `0600`.
 3. Write the entire record, `fflush`, `fsync` (POSIX) or `_commit` (Windows), then verify `fclose` succeeded.
 4. Replace the target with same-filesystem `rename` (POSIX) or `MoveFileExA` with replacement/write-through (Windows). If file write, file sync or rename fails, the temporary file is deleted and the previous target remains unchanged.
 5. **POSIX only:** open the containing directory and call `fsync` on the directory file descriptor, then check `close`. This requests persistence of the rename's directory metadata. The destination is never changed again after this step.
