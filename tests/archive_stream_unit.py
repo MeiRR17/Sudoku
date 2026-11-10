@@ -67,6 +67,19 @@ class StreamedTarVerificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'non-regular TAR member'):
             package.ensure_safe_archive(self.path, PREFIX)
 
+    def test_windows_unsafe_tar_names_rejected(self):
+        for name in ('con.txt', 'COM1.txt', 'NUL', 'a:stream', 'bad?.txt',
+                     'trailing.', 'trailing ', 'COM².txt'):
+            with self.subTest(name=name):
+                self.archive([name])
+                with self.assertRaisesRegex(ValueError, 'unsafe archive member'):
+                    package.ensure_safe_archive(self.path, PREFIX)
+
+    def test_portable_normal_tar_names_accepted(self):
+        self.archive(['.github/workflows/build.yml', 'src/main.c'], payload=b'abc')
+        self.assertEqual(package.ensure_safe_archive(self.path, PREFIX),
+                         {'.github/workflows/build.yml': b'abc', 'src/main.c': b'abc'})
+
     def test_tar_traversal_is_rejected(self):
         self.archive(['../escape'])
         with self.assertRaisesRegex(ValueError, 'unsafe archive member'):
