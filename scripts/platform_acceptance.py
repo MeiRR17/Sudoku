@@ -9,6 +9,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import platform
 import re
@@ -35,11 +36,27 @@ def compiler_identity(build):
     return found.group(1)
 
 
+def verify_checkout(required_sha=None):
+    """Bind evidence to the exact clean checkout, including untracked files."""
+    sha = call('git', 'rev-parse', '--verify', 'HEAD', capture=True)
+    if not re.fullmatch(r'[0-9a-f]{40}', sha):
+        raise ValueError('not on an exact Git commit')
+    if required_sha is not None:
+        if not re.fullmatch(r'[0-9a-f]{40}', required_sha):
+            raise ValueError('required SHA must be exactly 40 lowercase hex characters')
+        if sha != required_sha:
+            raise ValueError(f'Git HEAD does not match required SHA: {required_sha}')
+    if call('git', 'status', '--porcelain', '--untracked-files=all', capture=True):
+        raise ValueError('tracked or untracked worktree changes prevent exact-commit evidence')
+    return sha
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--expected', required=True,
                     choices=('ubuntu-latest', 'windows-latest', 'macos-latest'))
     ap.add_argument('--mode', choices=('fast', 'full'), default='fast')
+    ap.add_argument('--require-sha', help='Require exact Git HEAD (automatically uses GITHUB_SHA in Actions)')
     ap.add_argument('--output', type=Path, default=Path('dist/platform-receipt.json'))
     args = ap.parse_args()
     if args.mode == 'full' and args.expected != 'ubuntu-latest':
@@ -50,11 +67,7 @@ def main():
 
     call(sys.executable, ROOT / 'scripts/verify_runner_platform.py',
          '--expected', args.expected)
-    sha = call('git', 'rev-parse', '--verify', 'HEAD', capture=True)
-    if not re.fullmatch(r'[0-9a-f]{40}', sha):
-        raise ValueError('not on an exact Git commit')
-    if call('git', 'status', '--porcelain', '--untracked-files=no', capture=True):
-        raise ValueError('tracked worktree changes prevent an exact-commit receipt')
+    sha = verify_checkout(args.require_sha or os.environ.get('GITHUB_SHA'))
 
     build_root = ROOT / '.quality-build' / ('acceptance-' + sha[:12])
     call(sys.executable, ROOT / 'scripts/quality_gate.py', '--mode', args.mode,
@@ -85,6 +98,8 @@ def main():
         checksums[name] = digest
     if len(checksums) != 4:
         raise ValueError('expected four checked development archives')
+    # Detect source changes made during the build/test/package operations.
+    verify_checkout(sha)
 
     version_text = (ROOT / 'CMakeLists.txt').read_text(encoding='utf-8')
     match = re.search(r'project\(Sudoku VERSION ([0-9]+\.[0-9]+\.[0-9]+) LANGUAGES C\)', version_text)
