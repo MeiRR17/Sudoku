@@ -25,6 +25,17 @@ The script runs the full fast CMake/CTest gate, verifies all four development ar
 
 **Observed isolated checks in this update:** `platform_acceptance.py` passed Python bytecode compilation, CLI help parsing, four C compiler identity fixture checks (MSVC, AppleClang, GNU and missing-identity rejection), and a negative guard refusing `--mode full` for Windows. **No Sudoku CMake/CTest or packaging execution occurred.**
 
+## Executed isolated acceptance-guard tests — 2026-11-10
+
+The **exact** Python source blobs from this PR were copied into an isolated local test directory and independently checked by `git hash-object` against their GitHub blob identifiers:
+
+- `scripts/platform_acceptance.py`: `8bac0c0b3e812f05690f72b151cbb3545c6586da`
+- `tests/platform_acceptance_unit.py`: `52a0b70a8b991b2923d7eb84fa55a276c9611c33`
+
+Observed command: `python -B -m unittest discover -s tests -p platform_acceptance_unit.py -v`. Result: **9 tests passed in 0.004 s** (clean/mismatched/malformed SHA; tracked/untracked changes; invalid Git SHA; native compiler identity and missing-identity detection). `--help` completed successfully. Invalid command `python -B scripts/platform_acceptance.py --expected windows-latest --mode full` correctly exited with code **2** before attempting any project build.
+
+**Scope restriction:** these are real Python unit tests on byte-identical source copies, not an assembled Git checkout. The project CMake build, Sudoku CTest, package creation/verifier, native Windows/MSVC and macOS arm64 tests have **not** executed in this environment. No platform acceptance receipt was produced; no release approval or merge is implied.
+
 ## Focused checks to run from this exact branch/commit
 
 ```sh
