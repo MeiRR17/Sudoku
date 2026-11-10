@@ -33,7 +33,7 @@ The `--file` argument reads a puzzle file (max 1 MiB), not a saved game. `--resu
 
 The game uses 1-based row/column coordinates. The givens are immutable. Pencil notes are intentionally independent of the authoritative engine candidates: they are personal annotations, not automatic hints. The player may enter an incorrect digit as long as it does not directly violate row, column or box constraints; `check` compares it with the **verified unique solution**. Completion is detected only when the board matches all 81 digits of that solution, not merely when all cells are nonempty.
 
-Undo/redo in memory is bounded to the most recent **127 state transitions** (128 snapshots, one base state). Each snapshot contains board and notes; reset is a single undoable step. A freshly loaded game resumes the current board and notes with a **new undo history**; previous history is intentionally not serialized. Timer tracks active session wall-clock seconds and persists elapsed seconds on save. Time while the program is closed does **not** count; clock changes may affect elapsed seconds.
+Undo/redo in memory is bounded to the most recent **127 state transitions** (128 snapshots, one base state). Each snapshot contains board and notes; reset is a single undoable step **only when the board or notes actually change**. Repeating reset on an already-cleared board creates no new undo/redo history. A freshly loaded game resumes the current board and notes with a **new undo history**; previous history is intentionally not serialized. Timer tracks active session wall-clock seconds and persists elapsed seconds on save. Time while the program is closed does **not** count; clock changes may affect elapsed seconds.
 
 ## Save file format: `SUDOKU_SAVE_V1`
 

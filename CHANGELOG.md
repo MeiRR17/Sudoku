@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Fix `sudoku play` reset idempotence: compare the 81 board cells and 81 pencil-note masks, not the snapshot's ABI padding bytes. A reset of an untouched/already-cleared game no longer creates phantom undo steps. Add core unit and scripted gameplay regressions for repeat resets and undo restoration.
+
 - Strictly validate the save-file elapsed-time field: only canonical decimal numbers (no leading zeroes) are accepted, even when a tampered file carries a correctly recalculated FNV checksum. Saturate elapsed-time arithmetic before subtraction and perform clock differences without signed `time_t` overflow. Add game E2E tamper and core timer-boundary regressions.
 
 - Publish CLI `validate`/`solve`/`count`/`generate --output` files only after a complete staged write, file flush and sync. POSIX uses private `mkstemp(0600)` and atomic no-replace `link`; Windows uses exclusive staging plus no-replace `MoveFileExA` (native Windows check pending). Refuse existing destination, leave the previous output untouched, and remove transient staging on errors. Add portable golden and Linux fault-injection regressions for permission/file-sync/link failures.
