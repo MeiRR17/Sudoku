@@ -1,6 +1,6 @@
 """Linux-only save persistence fault-injection E2E.
 
-LD_PRELOAD interposes fchmod/fsync/rename. Tests document the distinction between
+LD_PRELOAD interposes fchmod/fsync/rename/link. Tests document the distinction between
 pre-commit failures (old save preserved) and post-rename dir-sync failure
 (target replaced, durability unconfirmed). Does not simulate real power loss.
 """
@@ -89,6 +89,22 @@ with tempfile.TemporaryDirectory(prefix='sudoku-fault-') as directory:
     assert not list(root.glob(born_private.name + '.tmp.*'))
     checks += 1
 
+    # CLI results must not publish a partial *final* output on staged
+    # permission, file fsync or link-publication failure. No stale temp leaks.
+    for fault in ('file-mode', 'file-sync', 'publish-link'):
+        result_path = root / ('cli-' + fault + '.txt')
+        env = os.environ.copy()
+        env['LD_PRELOAD'] = str(library)
+        env['SUDOKU_TEST_FAULT'] = fault
+        result = subprocess.run([str(EXE), 'solve', '--puzzle', PUZZLE,
+                                 '--format', 'compact', '--output', str(result_path)],
+                                capture_output=True, text=True, env=env, timeout=15)
+        assert result.returncode == 4, (fault, result.returncode, result.stderr)
+        assert result.stdout == '' and 'Output ' in result.stderr
+        assert not result_path.exists(), 'failed CLI output published incomplete result'
+        assert not list(root.glob(result_path.name + '.tmp.*')), 'CLI staging file leaked'
+        checks += 1
+
     resume = subprocess.run([str(EXE), 'play', '--resume', str(save)], input='status\nquit\n',
                             text=True, capture_output=True, timeout=15)
     assert resume.returncode == 0 and 'SOLVED!' in resume.stdout
@@ -98,4 +114,4 @@ with tempfile.TemporaryDirectory(prefix='sudoku-fault-') as directory:
     assert not list(root.glob(save.name + '.tmp.*'))
     checks += 1
 
-print(f'SAVE FAULT E2E PASS: {checks} checks (pre-rename preservation, post-rename uncertainty, clean resume)')
+print(f'SAVE FAULT E2E PASS: {checks} checks (pre-rename preservation, post-rename uncertainty, atomic CLI output failure, clean resume)')
