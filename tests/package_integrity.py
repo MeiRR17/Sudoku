@@ -77,6 +77,23 @@ with tempfile.TemporaryDirectory(prefix='sudoku-integrity-') as td:
     update_checksum(mismatch, archive_name)
     tested_fail(mismatch, 'ZIP and TAR.GZ content disagree')
 
+    # Regression: tamper BOTH source formats, then recompute BOTH checksums.
+    # Zip/TAR parity and SHA256SUMS still pass, but the archived manifest
+    # must detect a missing non-mandatory test file.
+    incomplete = scenario('incomplete-source')
+    source_prefix = archive_name[:-len('.zip')]
+    complete_source = PACKAGE.ensure_safe_archive(good / archive_name, source_prefix)
+    omitted = 'tests/source_membership_unit.py'
+    assert omitted in complete_source
+    source_without_test = [(name, data, 0o644)
+                           for name, data in complete_source.items() if name != omitted]
+    for ext, writer in (('.zip', PACKAGE.create_zip),
+                        ('.tar.gz', PACKAGE.create_tar)):
+        filename = source_prefix + ext
+        writer(incomplete / filename, source_prefix, source_without_test)
+        update_checksum(incomplete, filename)
+    tested_fail(incomplete, 'source archive manifest mismatch')
+
     symlink = scenario('symlink')
     def set_symlink(index, item, data):
         if index == 0:
