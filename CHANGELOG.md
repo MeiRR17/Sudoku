@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Preserve the exact solver's documented immutable-givens contract under an aliased in-place API call. `sudoku_analyze_bounded`, `sudoku_analyze` and `sudoku_solve_first` now return `SUDOKU_SOLVE_INVALID` if `first_solution == givens`, without changing the caller's board. Optional solution count and visited-node outputs reset to zero. Add regression assertions in `tests/test_solver.c` and document the explicit requirement for a distinct output board. The extracted production function passed GCC/Clang C11 UBSan isolated alias checks (13/13 each); full native build and release evidence remain HOLD.
+
 - Verify ZIP end-of-central-directory structure and stream-count actual central-directory records **before** constructing Python `ZipFile` and its eager in-memory member list. Enforce 1–1,024 records, an 8 MiB central-directory budget, an 80 MiB total ZIP bound, single-disk canonical ZIP format and no ZIP64/extra trailing data. Add 15 ZIP preflight unit tests, include them in the development source manifest and add a forged-entry-count negative case to package-integrity E2E. 16/16 local source-extracted focused checks passed; full native release tests remain HOLD.
 
 - Fix playable `erase ROW COL` semantics for empty editable cells: erase now clears their pencil notes as well as placed digits, creating one undoable history state; repeated erase on a blank, note-free cell remains a true no-op. Added engine and CLI E2E regressions for notes/erase/undo/redo. Isolated exact-function GCC and Clang C11/UBSan checks passed 20/20 each; complete CMake/CTest and native target acceptance are still pending.
