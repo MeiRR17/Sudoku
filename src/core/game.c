@@ -195,11 +195,21 @@ static int render_save(const SudokuGame *game, char out[SUDOKU_SAVE_MAX_BYTES], 
     int n, tail;
     unsigned i;
     if (!valid_game(game)) return 0;
+    /* The C game structure is public: callers can bypass the mutator APIs.
+     * Do not publish a checksummed file that our own loader must reject.
+     * Validate the full source and current board before opening any file. */
+    if (sudoku_board_validate(&game->givens, NULL) != SUDOKU_OK ||
+        sudoku_board_validate(&game->state.board, NULL) != SUDOKU_OK)
+        return 0;
     sudoku_board_compact(&game->givens, givens);
     sudoku_board_compact(&game->state.board, current);
     for (i=0;i<81u;++i) {
         unsigned note = game->state.notes[i];
-        if(note > 0x3feu || (note & 1u)) return 0;
+        if ((game->givens.cells[i] != 0u &&
+             game->state.board.cells[i] != game->givens.cells[i]) ||
+            (game->state.board.cells[i] != 0u && note != 0u) ||
+            note > 0x3feu || (note & 1u))
+            return 0;
         notes[i*3] = hex_digit(note >> 8);
         notes[i*3+1] = hex_digit(note >> 4);
         notes[i*3+2] = hex_digit(note);
