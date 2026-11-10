@@ -264,6 +264,29 @@ def preflight_zip_directory(path):
         raise ValueError('invalid number of ZIP members')
     if cd_size > MAX_ZIP_DIRECTORY_BYTES or cd_start + cd_size != length - 22:
         raise ValueError('ZIP central directory exceeds budget or offset is invalid')
+    # EOCD counts are attacker-controlled too. Walk the actual central
+    # records without decoding names or instantiating ZipInfo objects.
+    # Require exactly 'entries' records occupying exactly 'cd_size' bytes.
+    with path.open('rb') as source:
+        source.seek(cd_start)
+        end = cd_start + cd_size
+        for _ in range(entries):
+            if source.tell() + 46 > end:
+                raise ValueError('ZIP central directory entry count mismatch')
+            header = source.read(46)
+            if (len(header) != 46 or
+                    header[:4] != b'PK' + bytes((1, 2))):
+                raise ValueError('ZIP central directory entry count mismatch')
+            if (header[20:24] == bytes((255,)) * 4 or
+                    header[24:28] == bytes((255,)) * 4 or
+                    header[42:46] == bytes((255,)) * 4):
+                raise ValueError('ZIP64 entries are not canonical development archives')
+            name_len, extra_len, comment_len = struct.unpack_from('<3H', header, 28)
+            source.seek(name_len + extra_len + comment_len, 1)
+            if source.tell() > end:
+                raise ValueError('ZIP central directory entry length exceeds budget')
+        if source.tell() != end:
+            raise ValueError('ZIP central directory entry count mismatch')
 
 
 def ensure_safe_archive(path, expected_prefix):
