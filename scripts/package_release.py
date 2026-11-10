@@ -28,6 +28,8 @@ EPOCH = 315532800  # 1980-01-01 UTC; valid in both ZIP and TAR.
 MAX_ARCHIVE_FILES = 1024
 MAX_UNPACKED_BYTES = 64 * 1024 * 1024  # Bound untrusted archive verification memory.
 MAX_SOURCE_MANIFEST_BYTES = 256 * 1024  # Refuse oversized manifest before decoding.
+MAX_PORTABLE_PATH_BYTES = 4096  # Avoid pathological component-prefix expansion.
+MAX_PORTABLE_PATH_PARTS = 64
 
 # Windows rejects device names, ADS colons, restricted punctuation, control
 # characters and trailing dots/spaces. Enforce the same canonical names on
@@ -42,6 +44,12 @@ _WINDOWS_DEVICES = frozenset(
 def portable_relative_name(name):
     """True only for canonical POSIX components safe on Windows as well."""
     if not name or not isinstance(name, str):
+        return False
+    # Casefold collision tracking indexes every path prefix. Bound both
+    # pathname length and nesting before creating those intermediate keys.
+    if (len(name) > MAX_PORTABLE_PATH_BYTES
+            or name.count('/') >= MAX_PORTABLE_PATH_PARTS
+            or len(name.encode('utf-8')) > MAX_PORTABLE_PATH_BYTES):
         return False
     for component in name.split('/'):
         if (component in ('', '.', '..') or component.endswith((' ', '.'))
@@ -124,12 +132,14 @@ def source_paths():
     for line in raw:
         if not line or line.startswith('#'):
             continue
+        # Check size, depth and forbidden names before normalizing the path.
+        if not portable_relative_name(line):
+            raise ValueError(f'unsafe source path: {line}')
         name = PurePosixPath(line)
         # A POSIX-only name check is insufficient on Windows: backslashes
         # become path separators and colons can select a drive or NTFS
         # alternate data stream. Forbid both on every host.
-        if (not portable_relative_name(line) or name.is_absolute()
-                or str(name) != line):
+        if (name.is_absolute() or str(name) != line):
             raise ValueError(f'unsafe source path: {line}')
         if line in seen:
             raise ValueError('duplicate source manifest path')
