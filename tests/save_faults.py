@@ -1,6 +1,6 @@
 """Linux-only save persistence fault-injection E2E.
 
-LD_PRELOAD interposes fchmod/fsync/rename/link. Tests document the distinction between
+LD_PRELOAD interposes mkstemp/fchmod/fsync/rename/link. Tests document the distinction between
 pre-commit failures (old save preserved) and post-rename dir-sync failure
 (target replaced, durability unconfirmed). Does not simulate real power loss.
 """
@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix='sudoku-fault-') as directory:
     assert before.startswith(b'SUDOKU_SAVE_V1\n')
     checks += 1
 
-    for fault in ('file-mode', 'file-sync', 'rename'):
+    for fault in ('stage-create', 'file-mode', 'file-sync', 'rename'):
         output = play(save, 'set 1 1 5\nsave\nquit\n', fault, library)
         assert 'Error: file operation failed' in output, (fault, output)
         assert save.read_bytes() == before, 'previous valid game was modified on pre-rename failure'
