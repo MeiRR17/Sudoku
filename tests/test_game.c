@@ -83,6 +83,17 @@ static int check_game(void){
     game->givens.cells[2]=5; /* Invalid original clue configuration. */
     CHECK(sudoku_game_save(game,"game-unit.save")==SUDOKU_GAME_INVALID);
     *game=*orig;
+    /* An empty givens board is locally legal, but nonunique and cannot
+     * be resumed by the strict loader, even if the current board is valid. */
+    memset(&game->givens,0,sizeof game->givens);
+    CHECK(sudoku_board_validate(&game->givens,NULL)==SUDOKU_OK);
+    CHECK(sudoku_game_save(game,"game-unit.save")==SUDOKU_GAME_INVALID);
+    *game=*orig;
+    /* Reject a stale or caller-mutated solution cache even though the
+     * original clues and all placed digits still validate. */
+    game->solution.cells[0]=(uint8_t)(game->solution.cells[0]==9u?8u:9u);
+    CHECK(sudoku_game_save(game,"game-unit.save")==SUDOKU_GAME_INVALID);
+    *game=*orig;
     memset(restored,0xA6,sizeof *restored);
     CHECK(sudoku_game_load(restored,"game-unit.save")==SUDOKU_GAME_OK);
     CHECK(restored->state.notes[2]==(1u<<7));
