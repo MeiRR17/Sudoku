@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Publish CLI `validate`/`solve`/`count`/`generate --output` files only after a complete staged write, file flush and sync. POSIX uses private `mkstemp(0600)` and atomic no-replace `link`; Windows uses exclusive staging plus no-replace `MoveFileExA` (native Windows check pending). Refuse existing destination, leave the previous output untouched, and remove transient staging on errors. Add portable golden and Linux fault-injection regressions for permission/file-sync/link failures.
+
 - Require all mandatory CTest names, and reject required tests explicitly DISABLED or configured to skip; CTest's own exit status may otherwise be green for incomplete/disabled suites. Actual local Python gate regressions 13/13 PASS, plus synthetic CTest JSON discovery and real CTest disabled-property rejection; these do not replace a full Sudoku native build.
 
 - Enforce CTest test-discovery completeness before running any test: native Release requires 22 named checks on Linux and 21 on Windows/macOS; sanitizer/coverage modes require 19. Previously, missing Python E2E registration could leave CTest green without the intended regressions. Added 13 focused unit tests and wired them into the manual Actions gate.
