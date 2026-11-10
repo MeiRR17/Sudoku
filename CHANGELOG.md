@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Strengthen explicit game-save preflight: recheck that the caller-owned givens have exactly one solution and their cached solution still matches the deterministic solver. The earlier board/notes check was insufficient for a valid-but-ambiguous givens board, allowing a checksum-valid file that the strict resume loader would reject. Add C-game regression cases for nonunique givens and stale solution, preserving the prior save; exact-function isolated C11 UBSan checks 14/14 PASS under both GCC and Clang. Full Sudoku CTest still pending.
+
 - Validate all public `SudokuGame` state before serializing a checksum-valid save: givens/current board must satisfy Sudoku constraints, original clues must be preserved, and filled cells must not carry notes. A corrupted caller-owned struct now fails **before staging or overwriting** an existing save, instead of creating a checksum-valid but unloadable file. Add six C unit regression scenarios; isolated strict-GCC and Clang+UBSan harness 12/12 PASS per compiler; full engine tests pending.
 
 - Harden source archive manifest containment: reject a symlinked manifest, symlinks in **any** source path component (including parent directories), Windows-ambiguous backslashes and drive/alternate-stream colons, before reading bytes into source ZIP/TAR. Add nine focused file-system regression cases; all nine passed against the exact extracted source-path function, without claiming full release acceptance.
