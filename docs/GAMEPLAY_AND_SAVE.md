@@ -27,7 +27,7 @@ The `--file` argument reads a puzzle file (max 1 MiB), not a saved game. `--resu
 | `reset` | Restore original givens and clear notes. Can be undone while history remains. |
 | `check` | Count empty and incorrect cells without printing the answer. |
 | `status` | Filled cells, incorrect entries, time spent, available undo and redo steps. |
-| `save [PATH]` | Persist state to a supplied path or the previous `--save`/`--resume` path. |
+| `save [PATH]` | Persist state to a supplied path or the previous `--save`/`--resume` path. The rest of the command line is interpreted as a filename, so spaces work; optional surrounding double quotes are removed. |
 | `quit` / `exit` | Leave without an implicit save. |
 | `help` | Show the interactive command summary. |
 
@@ -58,7 +58,7 @@ Each note mask uses only digit bits 1–9 (`0x000`–`0x3FE`); bit zero must be 
 4. Replace the target with same-filesystem `rename` (POSIX) or `MoveFileExA` with replacement/write-through (Windows). If file write, file sync or rename fails, the temporary file is deleted and the previous target remains unchanged.
 5. **POSIX only:** open the containing directory and call `fsync` on the directory file descriptor, then check `close`. This requests persistence of the rename's directory metadata. The destination is never changed again after this step.
 
-If directory `fsync` fails **after a successful rename**, the game returns a distinct `SUDOKU_GAME_DURABILITY_UNCERTAIN` status. The terminal prints a warning that the **target was already replaced but survival of sudden power loss cannot be promised**; this is not a pre-rename failure and does not claim the previous file survived. The newly written save can normally be loaded immediately; this still does not establish durability after a hardware failure.
+If directory `fsync` fails **after a successful rename**, the game returns a distinct `SUDOKU_GAME_DURABILITY_UNCERTAIN` status. In v0.8.4 the terminal also retains an explicitly supplied save destination as the default for a later bare `save`, because the rename already succeeded. The terminal prints a warning that the **target was already replaced but survival of sudden power loss cannot be promised**; this is not a pre-rename failure and does not claim the previous file survived. The newly written save can normally be loaded immediately; this still does not establish durability after a hardware failure.
 
 An unexpected crash before rename can leave an orphaned temporary file; the old save remains intact, provided the filesystem honors same-directory rename semantics. A power loss at any phase, especially on a filesystem without reliable `fsync`/write barriers, may lose the latest version, so **durability is not formally guaranteed**. Windows uses `_commit` and `MoveFileExA(...WRITE_THROUGH)` but has not been verified on a native Windows runner. POSIX directory `fsync` is a best-effort metadata durability step, not a portable hardware guarantee. This is distinct from the other CLI commands' exclusive-create `--output`, which intentionally refuses overwrite. Do not manually rename a `.tmp.*` file to `.save`; recover from an earlier verified save instead. Tests simulate an orphan and verify that it cannot silently replace the verified save.
 
