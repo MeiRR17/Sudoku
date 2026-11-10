@@ -379,7 +379,7 @@ int main(int argc, char **argv) {
     if (argc >= 2 && strcmp(argv[1], "play") == 0) return sudoku_play_main(argc,argv);
     if (argc == 2 && strcmp(argv[1], "--help") == 0) { help(stdout); return 0; }
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-        puts("Sudoku 0.8.3 (experimental)"); return 0;
+        puts("Sudoku 0.8.4 (experimental)"); return 0;
     }
     if (argc == 2 && strcmp(argv[1], "--demo") == 0) {
         SudokuBoard example, solution;
