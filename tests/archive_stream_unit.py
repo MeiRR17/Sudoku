@@ -1,5 +1,6 @@
 """Test streaming TAR archive bounds without building the Sudoku executable."""
 import importlib.util
+import gzip
 import io
 from pathlib import Path
 import tarfile
@@ -45,6 +46,19 @@ class StreamedTarVerificationTests(unittest.TestCase):
         self.archive([f'part{i:04d}.txt'
                       for i in range(package.MAX_ARCHIVE_FILES + 1)])
         with self.assertRaisesRegex(ValueError, 'invalid number of TAR members'):
+            package.ensure_safe_archive(self.path, PREFIX)
+
+    def test_valid_gzip_with_non_tar_payload_is_rejected_cleanly(self):
+        # Real gzip stream, invalid TAR header: tarfile raises ReadError.
+        with gzip.open(self.path, 'wb') as stream:
+            stream.write(b'not a tar header' * 70)
+        with self.assertRaisesRegex(ValueError, 'malformed archive container'):
+            package.ensure_safe_archive(self.path, PREFIX)
+
+    def test_truncated_gzip_tar_is_rejected_cleanly(self):
+        self.archive(['a.txt'], payload=b'file-data')
+        self.path.write_bytes(self.path.read_bytes()[:18])
+        with self.assertRaisesRegex(ValueError, 'malformed archive container'):
             package.ensure_safe_archive(self.path, PREFIX)
 
     def test_empty_tar_is_rejected(self):
