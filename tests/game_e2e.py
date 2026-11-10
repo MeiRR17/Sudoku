@@ -92,6 +92,22 @@ with tempfile.TemporaryDirectory() as directory:
                          f'save "{incomplete}\nquit\n')
     assert 'Error: malformed quoted save path' in stdout and not incomplete.exists() and not stderr
     checks += 1
+    # Quoting has one optional pair only. Stray or nested quote characters
+    # must not become literal filenames or redirect a previous default save.
+    known_files = {p.name for p in folder.iterdir()}
+    malformed_inputs = [
+        f'save "{folder / "bad nested quote.save"}"'.replace('nested', 'nes"ted'),
+        f'save {folder / "dangling quote.save"}"',
+        f'save {folder / "embedded quote.save"}'.replace('embedded', 'em"bedded'),
+    ]
+    for command in malformed_inputs:
+        stdout, stderr = run(['--puzzle', near_win, '--save', explicit],
+                             command + '\nquit\n')
+        assert stdout.count('Error: malformed quoted save path') == 1
+        assert 'Saved to' not in stdout and not stderr
+        assert explicit.read_bytes() == preserved
+        assert {p.name for p in folder.iterdir()} == known_files
+        checks += 1
     # Gameplay file loading must use bounded heap storage instead of a >1 MiB
     # stack frame (especially relevant for the default Windows/MSVC stack).
     copied = folder / 'unique puzzle from file with spaces.txt'
