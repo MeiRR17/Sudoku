@@ -26,6 +26,7 @@ SOURCE_LIST = ROOT / 'scripts' / 'release_files.txt'
 EPOCH = 315532800  # 1980-01-01 UTC; valid in both ZIP and TAR.
 MAX_ARCHIVE_FILES = 1024
 MAX_UNPACKED_BYTES = 64 * 1024 * 1024  # Bound untrusted archive verification memory.
+MAX_SOURCE_MANIFEST_BYTES = 256 * 1024  # Refuse oversized manifest before decoding.
 
 
 def file_hash(path):
@@ -46,12 +47,34 @@ def target_platform():
     return f'{system}-{arch}'
 
 
+def bounded_file_bytes(path, remaining):
+    """Read at most the remaining package budget; detect concurrent size drift.
+
+    A metadata-only precheck rejects huge sparse files without allocating them.
+    The bounded read also prevents an expanding file from defeating that check.
+    """
+    size = path.stat().st_size
+    if size < 0 or size > remaining:
+        raise ValueError('package content exceeds size budget')
+    with path.open('rb') as stream:
+        payload = stream.read(size + 1)
+    if len(payload) != size:
+        raise ValueError('package source changed during read')
+    return payload
+
+
 def source_paths():
     # A source manifest is itself part of the release trust boundary.
     if SOURCE_LIST.is_symlink():
         raise ValueError('symlinked source manifest refused')
-    raw = SOURCE_LIST.read_text(encoding='utf-8').splitlines()
+    with SOURCE_LIST.open('rb') as stream:
+        manifest = stream.read(MAX_SOURCE_MANIFEST_BYTES + 1)
+    if len(manifest) > MAX_SOURCE_MANIFEST_BYTES:
+        raise ValueError('source manifest exceeds size budget')
+    raw = manifest.decode('utf-8').splitlines()
     files = []
+    seen = set()
+    total = 0
     for line in raw:
         if not line or line.startswith('#'):
             continue
@@ -62,6 +85,11 @@ def source_paths():
         if ('\\' in line or ':' in line or name.is_absolute()
                 or '..' in name.parts or str(name) != line or line == '.'):
             raise ValueError(f'unsafe source path: {line}')
+        if line in seen:
+            raise ValueError('duplicate source manifest path')
+        if len(files) >= MAX_ARCHIVE_FILES:
+            raise ValueError('source manifest exceeds file count budget')
+        seen.add(line)
         # Refuse *every* symlink component, not just a symlink at the leaf.
         # Otherwise a tracked directory symlink could package external data.
         path = ROOT
@@ -71,9 +99,9 @@ def source_paths():
                 raise ValueError(f'symlink in source manifest path: {line}')
         if not path.is_file():
             raise ValueError(f'not a regular source file: {line}')
-        files.append((str(name), path.read_bytes(), 0o644))
-    if len(files) != len(set(x[0] for x in files)):
-        raise ValueError('duplicate source manifest path')
+        payload = bounded_file_bytes(path, MAX_UNPACKED_BYTES - total)
+        total += len(payload)
+        files.append((str(name), payload, 0o644))
     if not files:
         raise ValueError('empty source manifest')
     return sorted(files)
@@ -81,14 +109,19 @@ def source_paths():
 
 def installed_paths(prefix):
     files = []
+    total = 0
     for file in sorted(prefix.rglob('*')):
         if file.is_symlink():
             raise ValueError('symlink in installation tree, refusing to package')
         if not file.is_file():
             continue
+        if len(files) >= MAX_ARCHIVE_FILES:
+            raise ValueError('installation exceeds file count budget')
         rel = file.relative_to(prefix).as_posix()
         mode = 0o755 if rel.startswith('bin/') else 0o644
-        files.append((rel, file.read_bytes(), mode))
+        payload = bounded_file_bytes(file, MAX_UNPACKED_BYTES - total)
+        total += len(payload)
+        files.append((rel, payload, mode))
     if not any(p.startswith('bin/sudoku') for p, _, _ in files):
         raise ValueError('sudoku executable missing from staged installation')
     return files
