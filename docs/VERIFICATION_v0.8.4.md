@@ -74,3 +74,10 @@ An isolated C11 harness using the relevant source normalization/quote validation
 ## CTest inventory fail-closed gate (source implementation; native run pending)
 
 `scripts/quality_gate.py` now obtains a machine-readable `ctest --show-only=json-v1` inventory after configuring/building and before running `ctest --output-on-failure`. It refuses success when any required named unit, CLI, golden, gameplay or packaging test is missing (e.g. because CMake failed to discover Python). Native Release requires **22 Linux checks** or **21 Windows/macOS checks**; sanitizer and coverage builds require **19** because instrumented packaging is intentionally excluded. Malformed JSON, duplicate names and unnamed tests also fail. `tests/quality_gate_unit.py` exercises these invariants without a C compiler. The manual-only workflow runs both Python `*_unit.py` test modules before the build. This gate does **not** constitute a successful native CMake/CTest run until it is actually executed against this PR SHA.
+
+
+### Measured CTest inventory guard checks — 2026-11-10
+
+Local copies of `scripts/quality_gate.py` and `tests/quality_gate_unit.py` matched the exact GitHub Git blob identifiers `a5f1c3d11f21f89a263a22343492934825d9d164` and `2993fd8c29cd1b569f65487ee55c4ffb785970c2`. The command `python -B -m unittest discover -s tests -p quality_gate_unit.py -v` **executed and passed 13/13 tests** (0.001 s). Verified mandatory inventories are 22 Linux native, 21 Windows/macOS native and 19 instrumented; missing/duplicate/unnamed tests, disabled tests and CTest skip policies fail closed.
+
+The CTest CLI was also executed against a **synthetic, single-test CMake project**: `ctest --show-only=json-v1` returned a real JSON listing, which the new guard correctly rejected as incomplete. A second synthetic CMake project declared `DISABLED TRUE`; its real CTest JSON `DISABLED` property was correctly rejected by the guard even after the rest of the mandatory names were simulated. These are real tool-integration checks of the gate, **not** Sudoku's full CMake build or CTest acceptance. No acceptance receipt, Windows x64/MSVC or macOS arm64 native result is claimed.

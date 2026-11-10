@@ -4,7 +4,9 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
-- Enforce CTest test-discovery completeness before running any test: native Release requires 22 named checks on Linux and 21 on Windows/macOS; sanitizer/coverage modes require 19. Previously, missing Python E2E registration could leave CTest green without the intended regressions. Added 11 focused unit tests and wired them into the manual Actions gate.
+- Require all mandatory CTest names, and reject required tests explicitly DISABLED or configured to skip; CTest's own exit status may otherwise be green for incomplete/disabled suites. Actual local Python gate regressions 13/13 PASS, plus synthetic CTest JSON discovery and real CTest disabled-property rejection; these do not replace a full Sudoku native build.
+
+- Enforce CTest test-discovery completeness before running any test: native Release requires 22 named checks on Linux and 21 on Windows/macOS; sanitizer/coverage modes require 19. Previously, missing Python E2E registration could leave CTest green without the intended regressions. Added 13 focused unit tests and wired them into the manual Actions gate.
 
 - Reject unpaired or embedded double quotes in interactive `save` filenames; only an optional matched outer quote pair is accepted. Add regression coverage proving malformed paths do not create unexpected files or overwrite the configured default save.
 
