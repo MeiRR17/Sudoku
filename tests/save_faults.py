@@ -69,7 +69,7 @@ with tempfile.TemporaryDirectory(prefix='sudoku-fault-') as directory:
     env['LD_PRELOAD'] = str(library)
     env['SUDOKU_TEST_FAULT'] = 'dir-sync'
     manual_run = subprocess.run([str(EXE), 'play', '--puzzle', PUZZLE],
-                                input=f'save {manual}\\nsave\\nquit\\n'.replace('\\n', '\n'),
+                                input=f'save {manual}\nsave\nquit\n',
                                 text=True, capture_output=True, env=env, timeout=15)
     assert manual_run.returncode == 0 and not manual_run.stderr
     assert manual_run.stdout.count('Warning: save replaced target') == 2
