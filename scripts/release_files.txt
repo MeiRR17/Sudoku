@@ -23,6 +23,7 @@ docs/VERIFICATION_v0.8.0.md
 docs/VERIFICATION_v0.8.1.md
 docs/VERIFICATION_v0.8.2.md
 docs/VERIFICATION_v0.8.3.md
+docs/VERIFICATION_v0.8.4.md
 include/sudoku/board.h
 include/sudoku/game.h
 include/sudoku/generator.h
