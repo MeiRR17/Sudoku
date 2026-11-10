@@ -55,3 +55,12 @@ On Linux, a minimal standalone C11 reproducer using the exact mode-setting calls
 The earlier version of the test-only Linux `tests/fault_inject.c` source was compiled separately using `gcc -std=c11 -Wall -Wextra -Werror -shared -fPIC -O0`. The resulting interposer returned `EPERM` when `SUDOKU_TEST_FAULT=file-mode` was set and succeeded after that fault was cleared. This establishes **only** the isolated fault-interposer behavior. No Sudoku executable was compiled or executed, and no project CTest gate, source package, Windows/MSVC or macOS check is claimed. All remaining target-specific acceptance gates remain pending.
 
 **Evidence status:** these commands are reproducible instructions, **not claimed observed executions** in this update. The GitHub write/PR confirms source delivery, not compilation or cross-platform acceptance. Windows x64/MSVC and macOS arm64 native tests, owner-approved licensing, artifact authenticity and release-grade rollback remain open in [issue #10](https://github.com/MeiRR17/Sudoku/issues/10). No v0.9 Release Candidate, v1.0 release, hosted CI run or official tag is claimed.
+
+
+### Measured isolated receipt publication tests — 2026-11-10
+
+The acceptance receipt writer now creates the local staging file with `os.open(O_CREAT | O_EXCL, 0600)`, flushes and `fsync`s the complete JSON, then uses a same-directory hard link to publish it **without replacing an existing destination**. A pre-existing temporary symlink is not followed. If the filesystem cannot create a hard link, evidence publication fails closed and leaves no success receipt. No other release metadata or official artifact is produced.
+
+**Observed Linux tests:** `python -B -m unittest discover -s tests -p platform_acceptance_unit.py -v` ran **14 tests; all passed** (0.006 seconds on the measured repeat). The five new cases check private file mode, no-overwrite behavior, symlink refusal, hardlink-not-supported cleanup and failed-serialization cleanup. Source copies match the exact GitHub Git blob hashes `207bc0c6cd28a4234e75a1da835d3f7cfe41e7ad` for `scripts/platform_acceptance.py` and `273fc5b478565855697c21900e7353cc23097534` for `tests/platform_acceptance_unit.py`.
+
+These tests validate the **Python receipt writer only** on Linux. No Sudoku C11 project compilation/CTest, full platform acceptance receipt, macOS arm64 or Windows/MSVC test was performed. Receipt-file hardlink behavior on those native platforms remains unverified.
