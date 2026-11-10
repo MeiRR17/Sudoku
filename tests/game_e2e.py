@@ -45,6 +45,16 @@ with tempfile.TemporaryDirectory() as directory:
     stdout, stderr = run(['--resume', explicit], 'status\nquit\n')
     assert 'SOLVED!' in stdout and not stderr
     checks += 1
+    # A failed explicit save does not replace the last working default path.
+    stdout, stderr = run(['--puzzle', near_win, '--save', explicit],
+                         f'save {folder}\\nsave\\nquit\\n')
+    assert 'Error: file operation failed' in stdout
+    assert f'Saved to {explicit}' in stdout and not stderr
+    checks += 1
+    # Discard an overlong input command as one unit (no stray partial command).
+    stdout, stderr = run(['--puzzle', near_win], 'save ' + 'x' * 4200 + '\nquit\n')
+    assert 'Error: command too long' in stdout and 'Goodbye.' in stdout and not stderr
+    checks += 1
     quoted = folder / 'quoted game path.save'
     stdout, stderr = run(['--puzzle', near_win], f'save "{quoted}"\nquit\n')
     assert f'Saved to {quoted}' in stdout and quoted.is_file() and not stderr
