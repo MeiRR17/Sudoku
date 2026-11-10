@@ -171,7 +171,7 @@ static void print_notes(const SudokuGame *game,unsigned r,unsigned c){
     putchar('\n');
 }
 static int event_loop(SudokuGame *game,PlayOptions *opt){
-    char line[256];
+    char line[4096 + 32];
     char last_save_path[4097];
     display(game);
     while(fgets(line,sizeof line,stdin)){
@@ -183,6 +183,58 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             int ch;
             while((ch=fgetc(stdin))!='\n'&&ch!=EOF){}
             puts("Error: command too long");continue;
+        }
+        /* Handle save before strtok: the complete remainder of the command is
+         * a path, so filenames containing whitespace survive tokenization.
+         * An optional surrounding pair of double quotes is accepted. */
+        {
+            char *first = line;
+            while (*first == ' ' || *first == '\t') ++first;
+            if (strncmp(first, "save", 4u) == 0 &&
+                (first[4] == '\0' || first[4] == ' ' || first[4] == '\t' ||
+                 first[4] == '\r' || first[4] == '\n')) {
+                char *path = first + 4;
+                const char *target;
+                size_t path_len;
+                SudokuGameStatus saved;
+                while (*path == ' ' || *path == '\t') ++path;
+                path_len = strlen(path);
+                while (path_len &&
+                       (path[path_len - 1u] == ' ' || path[path_len - 1u] == '\t' ||
+                        path[path_len - 1u] == '\r' || path[path_len - 1u] == '\n'))
+                    path[--path_len] = '\0';
+                if (path_len >= 2u && path[0] == '"' && path[path_len - 1u] == '"') {
+                    path[path_len - 1u] = '\0';
+                    ++path;
+                }
+                target = *path ? path : opt->save;
+                if (!target || !*target) {
+                    puts("Error: supply a path, e.g. save puzzle.save");
+                    continue;
+                }
+                if (strlen(target) > 4096u) {
+                    puts("Error: save path too long");
+                    continue;
+                }
+                saved = sudoku_game_save(game, target);
+                if (saved != SUDOKU_GAME_OK &&
+                    saved != SUDOKU_GAME_DURABILITY_UNCERTAIN) {
+                    printf("Error: %s\n", sudoku_game_status_text(saved));
+                    continue;
+                }
+                /* A post-rename sync warning means the target WAS replaced:
+                 * remember the explicit path even when durability is uncertain. */
+                if (*path) {
+                    (void)strcpy(last_save_path, target);
+                    opt->save = last_save_path;
+                    target = opt->save;
+                }
+                if (saved == SUDOKU_GAME_DURABILITY_UNCERTAIN)
+                    printf("Warning: %s\n", sudoku_game_status_text(saved));
+                else
+                    printf("Saved to %s (version 1, checksummed, atomic replace).\n", target);
+                continue;
+            }
         }
         command=strtok(line," \t\r\n");
         if(!command)continue;
@@ -203,27 +255,6 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                    sudoku_game_elapsed(game),game->history_cursor,
                    game->history_len-1u-game->history_cursor);
             if(sudoku_game_won(game))puts("SOLVED!");
-            continue;
-        }
-        if(strcmp(command,"save")==0&&!b){
-            const char *path=a?a:opt->save;
-            if(!path){puts("Error: supply a path, e.g. save puzzle.save");continue;}
-            if(strlen(path)>4096u){puts("Error: save path too long");continue;}
-            status=sudoku_game_save(game,path);
-            if(status==SUDOKU_GAME_DURABILITY_UNCERTAIN){
-                printf("Warning: %s\n",sudoku_game_status_text(status));
-                continue;
-            }
-            if(status!=SUDOKU_GAME_OK)printf("Error: %s\n",sudoku_game_status_text(status));
-            else{
-                /* Paths extracted by strtok point into reused input line. */
-                if(a){
-                    if(strlen(path)>4096u){puts("Error: save path too long");continue;}
-                    (void)strcpy(last_save_path,path);
-                    opt->save=last_save_path;
-                }
-                printf("Saved to %s (version 1, checksummed, atomic replace).\n",path);
-            }
             continue;
         }
         if(strcmp(command,"undo")==0&&!a)status=sudoku_game_undo(game);
