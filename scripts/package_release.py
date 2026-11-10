@@ -14,6 +14,7 @@ import platform
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tarfile
@@ -28,6 +29,8 @@ EPOCH = 315532800  # 1980-01-01 UTC; valid in both ZIP and TAR.
 MAX_ARCHIVE_FILES = 1024
 MAX_UNPACKED_BYTES = 64 * 1024 * 1024  # Bound untrusted archive verification memory.
 MAX_SOURCE_MANIFEST_BYTES = 256 * 1024  # Refuse oversized manifest before decoding.
+MAX_ZIP_ARCHIVE_BYTES = MAX_UNPACKED_BYTES + 16 * 1024 * 1024
+MAX_ZIP_DIRECTORY_BYTES = 8 * 1024 * 1024
 MAX_PORTABLE_PATH_BYTES = 4096  # Avoid pathological component-prefix expansion.
 MAX_PORTABLE_PATH_PARTS = 64
 
@@ -233,6 +236,36 @@ def _safe_member_name(name, expected_prefix):
     return relative_name
 
 
+def preflight_zip_directory(path):
+    """Bound ZIP central-directory metadata before ZipFile builds filelist.
+
+    The canonical Sudoku packager produces one single-disk ZIP, with an
+    ordinary 22-byte EOCD record, zero archive comment and no ZIP64 records.
+    Checking the tail *before* constructing ZipFile prevents an attacker from
+    forcing its eager central-directory parser to allocate many member objects.
+    This is an input-format check, not authentication.
+    """
+    length = path.stat().st_size
+    if length < 22 or length > MAX_ZIP_ARCHIVE_BYTES:
+        raise ValueError('ZIP container exceeds size budget or is truncated')
+    with path.open('rb') as source:
+        source.seek(-22, 2)
+        tail = source.read(22)
+    if len(tail) != 22:
+        raise ValueError('ZIP directory trailer is truncated')
+    signature, disk, start_disk, disk_entries, entries, cd_size, cd_start, comment = (
+        struct.unpack('<4s4H2IH', tail)
+    )
+    if signature != b'PK\\x05\\x06' or comment != 0:
+        raise ValueError('ZIP canonical directory trailer missing')
+    if disk or start_disk or disk_entries != entries:
+        raise ValueError('multi-disk ZIP archive not supported')
+    if entries < 1 or entries > MAX_ARCHIVE_FILES:
+        raise ValueError('invalid number of ZIP members')
+    if cd_size > MAX_ZIP_DIRECTORY_BYTES or cd_start + cd_size != length - 22:
+        raise ValueError('ZIP central directory exceeds budget or offset is invalid')
+
+
 def ensure_safe_archive(path, expected_prefix):
     """Read only bounded, regular files beneath one expected top-level dir."""
     members = {}
@@ -268,6 +301,7 @@ def ensure_safe_archive(path, expected_prefix):
             if not names:
                 raise ValueError('invalid number of TAR members')
     else:
+        preflight_zip_directory(path)
         with zipfile.ZipFile(path) as archive:
             infos = archive.infolist()
             if not 1 <= len(infos) <= MAX_ARCHIVE_FILES:
