@@ -236,6 +236,14 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                         continue;
                     }
                 }
+                /* Double quotes delimit an optional *outer* pair; embedded
+                 * or stray quote marks are malformed syntax, not literal
+                 * filenames. Reject rather than saving to an unexpected
+                 * destination (which differs across POSIX and Windows). */
+                if (strchr(path, '"') != NULL) {
+                    puts("Error: malformed quoted save path");
+                    continue;
+                }
                 target = *path ? path : opt->save;
                 if (!target || !*target) {
                     puts("Error: supply a path, e.g. save puzzle.save");
