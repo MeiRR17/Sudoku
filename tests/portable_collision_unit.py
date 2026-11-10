@@ -115,6 +115,23 @@ class PortableCollisionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'nonportable path collision'):
             package.installed_paths(root)
 
+    def test_overlong_or_deep_paths_rejected_before_casefold(self):
+        names = ('a' * (package.MAX_PORTABLE_PATH_BYTES + 1),
+                 'é' * (package.MAX_PORTABLE_PATH_BYTES // 2 + 1),
+                 '/'.join(['a'] * (package.MAX_PORTABLE_PATH_PARTS + 1)))
+        for name in names:
+            with self.subTest(length=len(name)):
+                self.assertFalse(package.portable_relative_name(name))
+        self.assertTrue(package.portable_relative_name(
+            '/'.join(['a'] * package.MAX_PORTABLE_PATH_PARTS)))
+
+    def test_long_archive_names_fail_closed(self):
+        huge = 'a' * (package.MAX_PORTABLE_PATH_BYTES + 1)
+        for archive in (self.tar, self.zip):
+            with self.subTest(format=archive.__name__):
+                with self.assertRaisesRegex(ValueError, 'unsafe archive member'):
+                    package.ensure_safe_archive(archive([huge]), PREFIX)
+
     def test_only_a_bounded_number_of_prefixes_is_retained(self):
         seen = {}
         package.claim_portable_path('a/b/c', seen)
