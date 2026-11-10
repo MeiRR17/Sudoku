@@ -29,6 +29,18 @@ class EvidenceWorkflowTests(unittest.TestCase):
         self.assertLess(gate, upload)
         self.assertRegex(source, r'(?m)^        uses: actions/upload-artifact@[0-9a-f]{40} # v[0-9.]+$')
 
+    def test_full_local_archive_validation_precedes_upload(self):
+        source = workflow()
+        native = source.index('run: python scripts/platform_acceptance.py ')
+        local = source.index('run: python scripts/verify_receipt_matrix.py ')
+        upload = source.index('uses: actions/upload-artifact@')
+        self.assertLess(native, local)
+        self.assertLess(local, upload)
+        self.assertIn('python scripts/verify_receipt_matrix.py '
+                      '--require-sha "${{ github.sha }}" '
+                      '--local dist --expected "${{ inputs.runner_os }}"', source)
+        self.assertIn('NOT uploaded', source)
+
     def test_only_receipt_and_hash_manifest_retained(self):
         source = workflow()
         self.assertIn('if-no-files-found: error', source)
