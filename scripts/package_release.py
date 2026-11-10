@@ -314,6 +314,19 @@ class _BoundedTarGzipReader:
         return chunk
 
 
+def canonical_archive_mode(relative_name, expected_prefix):
+    """Require the exact portable permission bits emitted by the packager.
+
+    Development source archives contain read-only text/source files (0644).
+    Installed binaries in bin/ use 0755, while libraries and headers use 0644.
+    Checking modes prevents a byte-identical but non-executable Unix binary
+    from passing ZIP/TAR parity and checksum verification.
+    """
+    if relative_name.startswith('bin/') and not expected_prefix.endswith('-source'):
+        return 0o755
+    return 0o644
+
+
 def _ensure_safe_archive(path, expected_prefix):
     """Read only bounded, regular files beneath one expected top-level dir."""
     members = {}
@@ -341,6 +354,8 @@ def _ensure_safe_archive(path, expected_prefix):
                         if not item.isfile() or item.size < 0:
                             raise ValueError('non-regular TAR member')
                         rel = _safe_member_name(item.name, expected_prefix)
+                        if item.mode != canonical_archive_mode(rel, expected_prefix):
+                            raise ValueError('non-canonical TAR file mode')
                         if rel in members:
                             raise ValueError('archive entries empty, duplicated or not sorted')
                         claim_portable_path(rel, seen_portable)
@@ -384,6 +399,8 @@ def _ensure_safe_archive(path, expected_prefix):
                 if item.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
                     raise ValueError('unsupported ZIP compression method')
                 rel = _safe_member_name(item.filename, expected_prefix)
+                if mode != (stat.S_IFREG | canonical_archive_mode(rel, expected_prefix)):
+                    raise ValueError('non-canonical ZIP file mode')
                 if rel in members:
                     raise ValueError('archive entries empty, duplicated or not sorted')
                 claim_portable_path(rel, seen_portable)
