@@ -19,6 +19,7 @@ import sys
 import tarfile
 import tempfile
 import zipfile
+import unicodedata
 
 VERSION = '0.8.4'
 ROOT = Path(__file__).resolve().parent.parent
@@ -49,6 +50,28 @@ def portable_relative_name(name):
                 or component.split('.', 1)[0].rstrip(' ').upper() in _WINDOWS_DEVICES):
             return False
     return True
+
+
+def claim_portable_path(name, known):
+    """Reject case/Unicode aliases and file-versus-directory collisions.
+
+    On case-insensitive extraction, different POSIX spellings can resolve to
+    the same file or directory. Track every normalized path prefix so even
+    distinct child names under "Assets/" and "assets/" cannot be packaged.
+    The bounded archive file-count limit bounds this dictionary too.
+    """
+    parts = name.split('/')
+    for i in range(1, len(parts) + 1):
+        prefix = '/'.join(parts[:i])
+        key = unicodedata.normalize('NFC', prefix).casefold()
+        old = known.get(key)
+        is_file = i == len(parts)
+        if old is not None:
+            old_prefix, old_is_file = old
+            if old_prefix != prefix or old_is_file or is_file:
+                raise ValueError(f'nonportable path collision: {name!r} versus {old_prefix!r}')
+        else:
+            known[key] = (prefix, is_file)
 
 
 def file_hash(path):
@@ -96,6 +119,7 @@ def source_paths():
     raw = manifest.decode('utf-8').splitlines()
     files = []
     seen = set()
+    seen_portable = {}
     total = 0
     for line in raw:
         if not line or line.startswith('#'):
@@ -111,6 +135,7 @@ def source_paths():
             raise ValueError('duplicate source manifest path')
         if len(files) >= MAX_ARCHIVE_FILES:
             raise ValueError('source manifest exceeds file count budget')
+        claim_portable_path(line, seen_portable)
         seen.add(line)
         # Refuse *every* symlink component, not just a symlink at the leaf.
         # Otherwise a tracked directory symlink could package external data.
@@ -133,6 +158,7 @@ def installed_paths(prefix):
     files = []
     total = 0
     seen = 0
+    seen_portable = {}
     # Walk lazily: sorting rglob() before applying count budgets allocates
     # an unbounded path list, even when the eventual archive has few files.
     for file in prefix.rglob('*'):
@@ -148,6 +174,7 @@ def installed_paths(prefix):
         rel = file.relative_to(prefix).as_posix()
         if not portable_relative_name(rel):
             raise ValueError(f'unsafe installed path: {rel}')
+        claim_portable_path(rel, seen_portable)
         mode = 0o755 if rel.startswith('bin/') else 0o644
         payload = bounded_file_bytes(file, MAX_UNPACKED_BYTES - total)
         total += len(payload)
@@ -200,6 +227,7 @@ def ensure_safe_archive(path, expected_prefix):
     """Read only bounded, regular files beneath one expected top-level dir."""
     members = {}
     names = []
+    seen_portable = {}
     unpacked = 0
     if path.name.endswith('.tar.gz'):
         # r|gz reads one member at a time. getmembers() would eagerly
@@ -214,6 +242,7 @@ def ensure_safe_archive(path, expected_prefix):
                 rel = _safe_member_name(item.name, expected_prefix)
                 if rel in members:
                     raise ValueError('archive entries empty, duplicated or not sorted')
+                claim_portable_path(rel, seen_portable)
                 unpacked += item.size
                 if unpacked > MAX_UNPACKED_BYTES:
                     raise ValueError('TAR unpacked content exceeds size budget')
@@ -240,6 +269,9 @@ def ensure_safe_archive(path, expected_prefix):
                 if item.is_dir() or item.create_system != 3 or not stat.S_ISREG(mode):
                     raise ValueError('non-regular ZIP member')
                 rel = _safe_member_name(item.filename, expected_prefix)
+                if rel in members:
+                    raise ValueError('archive entries empty, duplicated or not sorted')
+                claim_portable_path(rel, seen_portable)
                 unpacked += item.file_size
                 if unpacked > MAX_UNPACKED_BYTES:
                     raise ValueError('ZIP unpacked content exceeds size budget')
