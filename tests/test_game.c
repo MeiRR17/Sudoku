@@ -17,6 +17,9 @@ static int check_game(void){
     CHECK(game && restored && orig);
     CHECK(sudoku_board_parse(&board,(const unsigned char*)classic,81,NULL)==SUDOKU_OK);
     CHECK(sudoku_game_start(game,&board)==SUDOKU_GAME_OK);
+    CHECK(game->history_len==1u && game->history_cursor==0u);
+    CHECK(sudoku_game_reset(game)==SUDOKU_GAME_OK);
+    CHECK(game->history_len==1u && game->history_cursor==0u);
     CHECK(sudoku_game_empty(game)>0u);
     CHECK(sudoku_game_set(game,1,1,4)==SUDOKU_GAME_GIVEN);
     CHECK(sudoku_game_erase(game,1,1)==SUDOKU_GAME_GIVEN);
@@ -47,6 +50,11 @@ static int check_game(void){
     CHECK(sudoku_game_redo(game)==SUDOKU_GAME_NO_HISTORY);
     CHECK(sudoku_game_reset(game)==SUDOKU_GAME_OK);
     CHECK(game->state.board.cells[2]==0&&game->state.notes[2]==0);
+    {
+        unsigned cursor = game->history_cursor, length = game->history_len;
+        CHECK(sudoku_game_reset(game)==SUDOKU_GAME_OK);
+        CHECK(game->history_cursor==cursor && game->history_len==length);
+    }
     CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
     CHECK(game->state.board.cells[2]==4);
     CHECK(sudoku_game_redo(game)==SUDOKU_GAME_OK);
