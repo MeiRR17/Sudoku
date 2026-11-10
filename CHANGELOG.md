@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Reject unpaired or embedded double quotes in interactive `save` filenames; only an optional matched outer quote pair is accepted. Add regression coverage proving malformed paths do not create unexpected files or overwrite the configured default save.
+
 - Harden local platform-receipt publication: exclusive mode-0600 staging, flushed and fsynced JSON, and atomic no-overwrite publication via same-directory hard link. Existing receipt or staging symlink cannot be clobbered; unsupported hard links fail closed. Added five isolated regressions (14/14 total Python acceptance-guard unit tests passed on Linux); native platform release gates remain open.
 
 - Bind native platform evidence to an explicitly required Git SHA (`GITHUB_SHA` in manual Actions), reject untracked/modified source files before and after the gate, and add fast stdlib guard tests for incorrect SHAs, dirty trees and compiler identities.
