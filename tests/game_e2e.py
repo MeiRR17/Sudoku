@@ -180,6 +180,16 @@ with tempfile.TemporaryDirectory() as directory:
     stdout, stderr = run(['--puzzle', near_win], f'save {folder}\nquit\n')
     assert 'file operation failed' in stdout and not stderr
     checks += 1
+    # Erase also removes pencil notes on an empty editable cell. Undo must
+    # restore the notes, and redo must erase them again.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'note 1 1 5\nnotes 1 1\nerase 1 1\nnotes 1 1\n'
+                         'undo\nnotes 1 1\nredo\nnotes 1 1\nquit\n')
+    assert stdout.count('Notes for row 1 col 1: 5') == 2, stdout
+    assert stdout.count('Notes for row 1 col 1:\n') == 2, stdout
+    assert not stderr
+    checks += 1
+
     # A reset on an untouched board must not create phantom undo history.
     stdout, stderr = run(['--puzzle', near_win], 'reset\nstatus\nundo\nquit\n')
     assert 'undo 0, redo 0' in stdout and 'no action to undo or redo' in stdout
