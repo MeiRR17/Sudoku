@@ -33,6 +33,8 @@ MAX_SOURCE_MANIFEST_BYTES = 256 * 1024  # Refuse oversized manifest before decod
 MAX_ZIP_ARCHIVE_BYTES = MAX_UNPACKED_BYTES + 16 * 1024 * 1024
 MAX_ZIP_DIRECTORY_BYTES = 8 * 1024 * 1024
 MAX_TAR_ARCHIVE_BYTES = MAX_UNPACKED_BYTES + 16 * 1024 * 1024
+# Include TAR headers, per-entry PAX metadata and zero padding in decoded budget.
+MAX_TAR_DECODED_BYTES = MAX_UNPACKED_BYTES + MAX_ARCHIVE_FILES * 8192 + 16384
 MAX_CHECKSUM_MANIFEST_BYTES = 4096
 MAX_PORTABLE_PATH_BYTES = 4096  # Avoid pathological component-prefix expansion.
 MAX_PORTABLE_PATH_PARTS = 64
@@ -292,6 +294,26 @@ def preflight_zip_directory(path):
             raise ValueError('ZIP central directory entry count mismatch')
 
 
+class _BoundedTarGzipReader:
+    """Count *all* decoded GZIP bytes, including TAR headers and padding."""
+
+    def __init__(self, stream):
+        self.stream = stream
+        self.total = 0
+
+    def read(self, size=-1):
+        # Streaming TAR normally requests fixed-size blocks. Never permit an
+        # unbounded read even when a caller supplies -1.
+        if size is None or size < 0:
+            size = 65536
+        remaining = MAX_TAR_DECODED_BYTES - self.total
+        chunk = self.stream.read(min(size, remaining + 1))
+        self.total += len(chunk)
+        if self.total > MAX_TAR_DECODED_BYTES:
+            raise ValueError('TAR decoded stream exceeds size budget')
+        return chunk
+
+
 def _ensure_safe_archive(path, expected_prefix):
     """Read only bounded, regular files beneath one expected top-level dir."""
     members = {}
@@ -306,30 +328,42 @@ def _ensure_safe_archive(path, expected_prefix):
         # r|gz reads one member at a time. getmembers() would eagerly
         # materialize attacker-controlled metadata before applying the
         # MAX_ARCHIVE_FILES limit, defeating bounded-memory verification.
-        with tarfile.open(path, 'r|gz') as archive:
-            for item in archive:
-                if len(names) >= MAX_ARCHIVE_FILES:
+        # The tarfile iterator stops at the TAR end marker without necessarily
+        # reading the GZIP trailer. Drain the decompressor so CRC32 and ISIZE
+        # are checked even when all file members looked valid.
+        with path.open('rb') as compressed:
+            with gzip.GzipFile(fileobj=compressed, mode='rb') as decoder:
+                bounded = _BoundedTarGzipReader(decoder)
+                with tarfile.open(fileobj=bounded, mode='r|') as archive:
+                for item in archive:
+                    if len(names) >= MAX_ARCHIVE_FILES:
+                        raise ValueError('invalid number of TAR members')
+                    if not item.isfile() or item.size < 0:
+                        raise ValueError('non-regular TAR member')
+                    rel = _safe_member_name(item.name, expected_prefix)
+                    if rel in members:
+                        raise ValueError('archive entries empty, duplicated or not sorted')
+                    claim_portable_path(rel, seen_portable)
+                    unpacked += item.size
+                    if unpacked > MAX_UNPACKED_BYTES:
+                        raise ValueError('TAR unpacked content exceeds size budget')
+                    stream = archive.extractfile(item)
+                    if stream is None:
+                        raise ValueError('unreadable TAR member')
+                    with stream:
+                        payload = stream.read(item.size + 1)
+                    if len(payload) != item.size:
+                        raise ValueError('TAR member length mismatch')
+                    members[rel] = payload
+                    names.append(item.name)
+                if not names:
                     raise ValueError('invalid number of TAR members')
-                if not item.isfile() or item.size < 0:
-                    raise ValueError('non-regular TAR member')
-                rel = _safe_member_name(item.name, expected_prefix)
-                if rel in members:
-                    raise ValueError('archive entries empty, duplicated or not sorted')
-                claim_portable_path(rel, seen_portable)
-                unpacked += item.size
-                if unpacked > MAX_UNPACKED_BYTES:
-                    raise ValueError('TAR unpacked content exceeds size budget')
-                stream = archive.extractfile(item)
-                if stream is None:
-                    raise ValueError('unreadable TAR member')
-                with stream:
-                    payload = stream.read(item.size + 1)
-                if len(payload) != item.size:
-                    raise ValueError('TAR member length mismatch')
-                members[rel] = payload
-                names.append(item.name)
-            if not names:
-                raise ValueError('invalid number of TAR members')
+                while True:
+                    padding = bounded.read(65536)
+                    if not padding:
+                        break
+                    if any(padding):
+                        raise ValueError('non-zero trailing TAR data')
     else:
         preflight_zip_directory(path)
         with zipfile.ZipFile(path) as archive:
