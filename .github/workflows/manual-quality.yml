@@ -39,3 +39,16 @@ jobs:
         # A receipt exists only after the quality gate and package verification
         # succeed on the selected host; this workflow remains manual-only.
         run: python scripts/platform_acceptance.py --expected "${{ inputs.runner_os }}" --mode "${{ inputs.full_linux_gate && inputs.runner_os == 'ubuntu-latest' && 'full' || 'fast' }}" --require-sha "${{ github.sha }}"
+      - name: Preserve unsigned acceptance evidence for independent review
+        # Only retained after the exact-SHA gate and archive checks succeeded.
+        # Never publish unlicensed development binaries or a GitHub Release.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sudoku-evidence-${{ inputs.runner_os }}-${{ github.sha }}
+          path: |
+            dist/platform-receipt.json
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
