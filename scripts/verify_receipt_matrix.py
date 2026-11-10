@@ -5,6 +5,7 @@ Consistency checks are NOT artifact authenticity, native-run verification,
 license approval, or a production release. No network or package install.
 """
 import argparse
+import hashlib
 from datetime import datetime
 import json
 from pathlib import Path
@@ -19,6 +20,9 @@ PLATFORMS = {
 }
 SHA_RE = re.compile(r'[0-9a-f]{40}\Z')
 DIGEST_RE = re.compile(r'[0-9a-f]{64}\Z')
+MAX_RECEIPT_BYTES = 16 * 1024
+MAX_MANIFEST_BYTES = 4096
+MAX_ARCHIVE_BYTES = 80 * 1024 * 1024  # Same container cap as package_release.py.
 
 
 def unique_dict(items):
@@ -31,8 +35,40 @@ def unique_dict(items):
     return result
 
 
+def bounded_text(path, maximum, encoding):
+    """Refuse symlinked or overlong evidence input before decoding."""
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f'missing or unsafe evidence file: {path.name}')
+    with path.open('rb') as stream:
+        raw = stream.read(maximum + 1)
+    if len(raw) > maximum:
+        raise ValueError(f'evidence file exceeds size budget: {path.name}')
+    return raw.decode(encoding)
+
+
+def verify_archive_hash(path, expected):
+    """Compare a *real* local archive against its declared SHA-256 digest."""
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f'missing or unsafe archive: {path.name}')
+    if path.stat().st_size > MAX_ARCHIVE_BYTES:
+        raise ValueError(f'archive exceeds size budget: {path.name}')
+    digest = hashlib.sha256()
+    total = 0
+    with path.open('rb') as stream:
+        while True:
+            chunk = stream.read(65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_ARCHIVE_BYTES:
+                raise ValueError(f'archive exceeds size budget: {path.name}')
+            digest.update(chunk)
+    if digest.hexdigest() != expected:
+        raise ValueError(f'archive hash mismatch: {path.name}')
+
+
 def read_manifest(path):
-    lines = path.read_text(encoding='ascii').splitlines()
+    lines = bounded_text(path, MAX_MANIFEST_BYTES, 'ascii').splitlines()
     records = {}
     for line in lines:
         if not re.fullmatch(r'[0-9a-f]{64}  [a-zA-Z0-9._-]+', line):
@@ -50,7 +86,8 @@ def read_manifest(path):
 
 def verify_one(folder, platform_name, sha, version):
     system, arches, compilers, platform_suffix = PLATFORMS[platform_name]
-    receipt = json.loads((folder / 'platform-receipt.json').read_text(encoding='utf-8'),
+    receipt = json.loads(bounded_text(folder / 'platform-receipt.json',
+                                      MAX_RECEIPT_BYTES, 'utf-8'),
                          object_pairs_hook=unique_dict)
     if not isinstance(receipt, dict):
         raise ValueError('receipt must be a JSON object')
@@ -91,6 +128,10 @@ def verify_one(folder, platform_name, sha, version):
         raise ValueError(f'{platform_name}: invalid archive SHA-256')
     if read_manifest(folder / 'SHA256SUMS') != digests:
         raise ValueError(f'{platform_name}: receipt and SHA256SUMS differ')
+    # Matching two unsigned text records does not prove the artifact bytes
+    # remain present and unchanged. Stream and hash each claimed local file.
+    for name, digest in sorted(digests.items()):
+        verify_archive_hash(folder / name, digest)
     source_tree = receipt.get('source_tree_sha256')
     if not isinstance(source_tree, str) or DIGEST_RE.fullmatch(source_tree) is None:
         raise ValueError(f'{platform_name}: invalid canonical source content SHA-256')
