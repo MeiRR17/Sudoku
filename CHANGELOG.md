@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Reject forged encrypted ZIP members (traditional/strong encryption flags) and unsupported compressor IDs before extracting payloads. Prevents raw Python RuntimeError/NotImplementedError from escaping archive verification. Added three central+local-header mutation regressions; isolated real-ZIP tests passed (2 tests, 5 subcases). Canonical DEFLATE and stored entries remain valid; release HOLD remains.
+
 - Normalize malformed ZIP and TAR.GZ decoder exceptions at the single `ensure_safe_archive` boundary: truncated gzip data, invalid TAR headers and ZIP CRC corruption now produce deterministic `ValueError('malformed archive container')` instead of leaking backend-specific `ReadError`/`BadZipFile`/decompressor exceptions. Original semantic `ValueError` checks remain unchanged. Added three real-archive corruption regression tests. Six focused isolated Linux decoder scenarios passed, not the full CTest or native matrix; release remains HOLD.
 
 - Close a binary artifact verification hole in the multi-platform receipt matrix: after verifying unsigned receipt SHA-256 and source archive content, invoke the project's existing bounded package verifier on all four actual ZIP/TAR.GZ archives. Reject mismatched binary ZIP/TAR contents, missing installed headers/executable and nonregular/symlinked archive members even when package digests were regenerated. Extend the real ZIP/TAR fixtures and add three negative regression cases. Full CMake/CTest and native acceptance still pending; release HOLD.
