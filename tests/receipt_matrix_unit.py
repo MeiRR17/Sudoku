@@ -28,13 +28,14 @@ class ReceiptMatrixTests(unittest.TestCase):
                         for kind in ('source', suffix)
                         for ext in ('.tar.gz', '.zip')}
             receipt = {
-                'schema_version': 1, 'status': 'passed', 'scope': 'unsigned development evidence',
+                'schema_version': 2, 'status': 'passed', 'scope': 'unsigned development evidence',
                 'git_commit_sha': SHA, 'project_version': VERSION,
                 'runner_expected': label, 'observed_system': system,
                 'observed_arch': sorted(arches)[0], 'c_compiler_id': sorted(compilers)[0],
                 'quality_gate_mode': 'full' if label == 'ubuntu-latest' else 'fast',
                 'checks': ['quality_gate', 'package_release', 'package_verify'],
                 'archive_sha256': archives,
+                'source_tree_sha256': 'c' * 64,
                 'created_utc': datetime.now(timezone.utc).isoformat(timespec='seconds'),
             }
             self.folders[label] = folder
@@ -83,10 +84,36 @@ class ReceiptMatrixTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'receipt and SHA256SUMS differ'):
             self.check()
 
-    def test_source_archive_disagreement_rejected_even_with_matching_manifests(self):
-        self.receipts['macos-latest']['archive_sha256'][f'sudoku-v{VERSION}-source.zip'] = 'c' * 64
+    def test_different_compressed_source_archives_are_allowed(self):
+        # Compression-library differences do not imply different source files.
+        self.receipts['macos-latest']['archive_sha256'][f'sudoku-v{VERSION}-source.zip'] = 'd' * 64
+        self.receipts['windows-latest']['archive_sha256'][f'sudoku-v{VERSION}-source.tar.gz'] = 'e' * 64
         self.write('macos-latest')
-        with self.assertRaisesRegex(ValueError, 'source archive differs'):
+        self.write('windows-latest')
+        self.assertEqual(len(self.check()), 3)
+
+    def test_source_tree_digest_disagreement_rejected(self):
+        self.receipts['macos-latest']['source_tree_sha256'] = 'd' * 64
+        self.write('macos-latest')
+        with self.assertRaisesRegex(ValueError, 'source content differs'):
+            self.check()
+
+    def test_missing_source_tree_digest_rejected(self):
+        self.receipts['ubuntu-latest'].pop('source_tree_sha256')
+        self.write('ubuntu-latest')
+        with self.assertRaisesRegex(ValueError, 'invalid canonical source content'):
+            self.check()
+
+    def test_malformed_source_tree_digest_rejected(self):
+        self.receipts['ubuntu-latest']['source_tree_sha256'] = 'not-a-sha'
+        self.write('ubuntu-latest')
+        with self.assertRaisesRegex(ValueError, 'invalid canonical source content'):
+            self.check()
+
+    def test_old_receipt_schema_rejected(self):
+        self.receipts['ubuntu-latest']['schema_version'] = 1
+        self.write('ubuntu-latest')
+        with self.assertRaisesRegex(ValueError, 'schema_version'):
             self.check()
 
     def test_receipt_duplicate_json_key_rejected(self):
