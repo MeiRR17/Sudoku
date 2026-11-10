@@ -4,6 +4,9 @@ Never creates a receipt or requires a native toolchain. The full acceptance
 script still must run on each real target host before any release claim.
 """
 import importlib.util
+import json
+import os
+import stat
 from pathlib import Path
 import tempfile
 import unittest
@@ -79,6 +82,61 @@ class CompilerIdentityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             with self.assertRaisesRegex(ValueError, 'exactly one'):
                 acceptance.compiler_identity(Path(folder))
+
+
+class ReceiptWriteTests(unittest.TestCase):
+    def test_private_atomic_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory) / 'dist' / 'platform-receipt.json'
+            receipt = {'status': 'passed', 'git_commit_sha': SHA}
+            acceptance.write_receipt(dest, receipt)
+            self.assertEqual(json.loads(dest.read_text()), receipt)
+            self.assertFalse(dest.with_name(dest.name + '.tmp').exists())
+            if os.name == 'posix':
+                self.assertEqual(stat.S_IMODE(dest.stat().st_mode), 0o600)
+
+    def test_existing_receipt_cannot_be_overwritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory) / 'evidence.json'
+            dest.write_text('previous')
+            with self.assertRaises(FileExistsError):
+                acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertEqual(dest.read_text(), 'previous')
+            self.assertFalse(dest.with_name(dest.name + '.tmp').exists())
+
+    def test_existing_temporary_symlink_cannot_be_followed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            victim = root / 'victim.txt'
+            victim.write_text('unchanged')
+            dest = root / 'evidence.json'
+            stage = root / 'evidence.json.tmp'
+            try:
+                stage.symlink_to(victim)
+            except (OSError, NotImplementedError):
+                self.skipTest('host cannot create a symlink')
+            with self.assertRaises(FileExistsError):
+                acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertEqual(victim.read_text(), 'unchanged')
+            self.assertTrue(stage.is_symlink())
+            self.assertFalse(dest.exists())
+
+    def test_unsupported_hardlink_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory) / 'evidence.json'
+            with patch.object(acceptance.os, 'link', side_effect=OSError('unsupported')):
+                with self.assertRaises(OSError):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertFalse(dest.exists())
+            self.assertFalse(dest.with_name(dest.name + '.tmp').exists())
+
+    def test_serialization_failure_cleans_up_stage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory) / 'evidence.json'
+            with self.assertRaises(TypeError):
+                acceptance.write_receipt(dest, {'value': object()})
+            self.assertFalse(dest.exists())
+            self.assertFalse(dest.with_name(dest.name + '.tmp').exists()
 
 
 if __name__ == '__main__':
