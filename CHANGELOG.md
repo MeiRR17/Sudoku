@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Integrated real archive receipt re-verification into **manual** GitHub Actions without publishing unlicensed development ZIP/TAR binaries: new `verify_receipt_matrix.py --local dist --expected RUNNER --require-sha SHA` verifies all four present archives on that host *after* packaging and *before* metadata upload. Matrix mode with all three host folders remains supported. Added five CLI regression methods and a workflow ordering guard; metadata-only artifacts remain intentionally insufficient for an external archive recheck. Focused isolated mode-dispatch suite 9/9 PASS; full project and native CI not run this cycle.
+
 - Bind unsigned cross-platform acceptance receipts to **actual extracted source members**: the matrix now verifies canonical source ZIP and TAR.GZ contents and exact embedded `release_files.txt` membership, then recalculates the receipt's canonical source-tree SHA-256. Reject forged matching receipt digests, ZIP/TAR divergence and undeclared source members even when archive SHA256SUMS values were regenerated. Added four regression cases, and adjusted test fixtures to real deterministic archives. An isolated six-case archive/control-flow harness passed; full project tests and native acceptance are still pending.
 
 - Harden the v0.8.4 three-platform evidence matrix: read and SHA-256 hash all 12 locally supplied archives rather than comparing two unsigned text records; reject missing, symlinked or >80 MiB archives, plus >16 KiB receipt JSON and >4 KiB checksum manifests. Six negative regressions added. This is consistency validation, not publisher authentication or native acceptance.
