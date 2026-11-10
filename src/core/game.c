@@ -76,8 +76,13 @@ SudokuGameStatus sudoku_game_erase(SudokuGame *game, unsigned row, unsigned col)
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
     if (idx < 0) return SUDOKU_GAME_RANGE;
     if (game->givens.cells[idx]) return SUDOKU_GAME_GIVEN;
-    if (game->state.board.cells[idx] == 0u) return SUDOKU_GAME_OK;
-    game->state.board.cells[idx] = 0;
+    /* Erasing an editable cell clears its value AND its pencil marks.
+     * Previously 'erase' on an empty noted cell silently did nothing,
+     * leaving no one-step way to clear its candidates. */
+    if (game->state.board.cells[idx] == 0u &&
+        game->state.notes[idx] == 0u) return SUDOKU_GAME_OK;
+    game->state.board.cells[idx] = 0u;
+    game->state.notes[idx] = 0u;
     remember(game);
     return SUDOKU_GAME_OK;
 }
