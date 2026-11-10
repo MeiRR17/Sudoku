@@ -54,7 +54,14 @@ See [Packaging and platform gates](docs/PACKAGING_AND_PORTABILITY.md),
 
 ### Manual platform evidence review (development only)
 
-Run manually via GitHub Actions: Sudoku manual quality gate on the exact development branch, choosing each native runner separately. Passing the workflow preserves only platform-receipt.json and SHA256SUMS for seven days; it does not publish unsigned binaries or grant license/release approval. After obtaining three independent native receipts, run `python3 scripts/verify_receipt_matrix.py --require-sha <SHA> --linux ./evidence/linux --windows ./evidence/windows --macos ./evidence/macos`. This checks **unsigned receipt consistency only**; native installation, archive downloads, license approval and release attestation remain separate gates.
+Run the **manual** GitHub Actions Sudoku quality gate on the exact development branch, choosing each native runner separately (no automatic CI minutes). After `platform_acceptance.py` builds and verifies its four development archives, the runner now independently checks them with `verify_receipt_matrix.py --local` before retaining the unsigned receipt. The workflow uploads **only** `platform-receipt.json` and `SHA256SUMS` for seven days: no unlicensed development binaries or archives are published by Actions. These metadata-only downloads are **not sufficient** to rerun the complete three-platform archive matrix elsewhere. If the owner has independently obtained each runner's original four archives in private folders, verify all three together with:
+
+```sh
+python3 scripts/verify_receipt_matrix.py --require-sha "$COMMIT_SHA" \
+  --linux ./evidence/linux --windows ./evidence/windows --macos ./evidence/macos
+```
+
+For a local pre-upload validation on the real runner or clean checkout, use `python scripts/verify_receipt_matrix.py --require-sha "$COMMIT_SHA" --local dist --expected ubuntu-latest` (substitute the native runner label). **All checks validate unsigned internal consistency, not publisher identity**, license approval or production readiness.
 
 ## Run quality checks
 
