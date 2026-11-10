@@ -65,6 +65,7 @@ tests/game_e2e.py
 tests/generator_golden.py
 tests/package_smoke.py
 tests/platform_acceptance_unit.py
+tests/portable_collision_unit.py
 tests/quality_gate_unit.py
 tests/receipt_matrix_unit.py
 tests/workflow_evidence_unit.py
