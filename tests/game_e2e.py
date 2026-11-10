@@ -190,6 +190,21 @@ with tempfile.TemporaryDirectory() as directory:
     assert not stderr
     checks += 1
 
+    # Clear marks in multiple cells with one undoable action, and reject
+    # unexpected arguments without changing notes or history.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'note 1 3 4\nnote 1 4 9\nclear-notes\nstatus\n'
+                         'clear-notes\nstatus\nundo\nnotes 1 3\nnotes 1 4\n'
+                         'redo\nnotes 1 3\nnotes 1 4\nclear-notes unexpected\nquit\n')
+    assert stdout.count('undo 3, redo 0') == 2, stdout
+    assert 'Notes for row 1 col 3: 4' in stdout
+    assert 'Notes for row 1 col 4: 9' in stdout
+    assert 'Notes for row 1 col 3:\n' in stdout
+    assert 'Notes for row 1 col 4:\n' in stdout
+    assert 'Error: unknown command or invalid arguments' in stdout
+    assert not stderr
+    checks += 1
+
     # A reset on an untouched board must not create phantom undo history.
     stdout, stderr = run(['--puzzle', near_win], 'reset\nstatus\nundo\nquit\n')
     assert 'undo 0, redo 0' in stdout and 'no action to undo or redo' in stdout
