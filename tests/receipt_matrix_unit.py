@@ -4,6 +4,10 @@ import hashlib
 import importlib.util
 import json
 import zipfile
+import contextlib
+import io
+import sys
+from unittest.mock import patch
 from pathlib import Path
 import tempfile
 import unittest
@@ -68,6 +72,56 @@ class ReceiptMatrixTests(unittest.TestCase):
 
     def check(self):
         return MATRIX.verify_matrix(self.folders, SHA, VERSION)
+
+    def test_local_cli_validates_real_single_platform_archives(self):
+        stdout = io.StringIO()
+        with patch.object(sys, 'argv',
+                          ['verify_receipt_matrix.py', '--require-sha', SHA,
+                           '--local', str(self.folders['ubuntu-latest']),
+                           '--expected', 'ubuntu-latest']):
+            with contextlib.redirect_stdout(stdout):
+                MATRIX.main()
+        self.assertIn('LOCAL EVIDENCE CONSISTENT: ubuntu-latest', stdout.getvalue())
+        self.assertIn('no cross-host claim', stdout.getvalue())
+
+    def test_local_cli_rejects_missing_platform_label(self):
+        with patch.object(sys, 'argv',
+                          ['verify_receipt_matrix.py', '--require-sha', SHA,
+                           '--local', str(self.folders['ubuntu-latest'])]):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    MATRIX.main()
+        self.assertEqual(error.exception.code, 2)
+
+    def test_local_cli_rejects_mixed_matrix_arguments(self):
+        with patch.object(sys, 'argv',
+                          ['verify_receipt_matrix.py', '--require-sha', SHA,
+                           '--local', str(self.folders['ubuntu-latest']),
+                           '--expected', 'ubuntu-latest',
+                           '--linux', str(self.folders['ubuntu-latest'])]):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    MATRIX.main()
+        self.assertEqual(error.exception.code, 2)
+
+    def test_matrix_cli_requires_all_three_platforms(self):
+        with patch.object(sys, 'argv',
+                          ['verify_receipt_matrix.py', '--require-sha', SHA,
+                           '--linux', str(self.folders['ubuntu-latest'])]):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    MATRIX.main()
+        self.assertEqual(error.exception.code, 2)
+
+    def test_local_cli_rejects_wrong_sha(self):
+        with patch.object(sys, 'argv',
+                          ['verify_receipt_matrix.py', '--require-sha', 'not-a-sha',
+                           '--local', str(self.folders['ubuntu-latest']),
+                           '--expected', 'ubuntu-latest']):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    MATRIX.main()
+        self.assertEqual(error.exception.code, 2)
 
     def test_matching_three_platform_receipts_are_consistent(self):
         self.assertEqual(set(self.check()), set(MATRIX.PLATFORMS))
