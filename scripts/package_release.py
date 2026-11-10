@@ -256,7 +256,7 @@ def preflight_zip_directory(path):
     signature, disk, start_disk, disk_entries, entries, cd_size, cd_start, comment = (
         struct.unpack('<4s4H2IH', tail)
     )
-    if signature != b'PK\\x05\\x06' or comment != 0:
+    if signature != b'PK' + bytes((5, 6)) or comment != 0:
         raise ValueError('ZIP canonical directory trailer missing')
     if disk or start_disk or disk_entries != entries:
         raise ValueError('multi-disk ZIP archive not supported')
