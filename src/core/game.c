@@ -319,12 +319,17 @@ static int sync_parent_directory(const char *path) {
 #endif
 
 SudokuGameStatus sudoku_game_save(const SudokuGame *game, const char *path) {
+#if defined(_WIN32)
+    /* Windows staging retains the existing exclusive-create retry path. */
     static unsigned serial=0;
+#endif
     char bytes[SUDOKU_SAVE_MAX_BYTES];
     char *temp;
     size_t n,len;
     FILE *file=NULL;
+#if defined(_WIN32)
     unsigned attempt;
+#endif
     int ok;
     if(!valid_game(game)||!path||!*path)return SUDOKU_GAME_INVALID;
     if(!render_save(game,bytes,&n))return SUDOKU_GAME_INVALID;
@@ -332,41 +337,38 @@ SudokuGameStatus sudoku_game_save(const SudokuGame *game, const char *path) {
     if(len>4096u)return SUDOKU_GAME_IO;
     temp=malloc(len+64u);
     if(!temp)return SUDOKU_GAME_IO;
+#if defined(_WIN32)
     for(attempt=0;attempt<64u;++attempt){
         unsigned id=++serial;
         (void)snprintf(temp,len+64u,"%s.tmp.%08lX.%08X",path,
                        (unsigned long)time(NULL),id);
-#if defined(_WIN32)
         file=fopen(temp,"wbx");
         if(file)break;
         if(errno!=EEXIST){free(temp);return SUDOKU_GAME_IO;}
-#else
-        /* Create the staging inode owner-only from the first instant.
-         * fopen("wbx") normally starts at 0666 & umask, exposing a race
-         * before a later fchmod on permissively configured systems. */
-        {
-            int fd=open(temp,O_WRONLY|O_CREAT|O_EXCL,S_IRUSR|S_IWUSR);
-            if(fd<0){
-                if(errno!=EEXIST){free(temp);return SUDOKU_GAME_IO;}
-                continue;
-            }
-            file=fdopen(fd,"wb");
-            if(!file){
-                (void)close(fd);
-                (void)remove(temp);
-                free(temp);
-                return SUDOKU_GAME_IO;
-            }
-            break;
-        }
-#endif
     }
     if(!file){free(temp);return SUDOKU_GAME_IO;}
+#else
+    /* mkstemp creates an unpredictable, exclusive, owner-only file next to
+     * the destination. Unlike a process-global serial, this is safe across
+     * concurrent callers and unrelated processes, without a retry race. */
+    {
+        int fd;
+        (void)snprintf(temp,len+64u,"%s.tmp.XXXXXX",path);
+        fd=mkstemp(temp);
+        if(fd<0){free(temp);return SUDOKU_GAME_IO;}
+        file=fdopen(fd,"wb");
+        if(!file){
+            (void)close(fd);
+            (void)remove(temp);
+            free(temp);
+            return SUDOKU_GAME_IO;
+        }
+    }
+#endif
     ok=1;
 #if !defined(_WIN32)
-    /* The O_EXCL descriptor was created with mode 0600. Reassert that
-     * mode after umask (which can only remove permissions), before writing.
-     * Failure aborts without renaming over a previous target. */
+    /* mkstemp creates mode 0600 even under umask(000). Reassert the
+     * owner-only mode before writing; any failure preserves the old save. */
     ok=fchmod(fileno(file), S_IRUSR | S_IWUSR)==0;
 #endif
     if(ok)ok=fwrite(bytes,1u,n,file)==n;
