@@ -62,6 +62,46 @@ class ZipPreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'malformed archive container'):
             package.ensure_safe_archive(self.path, self.prefix)
 
+    def test_encrypted_member_rejected_before_decryption(self):
+        self.archive()
+        data = bytearray(self.path.read_bytes())
+        local = data.index(b'PK' + bytes((3, 4)))
+        central = data.index(b'PK' + bytes((1, 2)))
+        # Set encryption bit in both headers; ZipExtFile would otherwise
+        # raise RuntimeError because no password was supplied.
+        for at in (local + 6, central + 8):
+            flags = struct.unpack_from('<H', data, at)[0]
+            struct.pack_into('<H', data, at, flags | 1)
+        self.path.write_bytes(data)
+        package.preflight_zip_directory(self.path)
+        with self.assertRaisesRegex(ValueError, 'encrypted ZIP member'):
+            package.ensure_safe_archive(self.path, self.prefix)
+
+    def test_strong_encryption_marker_rejected(self):
+        self.archive()
+        data = bytearray(self.path.read_bytes())
+        local = data.index(b'PK' + bytes((3, 4)))
+        central = data.index(b'PK' + bytes((1, 2)))
+        for at in (local + 6, central + 8):
+            flags = struct.unpack_from('<H', data, at)[0]
+            struct.pack_into('<H', data, at, flags | 0x40)
+        self.path.write_bytes(data)
+        package.preflight_zip_directory(self.path)
+        with self.assertRaisesRegex(ValueError, 'encrypted ZIP member'):
+            package.ensure_safe_archive(self.path, self.prefix)
+
+    def test_unsupported_zip_compression_method_rejected(self):
+        self.archive()
+        data = bytearray(self.path.read_bytes())
+        local = data.index(b'PK' + bytes((3, 4)))
+        central = data.index(b'PK' + bytes((1, 2)))
+        for at in (local + 8, central + 10):
+            struct.pack_into('<H', data, at, 99)
+        self.path.write_bytes(data)
+        package.preflight_zip_directory(self.path)
+        with self.assertRaisesRegex(ValueError, 'unsupported ZIP compression method'):
+            package.ensure_safe_archive(self.path, self.prefix)
+
     def test_too_many_members_rejected_before_zipfile(self):
         self.archive()
         self.change_trailer(8, '<H', package.MAX_ARCHIVE_FILES + 1)
