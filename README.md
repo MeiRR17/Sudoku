@@ -102,3 +102,6 @@ Release verification now limits the unsigned `SHA256SUMS` input to 4 KiB before 
 
 
 **v0.8.4 receipt verifier detail:** Both `--local` and the three-platform matrix validate all four actual ZIP/TAR.GZ archives, not only receipt hash strings: the existing package verifier enforces regular files, canonical paths, binary ZIP/TAR content equality, required executable/header files and source archive membership. These are offline structural checks of unsigned files, not origin authentication. The manual workflow retains only the metadata files; a later full archive matrix still needs copies of the original archives from each host.
+
+
+**v0.8.4 canonical archive modes:** The development package verifier checks ZIP/TAR file permissions as well as their contents. Source files and non-executable installed assets require `0644`, while installed `bin/` files require `0755` on all platforms, so a Linux/macOS binary cannot silently lose its executable bit and still pass verification. These are archive metadata checks, not proof that the binary runs on supported native hosts.
