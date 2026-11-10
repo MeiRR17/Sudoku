@@ -135,9 +135,14 @@ uint64_t sudoku_game_elapsed(const SudokuGame *game) {
     uint64_t secs;
     if (!valid_game(game)) return 0;
     now = time(NULL);
-    secs = game->elapsed_base;
+    /* The struct is public: a caller may supply an out-of-range base.
+     * Clamp before subtraction so unsigned saturation cannot wrap around.
+     * Compute the delta in unsigned arithmetic to avoid time_t signed
+     * subtraction overflow for an extreme forward clock adjustment. */
+    secs = game->elapsed_base > SUDOKU_MAX_ELAPSED_SECONDS
+         ? SUDOKU_MAX_ELAPSED_SECONDS : game->elapsed_base;
     if (now != (time_t)-1 && game->session_start != (time_t)-1 && now > game->session_start) {
-        uint64_t delta = (uint64_t)(now - game->session_start);
+        uint64_t delta = (uint64_t)now - (uint64_t)game->session_start;
         secs = delta > SUDOKU_MAX_ELAPSED_SECONDS - secs
              ? SUDOKU_MAX_ELAPSED_SECONDS : secs + delta;
     }
@@ -230,6 +235,9 @@ static int parse_save(SudokuGame *out, const char *data, size_t size) {
     if(memcmp(data+p,"\nE=",3)!=0)return 0;
     p+=3;
     if(p>=size||data[p]<'0'||data[p]>'9')return 0;
+    /* The writer emits one canonical decimal representation: zero is "0",
+     * never "00", and positive values have no leading zeroes. */
+    if(data[p]=='0' && p+1u<size && data[p+1u]>='0' && data[p+1u]<='9')return 0;
     while(p<size&&data[p]>='0'&&data[p]<='9'){
         unsigned d=(unsigned)(data[p++]-'0');
         if(elapsed > (SUDOKU_MAX_ELAPSED_SECONDS-d)/10u) return 0;
