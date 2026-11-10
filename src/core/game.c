@@ -191,6 +191,7 @@ static int hex_value(unsigned char ch) {
  * The checksum detects accidental corruption; it is NOT authentication. */
 static int render_save(const SudokuGame *game, char out[SUDOKU_SAVE_MAX_BYTES], size_t *length) {
     char givens[82], current[82], notes[244];
+    SudokuBoard verified_solution;
     uint64_t elapsed;
     int n, tail;
     unsigned i;
@@ -200,6 +201,14 @@ static int render_save(const SudokuGame *game, char out[SUDOKU_SAVE_MAX_BYTES], 
      * Validate the full source and current board before opening any file. */
     if (sudoku_board_validate(&game->givens, NULL) != SUDOKU_OK ||
         sudoku_board_validate(&game->state.board, NULL) != SUDOKU_OK)
+        return 0;
+    /* Valid Sudoku constraints do not imply a uniquely solvable puzzle:
+     * a caller can replace givens with an empty or unsatisfiable board.
+     * Loading always demands UNIQUE, so require the same invariant on
+     * saving and reject a stale/corrupted cached solution as well. */
+    if (sudoku_solve_first(&game->givens, &verified_solution) != SUDOKU_SOLVE_UNIQUE ||
+        memcmp(verified_solution.cells, game->solution.cells,
+               sizeof verified_solution.cells) != 0)
         return 0;
     sudoku_board_compact(&game->givens, givens);
     sudoku_board_compact(&game->state.board, current);
