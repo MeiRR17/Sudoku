@@ -52,6 +52,10 @@ See [Packaging and platform gates](docs/PACKAGING_AND_PORTABILITY.md),
 [local packaging verification](docs/VERIFICATION_v0.8.0.md), and
 [license decision record](docs/LICENSE_DECISION_PENDING.md).
 
+### Manual platform evidence review (development only)
+
+Run manually via GitHub Actions: Sudoku manual quality gate on the exact development branch, choosing each native runner separately. Passing the workflow preserves only platform-receipt.json and SHA256SUMS for seven days; it does not publish unsigned binaries or grant license/release approval. After obtaining three independent native receipts, run `python3 scripts/verify_receipt_matrix.py --require-sha <SHA> --linux ./evidence/linux --windows ./evidence/windows --macos ./evidence/macos`. This checks **unsigned receipt consistency only**; native installation, archive downloads, license approval and release attestation remain separate gates.
+
 ## Run quality checks
 
 For the current platform (including Windows with MSVC, provided CMake/CTest/Python and a compiler are installed):

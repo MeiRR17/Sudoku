@@ -100,3 +100,20 @@ The fast/full quality gate checks CTest's JSON test inventory **before running t
 #### Streaming TAR validation bounds (v0.8.4)
 
 TAR verification now uses streaming `r|gz` iteration rather than `getmembers()`. It checks the 1,024-member limit **before loading another entry's content**, rejects duplicates immediately, and retains the 64 MiB decompressed-data budget and strict regular-file/path/order enforcement. This reduces memory exposure to malformed archives with very large numbers of header records. The eight isolated Python regression cases passed on extracted exact source functions; this does not establish platform acceptance.
+
+
+### v0.8.4 — retain manual-run acceptance evidence and verify a three-host matrix
+
+The manual-only GitHub Actions workflow uploads **only** `dist/platform-receipt.json` and `dist/SHA256SUMS` after a successful `platform_acceptance.py --require-sha <40-hex SHA>` run. The upload action is pinned to its full commit SHA; `if-no-files-found: error` prevents a false-success missing artifact. Its name records the platform, exact commit and run attempt. Retention is seven days to minimize storage. **No ZIP/TAR binaries, GitHub Release, tag, automatic CI or licensing decision are produced.** All three platform runs must be triggered manually and the real native toolchains/architectures checked by the acceptance script. A workflow run has **not** been started on this commit.
+
+After manually collecting each run's evidence artifact into three separate folders with its original two filenames, check the consistency matrix:
+
+```sh
+python3 scripts/verify_receipt_matrix.py \
+  --require-sha <exact-40-character-commit-SHA> \
+  --linux ./evidence/linux \
+  --windows ./evidence/windows \
+  --macos ./evidence/macos
+```
+
+The matrix requires `status=passed`, schema v1, one exact Git SHA and project version, the correct observed OS/CPU/actual compiler, mandatory test/package checks, exactly four canonical archive SHA-256 entries per host with identical `SHA256SUMS`, and identical **source** ZIP/TAR.GZ digests across all three runs. It rejects duplicate JSON keys and missing/duplicate/unsorted manifests. A consistent matrix shows agreement among **unsigned, self-reported files only**: it cannot prove that a runner was trustworthy, that binary artifacts exist or were downloaded and installed, that a license is approved, or that cryptographic release attestation/rollback gates passed. Do not close issue #10, tag, merge, or promote a release on matrix consistency alone.

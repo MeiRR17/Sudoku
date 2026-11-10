@@ -4,6 +4,9 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Retain unsigned exact-SHA per-platform acceptance receipt plus SHA256SUMS as a seven-day GitHub Actions artifact **only after** manual quality/packaging gates pass; do not distribute unlicensed binaries or trigger CI automatically. Pin the upload action by immutable SHA, use unique runner/commit/attempt names, and add workflow-configuration guard tests.
+- Add offline `verify_receipt_matrix.py` to reconcile native Linux/Windows/macOS receipt JSON and checksum manifests: reject mismatched Git commits, OS/CPU/compiler, missing checks, duplicate receipt keys, unexpected artifacts and cross-platform source-archive hash disagreement. 12 negative/positive unit tests and 4 workflow tests passed locally; synthetic receipts are **not** evidence of native host execution.
+
 - Stream TAR.GZ verification one member at a time instead of collecting all archive headers in memory. Enforce a maximum of 1,024 members before reading the next payload; reject duplicate member names early. Added 8 executable Python unit tests (normal, exact limit, one over limit, empty, duplicates, unsorted, symlink, traversal). Measured 8/8 passing in isolated exact-function validation; full native Sudoku CTest is still outstanding.
 
 - Fix `sudoku play` reset idempotence: compare the 81 board cells and 81 pencil-note masks, not the snapshot's ABI padding bytes. A reset of an untouched/already-cleared game no longer creates phantom undo steps. Add core unit and scripted gameplay regressions for repeat resets and undo restoration.

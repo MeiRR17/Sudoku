@@ -38,6 +38,7 @@ scripts/release_files.txt
 scripts/run_fuzz.py
 scripts/static_analysis.py
 scripts/verify_runner_platform.py
+scripts/verify_receipt_matrix.py
 src/cli/main.c
 src/cli/play.c
 src/core/board.c
@@ -65,6 +66,8 @@ tests/generator_golden.py
 tests/package_smoke.py
 tests/platform_acceptance_unit.py
 tests/quality_gate_unit.py
+tests/receipt_matrix_unit.py
+tests/workflow_evidence_unit.py
 tests/package_integrity.py
 tests/run_stdin.cmake
 tests/save_faults.py
