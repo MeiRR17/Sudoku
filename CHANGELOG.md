@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Add a fail-closed per-platform acceptance runner (`scripts/platform_acceptance.py`): it invokes the scoped CMake/CTest gate and deterministic packaging verification, checks the actual host architecture and C compiler (MSVC on Windows), and emits a local unsigned JSON receipt bound to the clean Git HEAD and four archive SHA-256 hashes **only after success**. Replace duplicated manual Actions steps with the runner; no automatic CI triggers or official release publishing.
+
 - Create POSIX save staging files using exclusive `open(..., O_CREAT | O_EXCL, 0600)` so they are private **from creation**, not only after `fchmod`. Preserve atomic replacement, fail-closed mode checks, and add Linux fault-injection that verifies the inode starts private even under `umask(000)`. Windows ACLs remain unverified.
 
 - Allow interactive `save PATH` to accept paths containing spaces, with or without enclosing double quotes; reject overlong commands instead of splitting one path into separate arguments. Reject empty or unterminated quoted paths rather than unexpectedly reusing an existing save destination.

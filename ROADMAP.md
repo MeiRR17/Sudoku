@@ -173,6 +173,6 @@ Time may increase for toolchain/OS access, generator rating calibration, or unex
 
 ## 7. Immediate next task
 
-Continue **issue #10 / v0.8.x release hardening** without asserting acceptance: verify clean Windows x64/MSVC and macOS arm64 installs/game saves; obtain owner license decision and release provenance/rollback evidence. Keep issue #11 (v0.9 RC) blocked until these gates pass.
+Continue **issue #10 / v0.8.x release hardening** without asserting acceptance: use `scripts/platform_acceptance.py` from clean Git checkouts to obtain exact-SHA per-platform build/package receipts (the script exists, but no native receipts have yet been produced); verify clean Windows x64/MSVC and macOS arm64 installs/game saves; obtain owner license decision and release provenance/rollback evidence. Keep issue #11 (v0.9 RC) blocked until these gates pass.
 
 See **docs/ARCHITECTURE.md** for planned interfaces, and **docs/PRODUCTION_READINESS.md** for mandatory verification/release gates.

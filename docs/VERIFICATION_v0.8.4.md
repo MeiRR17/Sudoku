@@ -12,6 +12,19 @@ Date: 2026-11-10. **Development patch only; release acceptance remains on HOLD.*
 - Added portable gameplay E2E scenarios for unquoted and quoted filenames with spaces, bare-save reuse and resume. Extended Linux-only `LD_PRELOAD` directory-fsync fault injection to verify default-path retention after the warning.
 - Updated CMake, CLI, package manifest and version assertions to 0.8.4.
 
+## Native platform acceptance command (new; not yet executed on the full repo)
+
+```sh
+# Run from a clean Git checkout of the PR SHA; select the actual host.
+python3 scripts/platform_acceptance.py --expected ubuntu-latest
+# Or on Windows x64/MSVC: python scripts/platform_acceptance.py --expected windows-latest
+# Or on Apple Silicon: python3 scripts/platform_acceptance.py --expected macos-latest
+```
+
+The script runs the full fast CMake/CTest gate, verifies all four development archives, and writes an unsigned `dist/platform-receipt.json` bound to exact Git HEAD **only on success**. Existing receipts are not overwritten. On Windows, compiler identity **MSVC** is required. The manual-only Actions workflow calls this command; it has not been dispatched or run as part of this update. A receipt alone cannot authorize a release or establish authenticity.
+
+**Observed isolated checks in this update:** `platform_acceptance.py` passed Python bytecode compilation, CLI help parsing, four C compiler identity fixture checks (MSVC, AppleClang, GNU and missing-identity rejection), and a negative guard refusing `--mode full` for Windows. **No Sudoku CMake/CTest or packaging execution occurred.**
+
 ## Focused checks to run from this exact branch/commit
 
 ```sh

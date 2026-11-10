@@ -32,6 +32,7 @@ include/sudoku/solver.h
 scripts/benchmark_solver.py
 scripts/coverage.py
 scripts/package_release.py
+scripts/platform_acceptance.py
 scripts/quality_gate.py
 scripts/release_files.txt
 scripts/run_fuzz.py
