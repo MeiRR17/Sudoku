@@ -23,6 +23,7 @@ The `--file` argument reads a puzzle file (max 1 MiB), not a saved game. `--resu
 | `erase ROW COL` | Clear the placed digit **and all pencil notes** from an editable cell. Erasing a blank cell with notes is undoable; repeating erase on a blank note-free cell is a no-op. |
 | `note ROW COL DIGIT` | Toggle a pencil note 1–9 on an empty editable cell. |
 | `notes ROW COL` | List the pencil notes for one cell. |
+| `clear-notes` | Remove all pencil notes from the whole board as **one undoable action**, retaining every placed digit. If no notes remain, no history entry is created. Takes no arguments. |
 | `undo`, `redo` | Revert or replay a placement, erasure, note or reset. New edits discard the redo branch. |
 | `reset` | Restore original givens and clear notes. Can be undone while history remains. |
 | `check` | Count empty and incorrect cells without printing the answer. |
