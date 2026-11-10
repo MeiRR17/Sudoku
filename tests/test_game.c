@@ -59,6 +59,15 @@ static int check_game(void){
     CHECK(restored->state.board.cells[2]==0);
     CHECK(restored->history_cursor==0 && restored->history_len==1);
     CHECK(sudoku_game_elapsed(restored)<=SUDOKU_MAX_ELAPSED_SECONDS);
+    /* Corrupted public struct fields must not underflow the saturation
+     * expression or report time beyond the documented 10-year limit. */
+    restored->elapsed_base = UINT64_MAX;
+    CHECK(sudoku_game_elapsed(restored)==SUDOKU_MAX_ELAPSED_SECONDS);
+    restored->elapsed_base = SUDOKU_MAX_ELAPSED_SECONDS;
+    restored->session_start = (time_t)0;
+    CHECK(sudoku_game_elapsed(restored)==SUDOKU_MAX_ELAPSED_SECONDS);
+    /* Reload canonical data before verifying no-mutation on corrupt loads. */
+    CHECK(sudoku_game_load(restored,"game-unit.save")==SUDOKU_GAME_OK);
     *orig=*restored;
     f=fopen("game-unit.save","ab");CHECK(f!=NULL);
     CHECK(fputc('x',f)=='x');CHECK(fclose(f)==0);
