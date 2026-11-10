@@ -24,12 +24,20 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(quality.validate_test_manifest(inventory(sorted(names)),
                                                          system='Linux'), 23)
 
-    def test_windows_and_macos_release_require_22(self):
+    def test_windows_release_requires_23(self):
+        names = set(quality.BASE_TESTS) | set(quality.PACKAGE_TESTS) | set(quality.WINDOWS_TESTS)
+        self.assertEqual(quality.validate_test_manifest(inventory(sorted(names)),
+                                                         system='Windows'), 23)
+
+    def test_macos_release_requires_22(self):
         names = set(quality.BASE_TESTS) | set(quality.PACKAGE_TESTS)
-        for system in ('Windows', 'Darwin'):
-            with self.subTest(system=system):
-                self.assertEqual(quality.validate_test_manifest(inventory(sorted(names)),
-                                                                 system=system), 22)
+        self.assertEqual(quality.validate_test_manifest(inventory(sorted(names)),
+                                                         system='Darwin'), 22)
+
+    def test_omitted_windows_concurrency_gate_is_fatal(self):
+        names = set(quality.BASE_TESTS) | set(quality.PACKAGE_TESTS)
+        with self.assertRaisesRegex(ValueError, 'sudoku_windows_save_concurrency'):
+            quality.validate_test_manifest(inventory(sorted(names)), system='Windows')
 
     def test_sanitizer_build_requires_20_not_packaging(self):
         self.assertEqual(quality.validate_test_manifest(
@@ -51,8 +59,9 @@ class InventoryTests(unittest.TestCase):
             quality.validate_test_manifest(inventory(sorted(names)), system='Linux')
 
     def test_missing_packaging_test_fails_release(self):
+        names = set(quality.BASE_TESTS) | set(quality.WINDOWS_TESTS)
         with self.assertRaisesRegex(ValueError, 'sudoku_package_e2e'):
-            quality.validate_test_manifest(inventory(sorted(quality.BASE_TESTS)),
+            quality.validate_test_manifest(inventory(sorted(names)),
                                            system='Windows')
 
     def test_bad_or_missing_json_is_fatal(self):
