@@ -162,6 +162,11 @@ def verify_one(folder, platform_name, sha, version):
     PACKAGE.verify_source_membership(source_zip)
     if ACCEPTANCE.source_tree_digest(source_zip) != source_tree:
         raise ValueError(f'{platform_name}: receipt source content digest mismatch')
+    # Source archive parity alone is not enough: independently inspect the
+    # *binary* TAR.GZ/ZIP structure, regular-file types, mandatory installed
+    # executable and headers, and cross-format byte parity as well. The full
+    # package verifier is the existing bounded validator for all four files.
+    PACKAGE.verify_packages(folder)
     return receipt
 
 
