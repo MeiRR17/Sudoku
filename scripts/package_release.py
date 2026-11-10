@@ -20,6 +20,7 @@ import sys
 import tarfile
 import tempfile
 import zipfile
+import zlib
 import unicodedata
 
 VERSION = '0.8.4'
@@ -291,7 +292,7 @@ def preflight_zip_directory(path):
             raise ValueError('ZIP central directory entry count mismatch')
 
 
-def ensure_safe_archive(path, expected_prefix):
+def _ensure_safe_archive(path, expected_prefix):
     """Read only bounded, regular files beneath one expected top-level dir."""
     members = {}
     names = []
@@ -357,6 +358,21 @@ def ensure_safe_archive(path, expected_prefix):
     if names != sorted(set(names)) or len(names) != len(members):
         raise ValueError('archive entries empty, duplicated or not sorted')
     return members
+
+
+def ensure_safe_archive(path, expected_prefix):
+    """Reject damaged ZIP/TAR.GZ payloads with the verifier's ValueError API.
+
+    zipfile, gzip and tarfile raise several decoder-specific exceptions for
+    untrusted compressed bytes. A malformed distribution is a verification
+    failure, not an uncaught traceback or a successful partial extraction.
+    Preserve the bounded, regular-file and canonical-path checks above.
+    """
+    try:
+        return _ensure_safe_archive(path, expected_prefix)
+    except (tarfile.TarError, zipfile.BadZipFile, gzip.BadGzipFile,
+            zlib.error, EOFError, struct.error) as exc:
+        raise ValueError('malformed archive container') from exc
 
 
 def check_archive(path, expected_prefix):
