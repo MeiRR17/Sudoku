@@ -8,7 +8,9 @@
  * exactly one, or at least two solutions. Counting stops after 2.
  * No global solver state. On INVALID/UNSOLVABLE, first_solution is unchanged.
  * On success it contains the deterministic first solution; givens are never
- * modified. count is optional and set to 0/1/2 when supplied. */
+ * modified. If first_solution aliases givens, INVALID is returned without
+ * searching or changing the puzzle; optional count and node outputs are zero.
+ * count is otherwise optional and set to 0/1/2 when supplied. */
 typedef enum SudokuSolveStatus {
     SUDOKU_SOLVE_INVALID = 0,
     SUDOKU_SOLVE_UNSOLVABLE,
