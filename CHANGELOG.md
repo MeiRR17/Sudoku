@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Restrict POSIX temporary save files to mode `0600` before writing, preserving owner-only permissions through atomic replacement; refuse the save without replacing the prior target if permission hardening fails. Add E2E tests with permissive umask and preexisting permissive target. Windows ACLs remain unverified.
+
 - Allow interactive `save PATH` to accept paths containing spaces, with or without enclosing double quotes; reject overlong commands instead of splitting one path into separate arguments. Reject empty or unterminated quoted paths rather than unexpectedly reusing an existing save destination.
 - Remember a new explicit save destination even when POSIX directory sync fails **after** a successful rename, so the next bare `save` retries the new destination rather than reporting no configured path.
 - Move gameplay `--file` puzzle loading from a >1 MiB automatic stack buffer to bounded heap memory; release the buffer on every I/O and parsing outcome to improve compatibility with smaller Windows process stacks.
