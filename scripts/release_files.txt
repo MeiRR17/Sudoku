@@ -69,6 +69,7 @@ tests/portable_collision_unit.py
 tests/quality_gate_unit.py
 tests/receipt_matrix_unit.py
 tests/workflow_evidence_unit.py
+tests/zip_preflight_unit.py
 tests/package_integrity.py
 tests/run_stdin.cmake
 tests/save_faults.py
