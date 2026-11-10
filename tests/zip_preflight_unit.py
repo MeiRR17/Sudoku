@@ -8,6 +8,7 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +42,25 @@ class ZipPreflightTests(unittest.TestCase):
                 package.preflight_zip_directory(self.path)
                 contents = package.ensure_safe_archive(self.path, self.prefix)
                 self.assertEqual(set(contents), set(names))
+
+    def test_corrupt_zip_payload_crc_is_reported_as_verification_failure(self):
+        # Canonical central directory and regular member, but damaged data.
+        # zipfile raises BadZipFile on CRC mismatch while extracting bytes.
+        with zipfile.ZipFile(self.path, 'w', compression=zipfile.ZIP_STORED) as archive:
+            info = zipfile.ZipInfo(self.prefix + '/crc.txt',
+                                   date_time=(1980, 1, 1, 0, 0, 0))
+            info.create_system = 3
+            info.external_attr = 0o100644 << 16
+            archive.writestr(info, b'unique-crc-test-payload')
+        data = bytearray(self.path.read_bytes())
+        at = data.index(b'unique-crc-test-payload')
+        data[at] ^= 1
+        self.path.write_bytes(data)
+        # The structural preflight still succeeds: failure must come from
+        # reading the changed member, and be normalized to ValueError.
+        package.preflight_zip_directory(self.path)
+        with self.assertRaisesRegex(ValueError, 'malformed archive container'):
+            package.ensure_safe_archive(self.path, self.prefix)
 
     def test_too_many_members_rejected_before_zipfile(self):
         self.archive()
