@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Validate all public `SudokuGame` state before serializing a checksum-valid save: givens/current board must satisfy Sudoku constraints, original clues must be preserved, and filled cells must not carry notes. A corrupted caller-owned struct now fails **before staging or overwriting** an existing save, instead of creating a checksum-valid but unloadable file. Add six C unit regression scenarios; isolated strict-GCC and Clang+UBSan harness 12/12 PASS per compiler; full engine tests pending.
+
 - Harden source archive manifest containment: reject a symlinked manifest, symlinks in **any** source path component (including parent directories), Windows-ambiguous backslashes and drive/alternate-stream colons, before reading bytes into source ZIP/TAR. Add nine focused file-system regression cases; all nine passed against the exact extracted source-path function, without claiming full release acceptance.
 
 - Fix cross-host release-evidence false negatives: use schema-v2 platform receipts with a canonical length-framed SHA-256 of **validated source file contents**, not raw compressed source ZIP/TAR digests, for Linux/Windows/macOS comparison. Preserve per-host archive SHA256SUMS checks and reject real source content drift. Add five canonical-hash tests (including actual GZip compression variants) and extend matrix tests to 16 cases; 21/21 focused local tests PASS. No platform acceptance or release status implied.

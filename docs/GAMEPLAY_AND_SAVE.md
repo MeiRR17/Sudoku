@@ -52,7 +52,7 @@ Each note mask uses only digit bits 1–9 (`0x000`–`0x3FE`); bit zero must be 
 
 ### Atomic save strategy
 
-1. Render an entire canonical, checksummed save in memory before writing.
+1. Before rendering, validate the caller-owned `SudokuGame` state: both boards must obey Sudoku rules, all givens must remain unchanged, no filled cell may retain notes, and note masks must be legal. This guards clients of the public C API that modify the exposed struct without using safe mutators. Invalid state is rejected *without creating any temporary file or replacing an earlier valid save*. Then render the canonical, checksummed record in memory.
 2. Create a fresh, exclusive temporary file **in the same directory** as the destination. POSIX uses `open(..., O_WRONLY | O_CREAT | O_EXCL, 0600)` followed by `fdopen`, which makes the temporary file private **from birth**, including with a permissive `umask(000)`; a defensive `fchmod(0600)` also runs before writing any save bytes. Windows retains exclusive `fopen(..., "wbx")` until native Windows validation is completed. Failed `fchmod` or `fdopen` aborts and cleans up without replacing the old target. An atomic rename installs the new file's permissions, so the POSIX replacement remains private.
 3. Write the entire record, `fflush`, `fsync` (POSIX) or `_commit` (Windows), then verify `fclose` succeeded.
 4. Replace the target with same-filesystem `rename` (POSIX) or `MoveFileExA` with replacement/write-through (Windows). If file write, file sync or rename fails, the temporary file is deleted and the previous target remains unchanged.
