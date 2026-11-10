@@ -49,6 +49,22 @@ class SourceManifestSafetyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'unsafe source path'):
                     package.source_paths()
 
+    def test_windows_device_names_and_punctuation_rejected(self):
+        invalid = ('src/CON.txt', 'src/prn.c', 'src/aux',
+                   'src/NUL.log', 'src/com1.c', 'src/Lpt9.txt',
+                   'src/COM¹.txt', 'src/CONIN$', 'src/a?.c',
+                   'src/a*.c', 'src/a|b.c', 'src/space .',
+                   'src/bad\x07name.c', 'src/name. ')
+        for name in invalid:
+            with self.subTest(name=name):
+                self.lines(name)
+                with self.assertRaisesRegex(ValueError, 'unsafe source path'):
+                    package.source_paths()
+
+    def test_windows_safe_filenames_are_still_allowed(self):
+        self.lines('src/board.c', 'src/solver.c')
+        self.assertEqual(len(package.source_paths()), 2)
+
     def test_absolute_and_parent_paths_rejected(self):
         for name in ('/etc/passwd', '../secrets.txt',
                      'src/../src/board.c', 'src/./board.c'):
