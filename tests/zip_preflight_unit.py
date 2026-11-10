@@ -102,6 +102,28 @@ class ZipPreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'unsupported ZIP compression method'):
             package.ensure_safe_archive(self.path, self.prefix)
 
+    def test_zip_source_mode_must_be_portable(self):
+        package.create_zip(self.path, self.prefix,
+                           [('README.md', b'text', 0o600)])
+        with self.assertRaisesRegex(ValueError, 'non-canonical ZIP file mode'):
+            package.ensure_safe_archive(self.path, self.prefix)
+
+    def test_zip_binary_executable_bit_cannot_be_removed(self):
+        binary_prefix = f'sudoku-v{package.VERSION}-linux-x86_64'
+        package.create_zip(self.path, binary_prefix,
+                           [('bin/sudoku', b'game', 0o644)])
+        with self.assertRaisesRegex(ValueError, 'non-canonical ZIP file mode'):
+            package.ensure_safe_archive(self.path, binary_prefix)
+
+    def test_zip_binary_executable_mode_is_accepted(self):
+        binary_prefix = f'sudoku-v{package.VERSION}-linux-x86_64'
+        package.create_zip(self.path, binary_prefix,
+                           [('bin/sudoku', b'game', 0o755),
+                            ('include/sudoku/game.h', b'header', 0o644)])
+        self.assertEqual(package.ensure_safe_archive(self.path, binary_prefix),
+                         {'bin/sudoku': b'game',
+                          'include/sudoku/game.h': b'header'})
+
     def test_too_many_members_rejected_before_zipfile(self):
         self.archive()
         self.change_trailer(8, '<H', package.MAX_ARCHIVE_FILES + 1)
