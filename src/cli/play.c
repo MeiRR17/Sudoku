@@ -203,9 +203,19 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                        (path[path_len - 1u] == ' ' || path[path_len - 1u] == '\t' ||
                         path[path_len - 1u] == '\r' || path[path_len - 1u] == '\n'))
                     path[--path_len] = '\0';
-                if (path_len >= 2u && path[0] == '"' && path[path_len - 1u] == '"') {
+                if (path_len && path[0] == '"') {
+                    if (path_len < 2u || path[path_len - 1u] != '"') {
+                        puts("Error: malformed quoted save path");
+                        continue;
+                    }
                     path[path_len - 1u] = '\0';
                     ++path;
+                    /* Explicit empty quotes must not silently reuse the last
+                     * destination and accidentally overwrite an older save. */
+                    if (!*path) {
+                        puts("Error: empty save path");
+                        continue;
+                    }
                 }
                 target = *path ? path : opt->save;
                 if (!target || !*target) {
