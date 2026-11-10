@@ -54,7 +54,7 @@ def verify_one(folder, platform_name, sha, version):
                          object_pairs_hook=unique_dict)
     if not isinstance(receipt, dict):
         raise ValueError('receipt must be a JSON object')
-    required = {'schema_version': 1, 'status': 'passed', 'git_commit_sha': sha,
+    required = {'schema_version': 2, 'status': 'passed', 'git_commit_sha': sha,
                 'project_version': version, 'runner_expected': platform_name,
                 'observed_system': system}
     for field, wanted in required.items():
@@ -91,6 +91,9 @@ def verify_one(folder, platform_name, sha, version):
         raise ValueError(f'{platform_name}: invalid archive SHA-256')
     if read_manifest(folder / 'SHA256SUMS') != digests:
         raise ValueError(f'{platform_name}: receipt and SHA256SUMS differ')
+    source_tree = receipt.get('source_tree_sha256')
+    if not isinstance(source_tree, str) or DIGEST_RE.fullmatch(source_tree) is None:
+        raise ValueError(f'{platform_name}: invalid canonical source content SHA-256')
     return receipt
 
 
@@ -101,11 +104,13 @@ def verify_matrix(folders, sha, version):
         raise ValueError('require precisely Linux, Windows and macOS evidence')
     receipts = {name: verify_one(Path(folders[name]), name, sha, version)
                 for name in PLATFORMS}
-    for ext in ('.zip', '.tar.gz'):
-        source_name = f'sudoku-v{version}-source{ext}'
-        values = {receipt['archive_sha256'][source_name] for receipt in receipts.values()}
-        if len(values) != 1:
-            raise ValueError('source archive differs across target platforms: ' + ext)
+    # ZIP and GZip compressors can emit different bytes across operating
+    # systems even when their extracted, validated source trees are identical.
+    # The acceptance runner records a domain-separated canonical content hash
+    # over sorted path/length/content tuples from its verified source ZIP.
+    source_hashes = {r['source_tree_sha256'] for r in receipts.values()}
+    if len(source_hashes) != 1:
+        raise ValueError('source content differs across target platforms')
     return receipts
 
 
