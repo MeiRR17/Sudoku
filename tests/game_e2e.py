@@ -47,7 +47,7 @@ with tempfile.TemporaryDirectory() as directory:
     checks += 1
     # A failed explicit save does not replace the last working default path.
     stdout, stderr = run(['--puzzle', near_win, '--save', explicit],
-                         f'save {folder}\\nsave\\nquit\\n')
+                         f'save {folder}\nsave\nquit\n')
     assert 'Error: file operation failed' in stdout
     assert f'Saved to {explicit}' in stdout and not stderr
     checks += 1
