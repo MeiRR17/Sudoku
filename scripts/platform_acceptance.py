@@ -36,6 +36,22 @@ def compiler_identity(build):
     return found.group(1)
 
 
+def source_tree_digest(members):
+    """Hash verified source member paths and bytes, independent of compression.
+
+    Length-prefixed framing prevents ambiguous concatenations. The caller
+    MUST pass entries from the strict, bounded release archive verifier.
+    """
+    digest = hashlib.sha256(b'Sudoku-source-content-v1\0')
+    for name, content in sorted(members.items()):
+        encoded = name.encode('utf-8')
+        digest.update(len(encoded).to_bytes(4, 'big'))
+        digest.update(encoded)
+        digest.update(len(content).to_bytes(8, 'big'))
+        digest.update(content)
+    return digest.hexdigest()
+
+
 def verify_checkout(required_sha=None):
     """Bind evidence to the exact clean checkout, including untracked files."""
     sha = call('git', 'rev-parse', '--verify', 'HEAD', capture=True)
@@ -127,8 +143,17 @@ def main():
     match = re.search(r'project\(Sudoku VERSION ([0-9]+\.[0-9]+\.[0-9]+) LANGUAGES C\)', version_text)
     if not match:
         raise ValueError('CMake project version missing')
+    # The ZIP/TAR parity verifier already checked every member's canonical
+    # path, file type and size. Hash their extracted content rather than the
+    # compressed bytes, which may differ across hosts/zlib implementations.
+    from package_release import ensure_safe_archive
+    source_prefix = f'sudoku-v{match.group(1)}-source'
+    source_members = ensure_safe_archive(dist / (source_prefix + '.zip'),
+                                         source_prefix)
+    source_sha = source_tree_digest(source_members)
     receipt = {
-        'schema_version': 1,
+        'schema_version': 2,
+        'source_tree_sha256': source_sha,
         'status': 'passed',
         'scope': 'this host only; unsigned development evidence, not release approval',
         'git_commit_sha': sha,
