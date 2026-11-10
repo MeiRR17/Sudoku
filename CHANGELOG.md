@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Fix cross-host release-evidence false negatives: use schema-v2 platform receipts with a canonical length-framed SHA-256 of **validated source file contents**, not raw compressed source ZIP/TAR digests, for Linux/Windows/macOS comparison. Preserve per-host archive SHA256SUMS checks and reject real source content drift. Add four canonical-hash tests and extend matrix tests to 16 cases; 20/20 focused local tests PASS. No platform acceptance or release status implied.
+
 - Retain unsigned exact-SHA per-platform acceptance receipt plus SHA256SUMS as a seven-day GitHub Actions artifact **only after** manual quality/packaging gates pass; do not distribute unlicensed binaries or trigger CI automatically. Pin the upload action by immutable SHA, use unique runner/commit/attempt names, and add workflow-configuration guard tests.
 - Add offline `verify_receipt_matrix.py` to reconcile native Linux/Windows/macOS receipt JSON and checksum manifests: reject mismatched Git commits, OS/CPU/compiler, missing checks, duplicate receipt keys, unexpected artifacts and cross-platform source-archive hash disagreement. 12 negative/positive unit tests and 4 workflow tests passed locally; synthetic receipts are **not** evidence of native host execution.
 

@@ -71,6 +71,7 @@ tests/workflow_evidence_unit.py
 tests/package_integrity.py
 tests/run_stdin.cmake
 tests/save_faults.py
+tests/source_tree_unit.py
 tests/test_board.c
 tests/test_game.c
 tests/test_generator.c
