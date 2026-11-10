@@ -302,6 +302,45 @@ def check_archive(path, expected_prefix):
     return members
 
 
+def verify_source_membership(entries):
+    """Require a self-consistent, buildable-source membership declaration.
+
+    A recomputed unsigned SHA256SUMS and matching ZIP/TAR bytes do not prove
+    that a source package contains the files claimed by its own manifest.
+    Verify exact equality of the archived path set and archived manifest.
+    This validates completeness relative to that manifest, not authenticity.
+    """
+    payload = entries.get('scripts/release_files.txt')
+    if payload is None or len(payload) > MAX_SOURCE_MANIFEST_BYTES:
+        raise ValueError('source archive missing or oversized release_files manifest')
+    try:
+        lines = payload.decode('utf-8').splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValueError('source archive manifest must be UTF-8') from exc
+    declared = set()
+    seen_portable = {}
+    for line in lines:
+        if not line or line.startswith('#'):
+            continue
+        path = PurePosixPath(line)
+        if (not portable_relative_name(line) or path.is_absolute()
+                or str(path) != line):
+            raise ValueError(f'unsafe source archive manifest path: {line!r}')
+        if line in declared:
+            raise ValueError(f'duplicate source archive manifest path: {line!r}')
+        if len(declared) >= MAX_ARCHIVE_FILES:
+            raise ValueError('source archive manifest exceeds file count budget')
+        claim_portable_path(line, seen_portable)
+        declared.add(line)
+    if not declared:
+        raise ValueError('empty source archive manifest')
+    actual = set(entries)
+    if actual != declared:
+        missing = sorted(declared - actual)
+        extra = sorted(actual - declared)
+        raise ValueError(f'source archive manifest mismatch: missing={missing!r} extra={extra!r}')
+
+
 def verify_packages(dest):
     manifest = dest / 'SHA256SUMS'
     if not manifest.is_file() or manifest.is_symlink():
@@ -340,6 +379,7 @@ def verify_packages(dest):
             required = {'README.md', 'CMakeLists.txt',
                         'src/core/solver.c', 'src/core/game.c',
                         'scripts/package_release.py', 'scripts/release_files.txt'}
+            verify_source_membership(tar_entries)
         else:
             executable = 'bin/sudoku.exe' if '-windows-' in prefix else 'bin/sudoku'
             required = {executable, 'include/sudoku/board.h',
