@@ -94,6 +94,25 @@ class StreamedTarVerificationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'TAR decoded stream exceeds size budget'):
                 package.ensure_safe_archive(self.path, PREFIX)
 
+    def test_tar_source_file_mode_must_be_portable(self):
+        with tarfile.open(self.path, 'w:gz') as output:
+            entry = tarfile.TarInfo(PREFIX + '/README.md')
+            entry.mode = 0o777
+            entry.size = 4
+            output.addfile(entry, io.BytesIO(b'text'))
+        with self.assertRaisesRegex(ValueError, 'non-canonical TAR file mode'):
+            package.ensure_safe_archive(self.path, PREFIX)
+
+    def test_tar_binary_executable_bit_cannot_be_removed(self):
+        binary_prefix = f'sudoku-v{package.VERSION}-linux-x86_64'
+        with tarfile.open(self.path, 'w:gz') as output:
+            entry = tarfile.TarInfo(binary_prefix + '/bin/sudoku')
+            entry.mode = 0o644  # Same binary bytes, no Unix execute permission.
+            entry.size = 4
+            output.addfile(entry, io.BytesIO(b'game'))
+        with self.assertRaisesRegex(ValueError, 'non-canonical TAR file mode'):
+            package.ensure_safe_archive(self.path, binary_prefix)
+
     def test_empty_tar_is_rejected(self):
         self.archive([])
         with self.assertRaisesRegex(ValueError, 'invalid number of TAR members'):
