@@ -44,7 +44,7 @@ jobs:
         # Never publish unlicensed development binaries or a GitHub Release.
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: sudoku-evidence-${{ inputs.runner_os }}-${{ github.sha }}
+          name: sudoku-evidence-${{ inputs.runner_os }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: |
             dist/platform-receipt.json
             dist/SHA256SUMS
