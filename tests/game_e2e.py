@@ -159,6 +159,22 @@ with tempfile.TemporaryDirectory() as directory:
     stdout, stderr = run(['--resume', damaged], exit_code=3)
     assert 'corrupted save file' in stderr and not stdout
     checks += 1
+    # A deliberately recalculated checksum must not permit a noncanonical
+    # timestamp such as E=00. Corruption rejection must be structural, not
+    # merely a mismatch with the original FNV-1a checksum.
+    prefix, old_checksum = first.rsplit(b'\nC=', 1)
+    assert len(old_checksum) == 17 and old_checksum.endswith(b'\n')
+    head, saved_elapsed = prefix.rsplit(b'\nE=', 1)
+    assert saved_elapsed.isdigit()
+    padded_body = head + b'\nE=0' + saved_elapsed + b'\n'
+    value = 0xcbf29ce484222325
+    for byte in padded_body:
+        value ^= byte
+        value = (value * 0x100000001b3) & ((1 << 64) - 1)
+    damaged.write_bytes(padded_body + f'C={value:016X}\n'.encode('ascii'))
+    stdout, stderr = run(['--resume', damaged], exit_code=3)
+    assert 'corrupted save file' in stderr and not stdout
+    checks += 1
     # A failed attempted save cannot overwrite the existing game.
     stdout, stderr = run(['--puzzle', near_win], f'save {folder}\nquit\n')
     assert 'file operation failed' in stdout and not stderr
