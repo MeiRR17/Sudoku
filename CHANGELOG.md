@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Add an offline `clear-notes` command to erase every pencil annotation in one undoable operation, preserving placed digits; an empty note set causes no history change. Extend game API, C unit checks, terminal E2E and gameplay documentation. Isolated GCC/Clang C11 + UBSan behavior checks passed; full Sudoku CMake/CTest and native platform acceptance are still pending.
+
 - Close remaining pre-verification size gaps: cap untrusted `SHA256SUMS` at **4 KiB** before ASCII decode, reject compressed TAR.GZ above **80 MiB** before streaming it, and apply the 80 MiB container cap to all four release archives **before calculating SHA-256**, not only while extracting. Add nine focused standard-library unit scenarios (including real four-archive positive verification and sparse oversized TAR negatives) plus two integrated E2E negative scenarios. Locally ran all 9 scenarios against reconstructed exact updated verification/archive functions; full CMake/CTest and native platform acceptance are still pending.
 
 - Preserve the exact solver's documented immutable-givens contract under an aliased in-place API call. `sudoku_analyze_bounded`, `sudoku_analyze` and `sudoku_solve_first` now return `SUDOKU_SOLVE_INVALID` if `first_solution == givens`, without changing the caller's board. Optional solution count and visited-node outputs reset to zero. Add regression assertions in `tests/test_solver.c` and document the explicit requirement for a distinct output board. The extracted production function passed GCC/Clang C11 UBSan isolated alias checks (13/13 each); full native build and release evidence remain HOLD.
