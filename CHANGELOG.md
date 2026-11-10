@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- Harden source archive manifest containment: reject a symlinked manifest, symlinks in **any** source path component (including parent directories), Windows-ambiguous backslashes and drive/alternate-stream colons, before reading bytes into source ZIP/TAR. Add nine focused file-system regression cases; all nine passed against the exact extracted source-path function, without claiming full release acceptance.
+
 - Fix cross-host release-evidence false negatives: use schema-v2 platform receipts with a canonical length-framed SHA-256 of **validated source file contents**, not raw compressed source ZIP/TAR digests, for Linux/Windows/macOS comparison. Preserve per-host archive SHA256SUMS checks and reject real source content drift. Add five canonical-hash tests (including actual GZip compression variants) and extend matrix tests to 16 cases; 21/21 focused local tests PASS. No platform acceptance or release status implied.
 
 - Retain unsigned exact-SHA per-platform acceptance receipt plus SHA256SUMS as a seven-day GitHub Actions artifact **only after** manual quality/packaging gates pass; do not distribute unlicensed binaries or trigger CI automatically. Pin the upload action by immutable SHA, use unique runner/commit/attempt names, and add workflow-configuration guard tests.
