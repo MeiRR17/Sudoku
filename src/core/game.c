@@ -320,8 +320,10 @@ static int sync_parent_directory(const char *path) {
 
 SudokuGameStatus sudoku_game_save(const SudokuGame *game, const char *path) {
 #if defined(_WIN32)
-    /* Windows staging retains the existing exclusive-create retry path. */
-    static unsigned serial=0;
+    /* InterlockedIncrement avoids a data race across simultaneous saves.
+     * A process ID also distinguishes filenames created by other processes
+     * in the same second; fopen("wbx") remains the exclusive-create guard. */
+    static volatile LONG serial=0;
 #endif
     char bytes[SUDOKU_SAVE_MAX_BYTES];
     char *temp;
@@ -339,9 +341,10 @@ SudokuGameStatus sudoku_game_save(const SudokuGame *game, const char *path) {
     if(!temp)return SUDOKU_GAME_IO;
 #if defined(_WIN32)
     for(attempt=0;attempt<64u;++attempt){
-        unsigned id=++serial;
-        (void)snprintf(temp,len+64u,"%s.tmp.%08lX.%08X",path,
-                       (unsigned long)time(NULL),id);
+        unsigned long id=(unsigned long)(DWORD)InterlockedIncrement(&serial);
+        (void)snprintf(temp,len+64u,"%s.tmp.%08lX.%08lX.%08lX",path,
+                       (unsigned long)time(NULL),
+                       (unsigned long)GetCurrentProcessId(),id);
         file=fopen(temp,"wbx");
         if(file)break;
         if(errno!=EEXIST){free(temp);return SUDOKU_GAME_IO;}
