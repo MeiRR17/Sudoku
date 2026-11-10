@@ -6,7 +6,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 - Allow interactive `save PATH` to accept paths containing spaces, with or without enclosing double quotes; reject overlong commands instead of splitting one path into separate arguments. Reject empty or unterminated quoted paths rather than unexpectedly reusing an existing save destination.
 - Remember a new explicit save destination even when POSIX directory sync fails **after** a successful rename, so the next bare `save` retries the new destination rather than reporting no configured path.
-- Add portable scripted game E2E and Linux fault-injection regressions. No native Windows/macOS acceptance or user-approved license is asserted; issue #10 remains open.
+- Move gameplay `--file` puzzle loading from a >1 MiB automatic stack buffer to bounded heap memory; release the buffer on every I/O and parsing outcome to improve compatibility with smaller Windows process stacks.
+- Add gameplay E2E for valid files with spaces, empty/binary/oversized files and missing paths, in addition to portable scripted save and Linux fault-injection regressions. No native Windows/macOS acceptance or user-approved license is asserted; issue #10 remains open.
 
 ## [0.8.3] — 2026-11-09
 
