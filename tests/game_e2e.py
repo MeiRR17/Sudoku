@@ -164,9 +164,8 @@ with tempfile.TemporaryDirectory() as directory:
     # merely a mismatch with the original FNV-1a checksum.
     prefix, old_checksum = first.rsplit(b'\nC=', 1)
     assert len(old_checksum) == 17 and old_checksum.endswith(b'\n')
-    head, saved_elapsed_line = prefix.rsplit(b'\nE=', 1)
-    assert saved_elapsed_line.endswith(b'\n')
-    saved_elapsed = saved_elapsed_line[:-1]
+    # The split at '\nC=' consumes the line break following E=...
+    head, saved_elapsed = prefix.rsplit(b'\nE=', 1)
     assert saved_elapsed.isdigit()
     padded_body = head + b'\nE=0' + saved_elapsed + b'\n'
     value = 0xcbf29ce484222325
