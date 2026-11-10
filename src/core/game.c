@@ -14,6 +14,7 @@
 #else
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #endif
 
 static int cell_index(unsigned row, unsigned col) {
@@ -304,7 +305,15 @@ SudokuGameStatus sudoku_game_save(const SudokuGame *game, const char *path) {
         if(errno!=EEXIST){ free(temp);return SUDOKU_GAME_IO; }
     }
     if(!file){free(temp);return SUDOKU_GAME_IO;}
-    ok=fwrite(bytes,1u,n,file)==n;
+    ok=1;
+#if !defined(_WIN32)
+    /* fopen("wbx") honors umask, which can create mode 0666. Even when
+     * replacing a previously private save, rename installs the *new* file's
+     * mode. Set 0600 before writing any game data, fail closed if this is
+     * impossible, and preserve the previous target on failure. */
+    ok=fchmod(fileno(file), S_IRUSR | S_IWUSR)==0;
+#endif
+    if(ok)ok=fwrite(bytes,1u,n,file)==n;
     if(ok)ok=fflush(file)==0;
 #if defined(_WIN32)
     if(ok)ok=_commit(_fileno(file))==0;
