@@ -27,6 +27,21 @@ static int check_game(void){
     CHECK(sudoku_game_set(game,0,1,4)==SUDOKU_GAME_RANGE);
     CHECK(sudoku_game_set(game,1,3,0)==SUDOKU_GAME_RANGE);
     CHECK(sudoku_game_set(game,1,3,5)==SUDOKU_GAME_CONFLICT);
+    /* Erase must clear pencil marks even when no digit is placed, while
+     * preserving undo/redo history and avoiding phantom no-op edits. */
+    CHECK(sudoku_game_note(game,1,3,4)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==(1u<<4));
+    CHECK(sudoku_game_erase(game,1,3)==SUDOKU_GAME_OK);
+    CHECK(game->state.board.cells[2]==0u && game->state.notes[2]==0u);
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==(1u<<4));
+    CHECK(sudoku_game_redo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==0u);
+    {
+        unsigned cursor = game->history_cursor, length = game->history_len;
+        CHECK(sudoku_game_erase(game,1,3)==SUDOKU_GAME_OK);
+        CHECK(game->history_cursor==cursor && game->history_len==length);
+    }
     CHECK(sudoku_game_note(game,1,3,4)==SUDOKU_GAME_OK);
     CHECK(game->state.notes[2] == (1u<<4));
     CHECK(sudoku_game_note(game,1,3,8)==SUDOKU_GAME_OK);
