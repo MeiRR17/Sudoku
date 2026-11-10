@@ -4,6 +4,8 @@ Runs a built binary, normalizes Windows CRLF, and checks byte-accurate JSON,
 exit codes, output file behavior, stdout/stderr separation and input paths.
 """
 import json
+import os
+import stat
 import pathlib
 import subprocess
 import sys
@@ -106,11 +108,38 @@ with tempfile.TemporaryDirectory() as tmp:
     run("solve", "--file", FIX / "unique.txt", "--format", "json", "--output", spaced_out, stdout="")
     assert json.loads(spaced_out.read_text()) == solve_json
     checks_add()
+    # New output is complete before atomically publishing its final name.
+    # Successful and refused-overwrite paths must clean staging files.
+    assert not list(temp.glob(output.name + ".tmp.*"))
+    checks_add()
     original = output.read_bytes()
     run("count", "--puzzle", EMPTY, "--format", "compact", "--output", output,
         code=4, stdout="", stderr_contains="never overwritten")
     assert output.read_bytes() == original
+    assert not list(temp.glob(output.name + ".tmp.*"))
     checks_add()
+    # Old orphaned staging files are never promoted into a final result.
+    orphan = temp / "recovery.txt.tmp.INTERRUPTED"
+    orphan.write_bytes(b"truncated, unverified")
+    recovered = temp / "recovery.txt"
+    run("validate", "--puzzle", GIVENS, "--format", "compact", "--output", recovered,
+        stdout="")
+    assert recovered.read_text() == GIVENS + "\n"
+    assert orphan.read_bytes() == b"truncated, unverified"
+    assert list(temp.glob(recovered.name + ".tmp.*")) == [orphan]
+    checks_add()
+    # Parent umask must not make newly published POSIX results world-readable.
+    if os.name == "posix":
+        owner_only = temp / "owner-only.txt"
+        previous_umask = os.umask(0)
+        try:
+            run("validate", "--puzzle", GIVENS, "--format", "compact",
+                "--output", owner_only, stdout="")
+        finally:
+            os.umask(previous_umask)
+        assert stat.S_IMODE(owner_only.stat().st_mode) == 0o600
+        assert not list(temp.glob(owner_only.name + ".tmp.*"))
+        checks_add()
     run("solve", "--file", FIX / "unsolvable.txt", "--output", temp / "not-created.txt",
         code=5, stdout="", stderr_contains="no solution")
     assert not (temp / "not-created.txt").exists()
