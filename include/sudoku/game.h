@@ -43,6 +43,9 @@ uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned c
 /* Fill candidate notes on all empty editable cells in one undoable step.
  * Replaces existing pencil notes; repeated unchanged action is a no-op. */
 SudokuGameStatus sudoku_game_auto_notes(SudokuGame *game);
+/* Remove pencil notes that conflict with the current board, but never add
+ * missing marks. One undoable state change, or no history change if unchanged. */
+SudokuGameStatus sudoku_game_prune_notes(SudokuGame *game);
 /* Clear every pencil note as one undoable edit; empty note sets are a no-op. */
 SudokuGameStatus sudoku_game_clear_notes(SudokuGame *game);
 SudokuGameStatus sudoku_game_undo(SudokuGame *game);
