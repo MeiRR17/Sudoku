@@ -81,20 +81,14 @@ def verify_archive_hash(path, expected):
 
 
 def read_manifest(path):
-    lines = bounded_text(path, MAX_MANIFEST_BYTES, 'ascii').splitlines()
-    records = {}
-    for line in lines:
-        if not re.fullmatch(r'[0-9a-f]{64}  [a-zA-Z0-9._-]+', line):
-            raise ValueError('invalid SHA256SUMS record')
-        digest, filename = line.split('  ', 1)
-        if filename in records:
-            raise ValueError('duplicate SHA256SUMS filename')
-        records[filename] = digest
-    if len(lines) != 4:
-        raise ValueError('expected four SHA256SUMS entries')
-    if list(records) != sorted(records):
-        raise ValueError('SHA256SUMS filenames must be sorted')
-    return records
+    """Apply the packager's canonical checksum grammar to acceptance evidence.
+
+    Metadata-only review must not accept a manifest that the local package
+    verifier rejects (CRLF, absent final newline, reordered/duplicate names).
+    This reads at most the shared 4 KiB budget before any archive inspection.
+    """
+    raw = bounded_text(path, MAX_MANIFEST_BYTES, 'ascii').encode('ascii')
+    return {name: digest for digest, name in PACKAGE.canonical_checksum_records(raw)}
 
 
 def verify_metadata_one(folder, platform_name, sha, version):
