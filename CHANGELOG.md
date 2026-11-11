@@ -4,6 +4,9 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-11 user-visible gameplay improvement — `hint all`:** Extend the terminal `hint` command family with a read-only listing of all distinct immediately forced naked/hidden singles in one pass. First list naked singles in row-major order, then hidden singles by row/column/box; deduplicate cells forced by more than one unit, preserve the original first-hint choice, and never inspect the stored answer to derive candidate digits. Refuse listing while incorrect entries remain, and never change board, pencil notes, history or save state. Existing `hint apply` remains an explicit single undoable move. CLI help, gameplay E2E checks and user documentation updated. Exact-source C helper (1,909 chars / FNV-1a32 `3408c169`) and printer (1,110 chars / FNV-1a32 `a138426d`) compiled with strict C11 warnings-as-errors and passed an isolated Linux harness. Full checkout CTest/native platform acceptance still pending, v0.8.4 release HOLD.
+
+
 - **2026-11-11 consistent cross-platform receipt manifest validation:** The unsigned receipt-matrix verifier now reuses the package verifier's canonical `SHA256SUMS` parser instead of maintaining a weaker, divergent grammar. The platform-acceptance hash verifier now rejects CRLF, CR and missing final LF before considering archive bytes. Three new tracked regression methods cover malformed records across both acceptance paths and valid canonical inputs; two preexisting matrix tests were updated to expect the shared canonical error diagnostics. Exact source-fingerprint-checked Linux harness: 13/13 focused checks passed across all three functions. Complete checked-in unit suites and platform-native acceptance remain pending; release HOLD unchanged.
 
 
