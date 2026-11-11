@@ -13,10 +13,18 @@ import os
 from pathlib import Path
 import platform
 import re
+import stat
 import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
+MAX_ARCHIVE_BYTES = 80 * 1024 * 1024  # Same ZIP/TAR compressed cap as package_release.
+MAX_CHECKSUM_BYTES = 4096
+RUNNER_ARCHIVE_SUFFIX = {
+    'ubuntu-latest': 'linux-x86_64',
+    'windows-latest': 'windows-x86_64',
+    'macos-latest': 'macos-arm64',
+}
 
 
 def call(*args, capture=False):
@@ -89,6 +97,61 @@ def write_receipt(output, receipt):
     finally:
         stage.unlink()
 
+def verified_archive_hashes(dist, version, expected):
+    """Recheck exact on-disk development artifacts without unbounded reads.
+
+    A prior package verification is necessary but not sufficient: files could
+    be changed before the acceptance receipt is emitted. Treat the checksum
+    manifest and all four claimed files as untrusted at this boundary.
+    """
+    if expected not in RUNNER_ARCHIVE_SUFFIX:
+        raise ValueError('unsupported acceptance runner')
+    prefix = f'sudoku-v{version}-'
+    names = {prefix + kind + ext
+             for kind in ('source', RUNNER_ARCHIVE_SUFFIX[expected])
+             for ext in ('.zip', '.tar.gz')}
+    manifest = dist / 'SHA256SUMS'
+    if manifest.is_symlink() or not manifest.is_file():
+        raise ValueError('missing or unsafe SHA256SUMS')
+    with manifest.open('rb') as stream:
+        raw = stream.read(MAX_CHECKSUM_BYTES + 1)
+    if len(raw) > MAX_CHECKSUM_BYTES:
+        raise ValueError('SHA256SUMS exceeds size budget')
+    lines = raw.decode('ascii').splitlines()
+    parsed = {}
+    for line in lines:
+        if not re.fullmatch(r'[0-9a-f]{64}  [A-Za-z0-9._-]+', line):
+            raise ValueError('invalid SHA256SUMS record')
+        digest, name = line.split('  ', 1)
+        if name in parsed:
+            raise ValueError('duplicate SHA256SUMS filename')
+        parsed[name] = digest
+    if len(lines) != 4 or set(parsed) != names or list(parsed) != sorted(parsed):
+        raise ValueError('wrong or unsorted four-archive manifest')
+    for name, expected_digest in parsed.items():
+        archive = dist / name
+        if archive.is_symlink() or not archive.is_file():
+            raise ValueError('missing or unsafe archive: ' + name)
+        digest = hashlib.sha256()
+        total = 0
+        with archive.open('rb') as stream:
+            # fstat verifies the opened file, not a potentially stale path.
+            metadata = os.fstat(stream.fileno())
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_ARCHIVE_BYTES:
+                raise ValueError('archive exceeds size budget or is not regular: ' + name)
+            while True:
+                chunk = stream.read(65536)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_ARCHIVE_BYTES:
+                    raise ValueError('archive exceeds size budget: ' + name)
+                digest.update(chunk)
+        if digest.hexdigest() != expected_digest:
+            raise ValueError('archive changed after verification: ' + name)
+    return dict(sorted(parsed.items()))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--expected', required=True,
@@ -124,25 +187,13 @@ def main():
          '--output', dist)
     call(sys.executable, ROOT / 'scripts/package_release.py', '--verify-only',
          '--output', dist)
-    manifest = dist / 'SHA256SUMS'
-    checksums = {}
-    for line in manifest.read_text(encoding='ascii').splitlines():
-        digest, name = line.split('  ', 1)
-        if not re.fullmatch(r'[0-9a-f]{64}', digest) or '/' in name or '\\' in name:
-            raise ValueError('unsafe archive manifest record')
-        actual = hashlib.sha256((dist / name).read_bytes()).hexdigest()
-        if digest != actual:
-            raise ValueError(f'archive changed after verification: {name}')
-        checksums[name] = digest
-    if len(checksums) != 4:
-        raise ValueError('expected four checked development archives')
-    # Detect source changes made during the build/test/package operations.
-    verify_checkout(sha)
-
     version_text = (ROOT / 'CMakeLists.txt').read_text(encoding='utf-8')
     match = re.search(r'project\(Sudoku VERSION ([0-9]+\.[0-9]+\.[0-9]+) LANGUAGES C\)', version_text)
     if not match:
         raise ValueError('CMake project version missing')
+    checksums = verified_archive_hashes(dist, match.group(1), args.expected)
+    # Detect source changes made during the build/test/package operations.
+    verify_checkout(sha)
     # The ZIP/TAR parity verifier already checked every member's canonical
     # path, file type and size. Hash their extracted content rather than the
     # compressed bytes, which may differ across hosts/zlib implementations.
