@@ -4,6 +4,13 @@ LD_PRELOAD interposes mkstemp/fchmod/fsync/rename/link. Tests document the disti
 pre-commit failures (old save preserved) and post-rename dir-sync failure
 (target replaced, durability unconfirmed). Does not simulate real power loss.
 """
+# These executable E2E scripts intentionally use Python 'assert' for
+# required release checks. -O/-OO and PYTHONOPTIMIZE remove all assertions;
+# refusing optimization prevents a silent false-positive acceptance.
+if not __debug__:
+    raise SystemExit('SUDOKU TEST FAIL: Python optimization disables required assertions')
+
+
 import os
 from pathlib import Path
 import subprocess
