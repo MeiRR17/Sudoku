@@ -4,6 +4,9 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-11 verifier input-open hardening:** Replace path-only `open('rb')` reads of SHA256SUMS, archive hashing, ZIP central-directory records, TAR GZIP decoding/trailers and ZIP decoding with descriptor-checked nonblocking regular-file opens. POSIX `O_NOFOLLOW` refuses final symlink swaps; `file_hash` enforces archive byte budgets against its opened descriptor and rejects shortened or growing reads. Six new targeted package-budget unit tests cover positive SHA-256, oversized archive, device, FIFO manifest/archive, and final symlink. An exact-GitHub helper fingerprint matched 1,473 characters (FNV-1a32 `c2e61d79`); isolated Linux regression harness passed **10/10**, including ZIP/TAR smoke. This is not a full CMake/CTest run or native platform acceptance. Post-hash archive identity is not yet bound to the same descriptor; release HOLD remains.
+
+
 - **2026-11-11 complete POSIX package-read containment:** Extend descriptor-relative directory traversal from source members to the source **manifest** and staged **installation** files. The source manifest now opens below the pinned repository root, and binaries/headers open below the pinned installation root. Even if a listed file's parent becomes a symlink after the pathname preflight, its file bytes cannot be loaded through that redirected path on supported POSIX hosts. Added manifest-parent, installed-parent and installed-leaf symlink-swap regressions. An isolated fingerprint-verified copy of the actual helper block (2,767 chars, FNV-1a32 `00d99e4e`) passed 11/11 Linux filesystem assertions. Windows remains on a guarded pathname fallback; complete tracked test runs and native acceptance receipts are still pending.
 
 
