@@ -4,6 +4,9 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-11 complete POSIX package-read containment:** Extend descriptor-relative directory traversal from source members to the source **manifest** and staged **installation** files. The source manifest now opens below the pinned repository root, and binaries/headers open below the pinned installation root. Even if a listed file's parent becomes a symlink after the pathname preflight, its file bytes cannot be loaded through that redirected path on supported POSIX hosts. Added manifest-parent, installed-parent and installed-leaf symlink-swap regressions. An isolated fingerprint-verified copy of the actual helper block (2,767 chars, FNV-1a32 `00d99e4e`) passed 11/11 Linux filesystem assertions. Windows remains on a guarded pathname fallback; complete tracked test runs and native acceptance receipts are still pending.
+
+
 - **2026-11-11 pinned source-directory traversal:** Source archives now resolve each manifested path component through an already-open directory descriptor on POSIX hosts with `openat`/`O_NOFOLLOW`. A replaced parent directory symlink cannot redirect package reads beyond the checkout, even after the pathname preflight; leaf and byte-count checks still use the opened inode. Added nested-path, hostile parent/leaf symlink, and traversal-rejection regressions; corrected an older package-budget test to use the new fd-based API. Exact GitHub function block (2,626 chars, FNV-1a32 `62da3c69`) passed 7/7 focused real-filesystem Linux checks; full checkout/CTest, native Windows/macOS, official acceptance receipts and release gates remain pending.
 
 
