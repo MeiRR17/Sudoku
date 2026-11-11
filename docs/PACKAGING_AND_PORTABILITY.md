@@ -24,10 +24,10 @@ To uninstall an **isolated** custom prefix, remove that prefix directory. For a 
 
 `package_release.py` writes five items to `dist/` on each host:
 
-- `sudoku-v0.8.1-{linux|windows|macos}-{x86_64|arm64}.tar.gz`
-- `sudoku-v0.8.1-{linux|windows|macos}-{x86_64|arm64}.zip`
-- `sudoku-v0.8.1-source.tar.gz`
-- `sudoku-v0.8.1-source.zip`
+- `sudoku-v0.8.4-{linux|windows|macos}-{x86_64|arm64}.tar.gz`
+- `sudoku-v0.8.4-{linux|windows|macos}-{x86_64|arm64}.zip`
+- `sudoku-v0.8.4-source.tar.gz`
+- `sudoku-v0.8.4-source.zip`
 - `SHA256SUMS` (four lowercase SHA-256 hex digests, sorted by filename)
 
 The platform label is detected from the **actual packaging host**, not inferred from a remote target. Script rejects unsupported hosts. Source archive membership is explicit in `scripts/release_files.txt`; build outputs, personal saves, `.git` metadata and archives are not listed. Both archive formats use sorted file order, fixed 1980-01-01 timestamps, fixed owner/group IDs where available and deterministic compression settings. This guarantees **repackaging determinism when the staged bytes are identical**, NOT necessarily identical executable bytes across different compilers, machines, runtime linkers or build paths. We separately compare binary hashes for independent local builds when possible. `--verify-only` validates the SHA manifest and checks that archive member paths are safe and sorted; SHA-256 checks corruption, **not authenticity**. No signature/attestation exists.
@@ -320,3 +320,10 @@ The workflow input can be selected in GitHub Actions once the updated file is av
 `verify_receipt_matrix.py` validates that a receipt either omits both optional Actions identity fields or contains a correctly typed and formatted pair. An explicitly supplied null value does not count as omission. For a known combined three-host Actions run, the `--metadata-only --require-run-id ID --require-run-attempt N` flags require every uploaded native receipt to claim **that exact ID and attempt**. This prevents accidental mixing of successful old-run data with new-run data sharing the same Git SHA. Both flags must appear together; neither is accepted in the full local or single-host modes. The opt-in `all` GitHub workflow passes `${{ github.run_id }}` and `${{ github.run_attempt }}` explicitly. Separately executed platform evidence can still be compared without a same-run requirement, but must not be described as a same-run cohort.
 
 No use of these fields proves that GitHub genuinely issued or signed the evidence, or that the downloaded binaries were executed. The actual required clean native builds, package bytes, license approval, signed provenance and rollback gates remain outstanding.
+
+
+### v0.8.4 development-package publication (no overwrite)
+
+The packager stages all four archives plus `SHA256SUMS` inside a private directory under the output folder on the **same filesystem**. It validates the complete set, including SHA-256 and ZIP/TAR content parity, **before** exposing any final package files. Publication uses exclusive hard links, so a stale verified package or an artifact created by a competing writer is never silently overwritten. If publication fails normally, the packager removes only its newly created links that still point to its private staged file inodes, and leaves unrelated and competing files intact.
+
+**Limitations:** a crash/power loss between links can still leave an incomplete multi-file set, and there is no signed release or power-loss durability guarantee. The `SHA256SUMS` link is written last; consumers must always run `--verify-only` and must never treat the mere presence of files as certification. Native Windows filesystem/link semantics still require real Windows acceptance. Re-run into a **fresh output directory** instead of overwriting previously published files.
