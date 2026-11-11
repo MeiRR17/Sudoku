@@ -48,15 +48,15 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, auto-notes, prune-notes,");
-    puts("          clear-notes, hint [all|chain|apply [all|chain]], undo, redo, reset, check [details|clear],");
+    puts("          clear-notes, hint [all|chain [N]|apply [all|chain [N]]], undo, redo, reset, check [details|clear],");
     puts("          status, save [PATH], help, quit");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'note' toggles pencil marks; 'candidates' lists legal digits without guessing.");
     puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
     puts("'hint' shows one forced single; 'hint all' lists each distinct forced cell.");
-    puts("'hint chain' previews successive singles opened by earlier deductions.");
+    puts("'hint chain [N]' previews up to N successive forced singles (1..81).");
     puts("'hint apply' places one; 'hint apply all' batches current forced cells.");
-    puts("'hint apply chain' commits the successive singles in a single undo.");
+    puts("'hint apply chain [N]' commits at most N singles in one undo.");
     puts("'check details' locates wrong entries; 'check clear' erases them (undoable).");
     puts("No color, network or special keys required.");
 }
@@ -440,13 +440,15 @@ static void apply_all_hints(SudokuGame *game){
  * Each iteration fills one cell; the 81-cell bound guarantees termination. */
 static SudokuGameStatus collect_hint_chain(const SudokuGame *game,
                                             LogicalHint hints[SUDOKU_CELL_COUNT],
-                                            unsigned *count){
-    SudokuGame *trial=malloc(sizeof *trial);
+                                            unsigned limit,unsigned *count){
+    SudokuGame *trial;
     SudokuGameStatus result=SUDOKU_GAME_OK;
     *count=0u;
+    if(limit==0u||limit>SUDOKU_CELL_COUNT)return SUDOKU_GAME_RANGE;
+    trial=malloc(sizeof *trial);
     if(!trial)return SUDOKU_GAME_IO;
     *trial=*game;
-    while(*count<SUDOKU_CELL_COUNT){
+    while(*count<limit){
         LogicalHint next;
         if(!find_hint(trial,&next))break;
         result=sudoku_game_set(trial,next.index/9u+1u,
@@ -461,7 +463,7 @@ static SudokuGameStatus collect_hint_chain(const SudokuGame *game,
  * transactional set-many API as ONE Undo step. No guess or solution lookup
  * supplies a placement; the verified solution is used only to block a
  * board that already contains wrong user entries. */
-static void hint_chain(SudokuGame *game,int apply){
+static void hint_chain(SudokuGame *game,int apply,unsigned limit){
     LogicalHint hints[SUDOKU_CELL_COUNT];
     SudokuGameMove moves[SUDOKU_CELL_COUNT];
     SudokuGameStatus status;
@@ -475,7 +477,7 @@ static void hint_chain(SudokuGame *game,int apply){
                    "Cannot preview hint chain: correct the existing mistakes first.");
         return;
     }
-    status=collect_hint_chain(game,hints,&count);
+    status=collect_hint_chain(game,hints,limit,&count);
     if(status!=SUDOKU_GAME_OK){
         printf("Error: %s\n",sudoku_game_status_text(status));
         return;
@@ -625,16 +627,22 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             continue;
         }
         if(strcmp(command,"help")==0&&!a){commands();continue;}
-        if(strcmp(command,"hint")==0&&
-           (!a||((strcmp(a,"apply")==0||strcmp(a,"all")==0||
-                   strcmp(a,"chain")==0)&&!b)||
-            (strcmp(a,"apply")==0&&b&&
-             (strcmp(b,"all")==0||strcmp(b,"chain")==0)&&!c))){
-            if(a&&strcmp(a,"chain")==0)hint_chain(game,0);
-            else if(a&&b&&strcmp(b,"chain")==0)hint_chain(game,1);
-            else if(a&&strcmp(a,"all")==0)print_hint_all(game);
-            else if(a&&b)apply_all_hints(game);
-            else print_hint(game,a!=NULL);
+        if(strcmp(command,"hint")==0){
+            uint64_t limit=81u;
+            if(!a)print_hint(game,0);
+            else if(strcmp(a,"all")==0&&!b)print_hint_all(game);
+            else if(strcmp(a,"apply")==0&&!b)print_hint(game,1);
+            else if(strcmp(a,"chain")==0&&
+                    (!b||(!c&&decimal(b,81u,&limit)&&limit>=1u)))
+                hint_chain(game,0,(unsigned)limit);
+            else if(strcmp(a,"apply")==0&&b&&
+                    strcmp(b,"all")==0&&!c)
+                apply_all_hints(game);
+            else if(strcmp(a,"apply")==0&&b&&
+                    strcmp(b,"chain")==0&&
+                    (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
+                hint_chain(game,1,(unsigned)limit);
+            else puts("Error: unknown command or invalid arguments. Type 'help'.");
             continue;
         }
         if(strcmp(command,"show")==0&&!a){display(game);continue;}
