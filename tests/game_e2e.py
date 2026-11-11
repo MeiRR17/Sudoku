@@ -398,6 +398,41 @@ with tempfile.TemporaryDirectory() as directory:
     assert not stderr
     checks += 1
 
+    # Users can request a short teaching sequence rather than applying all
+    # 51 deductions at once. Preview is read-only; apply 3 records one Undo.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint chain 3\nstatus\nhint chain 1\nstatus\n'
+                         'hint apply chain 3\nstatus\nundo\nstatus\n'
+                         'redo\nstatus\nquit\n')
+    assert 'Logical hint chain (3 steps):' in stdout, stdout
+    assert 'Logical hint chain (1 steps):' in stdout, stdout
+    assert 'Step 3 ' in stdout and 'Step 4 ' not in stdout, stdout
+    assert 'Applied 3 chained logical hints in one undoable move.' in stdout
+    assert stdout.count('Progress: 30/81 filled') == 3, stdout
+    assert stdout.count('Progress: 33/81 filled') == 2, stdout
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # Reject zero, >81, nondecimal and extra arguments before looking at
+    # candidate digits. Invalid requests are history/board neutral.
+    invalid_chains = [
+        'hint chain 0', 'hint chain 82', 'hint chain -1',
+        'hint chain 3 extra', 'hint chain 3.0',
+        'hint apply chain 0', 'hint apply chain 82',
+        'hint apply chain nope', 'hint apply chain 3 extra',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(invalid_chains) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_chains)
+    assert stdout.count('Progress: 30/81 filled') == 2
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'Applied ' not in stdout and 'Logical hint chain (' not in stdout
+    assert not stderr
+    checks += 1
+
     # Existing incorrect digits block both preview and group application;
     # neither command adds an undo entry or leaks the cached solution.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],
