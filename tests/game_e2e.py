@@ -302,6 +302,26 @@ with tempfile.TemporaryDirectory() as directory:
     assert not stderr
     checks += 1
 
+    # Auto-notes fills all live-rule candidates with one undoable edit;
+    # repeating it is history-neutral and resume persists the generated notes.
+    auto_save = folder / 'generated pencil notes.save'
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         f'notes 1 3\nauto-notes\nnotes 1 3\nstatus\n'
+                         f'auto-notes\nstatus\nundo\nnotes 1 3\n'
+                         f'redo\nnotes 1 3\nsave {auto_save}\nquit\n')
+    assert stdout.count('Notes for row 1 col 3: 1 2 4') == 2, stdout
+    assert stdout.count('Notes for row 1 col 3:\n') == 2, stdout
+    assert stdout.count('undo 1, redo 0') == 2, stdout
+    assert auto_save.is_file() and not stderr
+    checks += 1
+    stdout, stderr = run(['--resume', auto_save],
+                         'notes 1 3\nauto-notes wrong\n'
+                         'status\nquit\n')
+    assert 'Notes for row 1 col 3: 1 2 4' in stdout
+    assert 'Error: unknown command or invalid arguments' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
     # A reset on an untouched board must not create phantom undo history.
     stdout, stderr = run(['--puzzle', near_win], 'reset\nstatus\nundo\nquit\n')
     assert 'undo 0, redo 0' in stdout and 'no action to undo or redo' in stdout
