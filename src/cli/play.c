@@ -48,7 +48,7 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, focus [N], auto-notes, prune-notes,");
-    puts("          clear-notes, hint [all|pairs [N]|chain [N]|apply [all|pairs [N]|chain [N]]], undo [N], redo [N], reset, check [details|clear],");
+    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|chain [N]|apply [all|pairs [N]|hidden-pairs [N]|chain [N]]], undo [N], redo [N], reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
     puts("prints entered digits too; neither is a full save or stored solution.");
@@ -59,6 +59,8 @@ static void commands(void){
     puts("'hint' shows one forced single; 'hint all' lists each distinct forced cell.");
     puts("'hint pairs [N]' previews actionable naked pairs (default 5).");
     puts("'hint apply pairs [N]' removes matching pencil marks in one undo.");
+    puts("'hint hidden-pairs [N]' previews pairs hidden among more candidates.");
+    puts("'hint apply hidden-pairs [N]' prunes those extra notes in one undo.");
     puts("'hint chain [N]' previews up to N successive forced singles (1..81).");
     puts("'hint apply' places one; 'hint apply all' batches current forced cells.");
     puts("'hint apply chain [N]' commits at most N singles in one undo.");
@@ -444,6 +446,110 @@ done_pairs:
             puts("No matching pencil notes to remove; history unchanged.");
     }
 }
+/* A hidden pair is two digits whose only possible locations within a
+ * row/column/box are the same two unfilled cells. Thus other candidates
+ * can be removed from THOSE cells, unlike a naked pair which removes the
+ * paired digits from other cells of the unit. Both modes are solution-blind.
+ * Dedupe identical (two cells, two digits) found in overlapping units. */
+typedef struct HiddenPairKey {
+    unsigned first, second;
+    uint16_t digits;
+} HiddenPairKey;
+static void hidden_pairs(SudokuGame *game,unsigned limit,int apply){
+    uint16_t masks[SUDOKU_CELL_COUNT]={0};
+    uint16_t eliminations[SUDOKU_CELL_COUNT]={0};
+    HiddenPairKey seen[SUDOKU_CELL_COUNT];
+    unsigned seen_count=0u,total=0u,unit,i,k,d,e,j;
+    if(sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot inspect hidden pairs: invalid current board.");
+        return;
+    }
+    if(sudoku_game_won(game)){
+        puts("Puzzle already solved; no hidden pair hint needed.");
+        return;
+    }
+    if(sudoku_game_mistakes(game)){
+        puts(apply?"Cannot apply hidden pairs: correct the existing mistakes first.":
+                   "Cannot preview hidden pairs: correct the existing mistakes first.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        masks[i]=candidate_mask(game,i);
+    for(unit=0u;unit<27u;++unit){
+        const char *kind=unit<9u?"row":unit<18u?"column":"box";
+        for(d=1u;d<=8u;++d){
+            unsigned first=0u,second=0u,count=0u;
+            for(k=0u;k<9u;++k){
+                i=pair_unit_cell(unit,k);
+                if(masks[i]&(uint16_t)(1u<<d)){
+                    if(count==0u)first=i;
+                    else if(count==1u)second=i;
+                    ++count;
+                }
+            }
+            if(count!=2u)continue;
+            for(e=d+1u;e<=9u;++e){
+                unsigned matches=0u,already=0u;
+                uint16_t reserved,drop_first,drop_second;
+                for(k=0u;k<9u;++k){
+                    i=pair_unit_cell(unit,k);
+                    if(masks[i]&(uint16_t)(1u<<e)){
+                        if(i==first||i==second)++matches;
+                        else{matches=3u;break;}
+                    }
+                }
+                if(matches!=2u)continue;
+                reserved=(uint16_t)((1u<<d)|(1u<<e));
+                drop_first=(uint16_t)(masks[first]&(uint16_t)~reserved);
+                drop_second=(uint16_t)(masks[second]&(uint16_t)~reserved);
+                if(!(drop_first||drop_second))continue;
+                for(j=0u;j<seen_count;++j)
+                    if(seen[j].first==first&&seen[j].second==second&&
+                       seen[j].digits==reserved){already=1u;break;}
+                if(already)continue;
+                /* seen_count never exceeds the user-selected 81-pair cap. */
+                seen[seen_count].first=first;
+                seen[seen_count].second=second;
+                seen[seen_count].digits=reserved;
+                ++seen_count;
+                printf("Hidden pair %u in %s %u: r%uc%u + r%uc%u reserve %u,%u; remove from",
+                       total+1u,kind,unit%9u+1u,first/9u+1u,first%9u+1u,
+                       second/9u+1u,second%9u+1u,d,e);
+                for(j=0u;j<2u;++j){
+                    unsigned index=j?second:first,sep=0u;
+                    uint16_t drop=j?drop_second:drop_first;
+                    if(!drop)continue;
+                    if(apply)eliminations[index]=(uint16_t)(eliminations[index]|drop);
+                    printf(" r%uc%u(",index/9u+1u,index%9u+1u);
+                    for(i=1u;i<=9u;++i)
+                        if(drop&(uint16_t)(1u<<i)){
+                            if(sep++)putchar(',');
+                            printf("%u",i);
+                        }
+                    putchar(')');
+                }
+                putchar('\n');
+                if(++total==limit)goto done_hidden_pairs;
+            }
+        }
+    }
+done_hidden_pairs:
+    if(!total){
+        puts("No actionable hidden pairs found.");
+        return;
+    }
+    if(apply){
+        unsigned removed=0u;
+        SudokuGameStatus status=sudoku_game_eliminate_notes(game,eliminations,&removed);
+        if(status!=SUDOKU_GAME_OK)
+            printf("Error: %s\n",sudoku_game_status_text(status));
+        else if(removed)
+            printf("Removed %u hidden-pair pencil candidate%s in one undoable edit.\n",
+                   removed,removed==1u?"":"s");
+        else
+            puts("No matching hidden-pair pencil notes to remove; history unchanged.");
+    }
+}
 typedef struct LogicalHint {
     unsigned index, digit, group;
     int hidden;
@@ -807,6 +913,9 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             else if(strcmp(a,"pairs")==0&&
                     (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
                 naked_pairs(game,(unsigned)(b?limit:5u),0);
+            else if(strcmp(a,"hidden-pairs")==0&&
+                    (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
+                hidden_pairs(game,(unsigned)(b?limit:5u),0);
             else if(strcmp(a,"apply")==0&&!b)print_hint(game,1);
             else if(strcmp(a,"chain")==0&&
                     (!b||(!c&&decimal(b,81u,&limit)&&limit>=1u)))
@@ -818,6 +927,10 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                     strcmp(b,"pairs")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
                 naked_pairs(game,(unsigned)(c?limit:5u),1);
+            else if(strcmp(a,"apply")==0&&b&&
+                    strcmp(b,"hidden-pairs")==0&&
+                    (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
+                hidden_pairs(game,(unsigned)(c?limit:5u),1);
             else if(strcmp(a,"apply")==0&&b&&
                     strcmp(b,"chain")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
