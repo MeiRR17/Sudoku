@@ -4,6 +4,9 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-11 atomic multi-step Undo/Redo:** Extend the public C game API with `sudoku_game_undo_steps` and `sudoku_game_redo_steps`, and the playable CLI with `undo [N]` / `redo [N]` (decimal N=1–127, default 1). The engine checks available history first and then moves to the final snapshot in one operation; out-of-range, malformed or excessive counts never partially change the board, notes, cursor or redo branch. Original no-argument commands remain backward-compatible wrappers. Add a C regression covering grouped navigation, redo truncation after a new move, invalid input and the full 128-snapshot bound, plus CLI E2E scenarios. Exact GitHub function bodies compiled under GCC C11 warnings-as-errors and passed 22 focused assertions; complete original game CTest/native platform acceptance is still pending. Release HOLD unchanged.
+
+
 - **2026-11-11 prevent silent optimized-test pass:** All six assertion-dependent Python CTest scripts (`package_smoke`, `game_e2e`, `cli_golden`, `generator_golden`, `package_integrity`, Linux `save_faults`) now refuse `python -O`, `python -OO` and `PYTHONOPTIMIZE` before running child binaries or writing test artifacts; optimized Python removes `assert` statements and could otherwise return a false-green CTest result. `scripts/quality_gate.py` also rejects optimized execution before building. Five regression methods in `tests/quality_gate_unit.py` check the guard and exercise the real six scripts in optimized subprocesses, including environment-triggered optimization. Verified the same GitHub guard snippet was installed in all six sources (322 chars / FNV-1a32 `a6c05352`). Executed 4/4 local Python guard subprocess checks (normal, -O, -OO, PYTHONOPTIMIZE), **not** the checked-in suite or real native package E2E. Release HOLD unchanged.
 
 
