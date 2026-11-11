@@ -4,6 +4,9 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-11 consistent cross-platform receipt manifest validation:** The unsigned receipt-matrix verifier now reuses the package verifier's canonical `SHA256SUMS` parser instead of maintaining a weaker, divergent grammar. The platform-acceptance hash verifier now rejects CRLF, CR and missing final LF before considering archive bytes. Three new tracked regression methods cover malformed records across both acceptance paths and valid canonical inputs; two preexisting matrix tests were updated to expect the shared canonical error diagnostics. Exact source-fingerprint-checked Linux harness: 13/13 focused checks passed across all three functions. Complete checked-in unit suites and platform-native acceptance remain pending; release HOLD unchanged.
+
+
 - **2026-11-11 canonical checksum manifest and supported-host labels:** Development release verification now requires exactly four ASCII/LF-terminated SHA256SUMS entries sorted by **filename**, not by digest, and rejects CRLF, missing final newline, duplicates, malformed hexadecimal or reordered entries before opening any archives. Only the roadmap's initial supported labels are accepted: Linux x86_64, Windows x86_64 and macOS arm64; packaging itself also rejects otherwise recognized but unapproved OS/CPU pairs. Added six manifest/platform regression methods and preserved the adversarial forged-name test's intended coverage by sorting its modified manifest. A focused copy of the exact GitHub parser block (1,505 chars, FNV-1a32 `ccd4e4c0`) passed 19/19 Linux checks; complete checked-in tests and native platform acceptance remain pending.
 
 
