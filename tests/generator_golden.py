@@ -1,4 +1,11 @@
 """Exact generator JSON, deterministic seeds, validation and failure semantics."""
+# These executable E2E scripts intentionally use Python 'assert' for
+# required release checks. -O/-OO and PYTHONOPTIMIZE remove all assertions;
+# refusing optimization prevents a silent false-positive acceptance.
+if not __debug__:
+    raise SystemExit('SUDOKU TEST FAIL: Python optimization disables required assertions')
+
+
 import json
 from pathlib import Path
 import subprocess
