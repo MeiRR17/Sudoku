@@ -23,6 +23,7 @@ The `--file` argument reads a puzzle file (max 1 MiB), not a saved game. `--resu
 | `erase ROW COL` | Clear the placed digit **and all pencil notes** from an editable cell. Erasing a blank cell with notes is undoable; repeating erase on a blank note-free cell is a no-op. |
 | `note ROW COL DIGIT` | Toggle a pencil note 1–9 on an empty editable cell. |
 | `notes ROW COL` | List the pencil notes for one cell. |
+| `candidates ROW COL` | Show digits currently legal under Sudoku row/column/box rules in an **empty** cell, without consulting the hidden solution or changing notes/history. A filled cell reports its current digit. |
 | `clear-notes` | Remove all pencil notes from the whole board as **one undoable action**, retaining every placed digit. If no notes remain, no history entry is created. Takes no arguments. |
 | `undo`, `redo` | Revert or replay a placement, erasure, note or reset. New edits discard the redo branch. |
 | `reset` | Restore original givens and clear notes. Can be undone while history remains. |
@@ -32,7 +33,7 @@ The `--file` argument reads a puzzle file (max 1 MiB), not a saved game. `--resu
 | `quit` / `exit` | Leave without an implicit save. |
 | `help` | Show the interactive command summary. |
 
-The game uses 1-based row/column coordinates. The givens are immutable. Pencil notes are intentionally independent of the authoritative engine candidates: they are personal annotations, not automatic hints. The player may enter an incorrect digit as long as it does not directly violate row, column or box constraints; `check` compares it with the **verified unique solution**. Completion is detected only when the board matches all 81 digits of that solution, not merely when all cells are nonempty.
+The game uses 1-based row/column coordinates. The givens are immutable. `candidates` calculates currently legal values from the **live board**, not the puzzle's verified solution; therefore it cannot spoil the answer and can list multiple options. Its output is read-only and does not depend on pencil notes, create an undo state, clear redo or modify a save. For example, with the standard sample puzzle, `candidates 1 3` prints `Candidates for row 1 col 3: 1 2 4`; `candidates 1 1` reports that the original clue is already filled. Invalid coordinates, a third argument or a missing coordinate are rejected. Pencil notes are intentionally independent of the authoritative engine candidates: they are personal annotations, not automatic hints. The player may enter an incorrect digit as long as it does not directly violate row, column or box constraints; `check` compares it with the **verified unique solution**. Completion is detected only when the board matches all 81 digits of that solution, not merely when all cells are nonempty.
 
 Erasing an editable cell now clears **both** any placed digit and its note mask. This fixes the former no-op behavior when an empty cell still contained pencil marks, without adding a second command: `undo` restores the erased notes, `redo` clears them again, and no history step is created if there was nothing to erase. Given cells remain immutable.
 
