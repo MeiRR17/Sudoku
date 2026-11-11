@@ -166,6 +166,45 @@ class SourceManifestSafetyTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(kind + ' must be a regular file', result.stderr)
 
+    def test_nested_source_member_reads_pinned_directory(self):
+        nested = self.root / 'src' / 'nested'
+        nested.mkdir()
+        (nested / 'good.c').write_bytes(b'actual source bytes')
+        self.lines('src/nested/good.c')
+        self.assertEqual(package.source_paths(),
+                         [('src/nested/good.c', b'actual source bytes', 0o644)])
+
+    @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'O_NOFOLLOW') and
+                         hasattr(os, 'O_DIRECTORY') and os.open in os.supports_dir_fd,
+                         'POSIX openat/O_NOFOLLOW required')
+    def test_parent_symlink_rejected_even_if_preflight_is_bypassed(self):
+        outside = Path(self.tmp.name) / 'outside-source'
+        outside.mkdir()
+        (outside / 'secret.c').write_bytes(b'secret source bytes')
+        shortcut = self.root / 'alias'
+        shortcut.symlink_to(outside, target_is_directory=True)
+        self.lines('alias/secret.c')
+        # This simulates a symlink swap after the old Path.is_symlink
+        # preflight but before the actual source file is opened.
+        with patch.object(Path, 'is_symlink', return_value=False):
+            with self.assertRaises(OSError):
+                package.source_paths()
+
+    @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'O_NOFOLLOW') and
+                         hasattr(os, 'O_DIRECTORY') and os.open in os.supports_dir_fd,
+                         'POSIX openat/O_NOFOLLOW required')
+    def test_leaf_symlink_rejected_by_pinned_directory_open(self):
+        linked = self.root / 'src' / 'swapped.c'
+        linked.symlink_to(self.root / 'src' / 'board.c')
+        with self.assertRaises(OSError):
+            package.read_source_member('src/swapped.c', 128)
+
+    def test_source_member_rejects_parent_escape(self):
+        for unsafe in ('../secrets.c', '/etc/passwd', 'src/../secret.c'):
+            with self.subTest(name=unsafe):
+                with self.assertRaisesRegex(ValueError, 'unsafe source member'):
+                    package.read_source_member(unsafe, 4096)
+
     def test_manifest_file_must_be_regular_and_bounded(self):
         self.lines('src/board.c')
         self.assertEqual(len(package.source_paths()), 1)
