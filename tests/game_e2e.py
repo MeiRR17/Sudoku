@@ -29,6 +29,49 @@ def run(args, commands='', exit_code=0, timeout=25):
 
 with tempfile.TemporaryDirectory() as directory:
     folder = pathlib.Path(directory)
+    # Portable puzzle exchange uses the already-supported --puzzle 81-digit
+    # format. Givens stay immutable across edits; current reflects only
+    # player entries, never the cached solution or private pencil notes.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'export\nexport givens\nexport current\nstatus\n'
+                         'note 1 1 5\nexport both\nstatus\nset 1 1 5\n'
+                         'export current\nexport\nstatus\nundo\n'
+                         'export current\nnotes 1 1\nstatus\nquit\n')
+    assert stdout.count('Puzzle givens: ' + near_win) == 4, stdout
+    assert stdout.count('Current board: ' + near_win) == 3, stdout
+    assert stdout.count('Current board: ' + solution) == 1, stdout
+    assert 'Notes for row 1 col 1: 5' in stdout, stdout
+    assert 'undo 0, redo 0' in stdout
+    assert 'undo 2, redo 0' in stdout and 'undo 1, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # Export may display a rule-legal but incorrect player's entry. It must
+    # not silently substitute the stored answer (or promise solvability).
+    original = ''.join((fixtures / 'unique.txt').read_text().split())
+    modified = original[:2] + '1' + original[3:]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 1\nexport\nexport current\nstatus\nquit\n')
+    assert 'Puzzle givens: ' + original in stdout
+    assert 'Current board: ' + modified in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Invalid export modes and extra arguments must be rejected without
+    # touching the board, save path, pencil marks or Undo/Redo.
+    invalid_exports = [
+        'export currently', 'export givens extra', 'export current extra',
+        'export both extra', 'export current many more', 'export --help',
+    ]
+    stdout, stderr = run(['--puzzle', near_win],
+                         'status\n' + '\n'.join(invalid_exports) +
+                         '\nstatus\nexport\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_exports)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert stdout.count('Puzzle givens: ' + near_win) == 1
+    assert 'Current board:' not in stdout and not stderr
+    checks += 1
+
     saved = folder / 'game with spaces.save'
     stdout, stderr = run(['--puzzle', near_win, '--save', saved], '\n'.join([
         'notes 1 1', 'note 1 1 5', 'notes 1 1', 'set 1 1 5', 'check',
