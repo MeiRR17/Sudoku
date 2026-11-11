@@ -40,11 +40,11 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, clear-notes,");
-    puts("          hint, undo, redo, reset, check, status,");
+    puts("          hint [apply], undo, redo, reset, check, status,");
     puts("          save [PATH], help, quit");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'note' toggles pencil marks; 'candidates' lists legal digits without guessing.");
-    puts("'hint' finds a forced single without showing the stored solution.");
+    puts("'hint' finds a forced single; 'hint apply' places it as an undoable move.");
     puts("No color, network or special keys required.");
 }
 static void display(const SudokuGame *game) {
@@ -233,22 +233,21 @@ static void print_candidates(const SudokuGame *game,unsigned r,unsigned c){
         if((mask&(uint16_t)(1u<<d))!=0u)printf(" %u",d);
     putchar('\n');
 }
+typedef struct LogicalHint {
+    unsigned index, digit, group;
+    int hidden;
+} LogicalHint;
 /* Naked singles first; if none exist, scan for a hidden single in a
- * row, column or 3x3 box. This is logic, not an answer lookup or move. */
-static void print_hint(const SudokuGame *game){
+ * row, column or 3x3 box. Never look up the completed solution. */
+static int find_hint(const SudokuGame *game,LogicalHint *hint){
     uint16_t masks[SUDOKU_CELL_COUNT]={0};
     unsigned i,d,group,slot,count,chosen;
-    if(sudoku_game_won(game)){
-        puts("Puzzle already solved; no hint needed.");
-        return;
-    }
     for(i=0u;i<SUDOKU_CELL_COUNT;++i){
         masks[i]=candidate_mask(&game->state.board,i);
         d=single_candidate(masks[i]);
         if(d){
-            printf("Hint (only candidate): row %u col %u -> %u.\n",
-                   i/9u+1u,i%9u+1u,d);
-            return;
+            *hint=(LogicalHint){i,d,0u,0};
+            return 1;
         }
     }
     for(group=0u;group<27u;++group){
@@ -268,14 +267,50 @@ static void print_hint(const SudokuGame *game){
                 }
             }
             if(count==1u){
-                const char *unit=group<9u?"row":group<18u?"column":"box";
-                printf("Hint (only place in %s %u): row %u col %u -> %u.\n",
-                       unit,group%9u+1u,chosen/9u+1u,chosen%9u+1u,d);
-                return;
+                *hint=(LogicalHint){chosen,d,group,1};
+                return 1;
             }
         }
     }
-    puts("No simple hint found. Try candidates ROW COL.");
+    return 0;
+}
+/* 'hint' is observational. 'hint apply' explicitly places exactly one
+ * logical single via the normal game setter (and therefore supports undo).
+ * Never auto-place when the player's grid already has incorrect entries. */
+static void print_hint(SudokuGame *game,int apply){
+    LogicalHint hint;
+    SudokuGameStatus result;
+    const char *action=apply?"Applied hint":"Hint";
+    if(sudoku_game_won(game)){
+        puts("Puzzle already solved; no hint needed.");
+        return;
+    }
+    if(apply&&sudoku_game_mistakes(game)){
+        puts("Cannot apply hint: correct the existing mistakes first.");
+        return;
+    }
+    if(!find_hint(game,&hint)){
+        puts("No simple hint found. Try candidates ROW COL.");
+        return;
+    }
+    if(apply){
+        result=sudoku_game_set(game,hint.index/9u+1u,
+                              hint.index%9u+1u,hint.digit);
+        if(result!=SUDOKU_GAME_OK){
+            printf("Error: %s\n",sudoku_game_status_text(result));
+            return;
+        }
+    }
+    if(!hint.hidden){
+        printf("%s (only candidate): row %u col %u -> %u.\n",
+               action,hint.index/9u+1u,hint.index%9u+1u,hint.digit);
+    }else{
+        const char *unit=hint.group<9u?"row":hint.group<18u?"column":"box";
+        printf("%s (only place in %s %u): row %u col %u -> %u.\n",
+               action,unit,hint.group%9u+1u,
+               hint.index/9u+1u,hint.index%9u+1u,hint.digit);
+    }
+    if(apply&&sudoku_game_won(game))puts("SOLVED! All cells are correct.");
 }
 static int event_loop(SudokuGame *game,PlayOptions *opt){
     char line[4096 + 32];
@@ -373,7 +408,10 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             continue;
         }
         if(strcmp(command,"help")==0&&!a){commands();continue;}
-        if(strcmp(command,"hint")==0&&!a){print_hint(game);continue;}
+        if(strcmp(command,"hint")==0&&
+           (!a||(strcmp(a,"apply")==0&&!b))){
+            print_hint(game,a!=NULL);continue;
+        }
         if(strcmp(command,"show")==0&&!a){display(game);continue;}
         if(strcmp(command,"status")==0&&!a){
             printf("Progress: %u/81 filled, %u mistakes, elapsed %" PRIu64 "s, undo %u, redo %u\n",
