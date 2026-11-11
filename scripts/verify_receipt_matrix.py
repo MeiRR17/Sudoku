@@ -154,7 +154,7 @@ def verify_metadata_one(folder, platform_name, sha, version):
     # must be well-formed; the issuer is still untrusted and unsigned.
     run_id = receipt.get('github_run_id')
     attempt = receipt.get('github_run_attempt')
-    if run_id is not None or attempt is not None:
+    if 'github_run_id' in receipt or 'github_run_attempt' in receipt:
         if (not isinstance(run_id, str) or
             re.fullmatch(r'[1-9][0-9]{0,19}', run_id) is None or
             type(attempt) is not int or
