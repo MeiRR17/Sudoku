@@ -261,6 +261,35 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'undo 0, redo 0' in stdout and not stderr
     checks += 1
 
+    # Explicit bulk correction clears only wrong player-entered digits,
+    # preserving correctly placed digits, givens and handwritten notes.
+    # The whole correction is undoable; repeating it is history-neutral.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 1\nset 1 4 2\nnote 2 2 5\n'
+                         'check details\ncheck clear\nstatus\n'
+                         'check details\nnotes 2 2\nundo\n'
+                         'check details\nredo\ncheck details\n'
+                         'check clear\nstatus\nquit\n')
+    assert stdout.count('Incorrect entry: row 1 col 3 contains 1.') == 2, stdout
+    assert stdout.count('Incorrect entry: row 1 col 4 contains 2.') == 2, stdout
+    assert stdout.count('No incorrect entries.') == 2, stdout
+    assert 'Notes for row 2 col 2: 5' in stdout
+    assert stdout.count('undo 4, redo 0') == 2, stdout
+    assert not stderr
+    checks += 1
+
+    # check clear is a true no-op on a clean snapshot. It must not discard a
+    # previously available redo branch or insert a phantom undo history step.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 1\nundo\ncheck clear\n'
+                         'status\nredo\ncheck details\n'
+                         'check clear extra\ncheck clear wrong\nquit\n')
+    assert 'undo 0, redo 1' in stdout
+    assert 'Incorrect entry: row 1 col 3 contains 1.' in stdout
+    assert stdout.count('Error: unknown command or invalid arguments') == 2
+    assert not stderr
+    checks += 1
+
     # A logical hint uses current board candidates only, with no move,
     # note edits, history change or accidental undo/redo branch reset.
     stdout, stderr = run(['--puzzle', near_win],
