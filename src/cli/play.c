@@ -246,7 +246,10 @@ static int find_hint(const SudokuGame *game,LogicalHint *hint){
         masks[i]=candidate_mask(&game->state.board,i);
         d=single_candidate(masks[i]);
         if(d){
-            *hint=(LogicalHint){i,d,0u,0};
+            hint->index=i;
+            hint->digit=d;
+            hint->group=0u;
+            hint->hidden=0;
             return 1;
         }
     }
@@ -267,7 +270,10 @@ static int find_hint(const SudokuGame *game,LogicalHint *hint){
                 }
             }
             if(count==1u){
-                *hint=(LogicalHint){chosen,d,group,1};
+                hint->index=chosen;
+                hint->digit=d;
+                hint->group=group;
+                hint->hidden=1;
                 return 1;
             }
         }
