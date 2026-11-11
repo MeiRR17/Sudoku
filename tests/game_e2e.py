@@ -205,6 +205,34 @@ with tempfile.TemporaryDirectory() as directory:
     assert not stderr
     checks += 1
 
+    # Candidates reveal only currently legal Sudoku digits. The command
+    # leaves notes, board and undo/redo history unchanged, and invalid input
+    # cannot silently mutate state or reveal the verified unique solution.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'candidates 1 3\nstatus\nnote 1 3 4\n'
+                         'candidates 1 3\nnotes 1 3\nset 1 3 4\n'
+                         'candidates 1 3\nundo\ncandidates 1 3\n'
+                         'candidates 1 3 extra\ncandidates 0 3\n'
+                         'candidates 1 3 5\nstatus\nquit\n')
+    assert stdout.count('Candidates for row 1 col 3: 1 2 4') == 3, stdout
+    assert 'Cell row 1 col 3 already contains 4.' in stdout
+    assert 'Notes for row 1 col 3: 4' in stdout
+    assert 'undo 0, redo 0' in stdout  # First candidates call is a no-op.
+    assert 'undo 1, redo 1' in stdout  # After undo, candidates leaves redo.
+    assert stdout.count('Error: unknown command or invalid arguments') == 3
+    assert not stderr
+    checks += 1
+
+    # A filled original clue is reported, never replaced, when candidates
+    # is requested; a near-complete puzzle must expose only its last digit.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'candidates 1 1\ncandidates 1 2\n'
+                         'status\nquit\n')
+    assert 'Candidates for row 1 col 1: 5' in stdout
+    assert 'Cell row 1 col 2 already contains 3.' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
     # A reset on an untouched board must not create phantom undo history.
     stdout, stderr = run(['--puzzle', near_win], 'reset\nstatus\nundo\nquit\n')
     assert 'undo 0, redo 0' in stdout and 'no action to undo or redo' in stdout
