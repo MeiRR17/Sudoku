@@ -57,6 +57,26 @@ static int check_game(void){
         CHECK(sudoku_game_clear_notes(game)==SUDOKU_GAME_OK);
         CHECK(game->history_cursor==cursor && game->history_len==length);
     }
+    /* Canonical candidate masks come from the live board, not the solution. */
+    CHECK(sudoku_game_candidates(game,1,3)==((1u<<1)|(1u<<2)|(1u<<4)));
+    CHECK(sudoku_game_candidates(game,1,1)==0u);
+    CHECK(sudoku_game_candidates(game,0,3)==0u);
+    CHECK(sudoku_game_auto_notes(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==((1u<<1)|(1u<<2)|(1u<<4)));
+    CHECK(game->state.notes[0]==0u && game->state.board.cells[2]==0u);
+    {
+        unsigned cursor=game->history_cursor, length=game->history_len;
+        CHECK(sudoku_game_auto_notes(game)==SUDOKU_GAME_OK);
+        CHECK(game->history_cursor==cursor && game->history_len==length);
+    }
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==0u);
+    CHECK(sudoku_game_redo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==((1u<<1)|(1u<<2)|(1u<<4)));
+    /* Undo and redo above must restore exactly one state change. Clearing
+     * auto-generated notes also needs to preserve the original behavior. */
+    CHECK(sudoku_game_clear_notes(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==0u);
     CHECK(sudoku_game_note(game,1,3,4)==SUDOKU_GAME_OK);
     CHECK(game->state.notes[2] == (1u<<4));
     CHECK(sudoku_game_note(game,1,3,8)==SUDOKU_GAME_OK);
