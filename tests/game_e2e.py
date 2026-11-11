@@ -36,6 +36,58 @@ def run(args, commands='', exit_code=0, timeout=25):
 
 with tempfile.TemporaryDirectory() as directory:
     folder = pathlib.Path(directory)
+    # Candidate-pressure explorer is read-only, deterministic, and sorted
+    # first by fewest legal candidates, then by row/column reading order.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\nfocus\nfocus 6\nnote 1 3 4\n'
+                         'focus 1\nstatus\nundo\nfocus 1\nstatus\nquit\n')
+    assert 'Focus cells (5 of 51 empty, fewest candidates first):' in stdout
+    assert 'Focus cells (6 of 51 empty, fewest candidates first):' in stdout
+    assert stdout.count('row 5 col 5: 1 candidate: 5 (forced single)') == 4
+    for expected in (
+        'row 7 col 6: 1 candidate: 7 (forced single)',
+        'row 7 col 9: 1 candidate: 4 (forced single)',
+        'row 8 col 8: 1 candidate: 3 (forced single)',
+        'row 1 col 4: 2 candidates: 2 6',
+        'row 3 col 1: 2 candidates: 1 2',
+    ):
+        assert expected in stdout, (expected, stdout)
+    assert stdout.count('Progress: 30/81 filled') == 3
+    assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # A full 81-slot request is capped by the number of remaining cells.
+    # On a solved game it does not disclose hidden solution data or edit it.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'focus 1\nfocus 81\nstatus\nset 1 1 5\n'
+                         'focus\nstatus\nquit\n')
+    assert stdout.count('Focus cells (1 of 1 empty, fewest candidates first):') == 2
+    assert stdout.count('row 1 col 1: 1 candidate: 5 (forced single)') == 2
+    assert 'Puzzle already filled; no focus needed.' in stdout
+    assert 'undo 0, redo 0' in stdout and 'undo 1, redo 0' in stdout
+    assert not stderr
+    checks += 1
+
+    # A locally legal but wrong entry may leave another cell with no legal
+    # candidate. Focus must surface that dead end rather than silently hide it.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 9 4\nfocus 3\nstatus\nquit\n')
+    assert 'row 7 col 9: 0 candidates (no legal digits)' in stdout
+    assert 'Warning: ' in stdout and 'no legal digits; inspect entries.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    invalid_focus = ['focus 0', 'focus 82', 'focus -1', 'focus nope',
+                     'focus 1 extra', 'focus 2.5']
+    stdout, stderr = run(['--puzzle', near_win],
+                         'status\n' + '\n'.join(invalid_focus) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_focus)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'Focus cells (' not in stdout and not stderr
+    checks += 1
+
     # Portable puzzle exchange uses the already-supported --puzzle 81-digit
     # format. Givens stay immutable across edits; current reflects only
     # player entries, never the cached solution or private pencil notes.
