@@ -154,6 +154,14 @@ class ReceiptMatrixTests(unittest.TestCase):
             MATRIX.verify_matrix(self.folders, SHA, VERSION,
                                  metadata_only=True)
 
+    def test_explicit_null_identity_fields_are_not_absent(self):
+        self.receipts['ubuntu-latest']['github_run_id'] = None
+        self.receipts['ubuntu-latest']['github_run_attempt'] = None
+        self.write('ubuntu-latest')
+        with self.assertRaisesRegex(ValueError, 'invalid Actions run identity'):
+            MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                 metadata_only=True)
+
     def test_boolean_attempt_cannot_masquerade_as_integer(self):
         self.receipts['ubuntu-latest'].update(
             github_run_id='123456789012', github_run_attempt=True)
