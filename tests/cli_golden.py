@@ -3,6 +3,13 @@
 Runs a built binary, normalizes Windows CRLF, and checks byte-accurate JSON,
 exit codes, output file behavior, stdout/stderr separation and input paths.
 """
+# These executable E2E scripts intentionally use Python 'assert' for
+# required release checks. -O/-OO and PYTHONOPTIMIZE remove all assertions;
+# refusing optimization prevents a silent false-positive acceptance.
+if not __debug__:
+    raise SystemExit('SUDOKU TEST FAIL: Python optimization disables required assertions')
+
+
 import json
 import os
 import stat
