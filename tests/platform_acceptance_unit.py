@@ -248,6 +248,19 @@ class ArchiveReceiptHashTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'SHA256SUMS exceeds size budget'):
             self.check()
 
+    def test_noncanonical_manifest_line_endings_cannot_create_receipt(self):
+        manifest = self.dist / 'SHA256SUMS'
+        canonical = manifest.read_bytes()
+        for blob in (canonical[:-1], canonical.replace(b'\n', b'\r\n'),
+                     canonical.replace(b'\n', b'\r')):
+            with self.subTest(trailer=repr(blob[-5:])):
+                manifest.write_bytes(blob)
+                with self.assertRaisesRegex(
+                        ValueError, 'non-canonical SHA256SUMS line endings'):
+                    self.check()
+        manifest.write_bytes(canonical)
+        self.assertEqual(sorted(self.check()), self.names)
+
     def test_duplicate_or_unsorted_manifest_rejected(self):
         path = self.dist / 'SHA256SUMS'
         lines = path.read_text().splitlines()
