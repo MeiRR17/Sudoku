@@ -252,6 +252,15 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 0, redo 0') == 2 and not stderr
     checks += 1
 
+    # Transposition preserves unique solutions and turns the above hidden
+    # column single into a hidden row single. No answer lookup is permitted.
+    hidden_row_puzzle = '500800023000001680000000005610009500000002000050130000935008000000200007280000400'
+    stdout, stderr = run(['--puzzle', hidden_row_puzzle],
+                         'hint\nstatus\nquit\n')
+    assert 'Hint (only place in row 8): row 8 col 7 -> 8.' in stdout, stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
     # A completed valid grid is not offered any irrelevant candidate hint.
     stdout, stderr = run(['--puzzle', solution], 'hint\nquit\n')
     assert 'Puzzle already solved; no hint needed.' in stdout and not stderr
