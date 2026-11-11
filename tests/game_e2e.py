@@ -233,6 +233,30 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'undo 0, redo 0' in stdout and not stderr
     checks += 1
 
+    # A logical hint uses current board candidates only, with no move,
+    # note edits, history change or accidental undo/redo branch reset.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'hint\nstatus\nhint unexpected\nstatus\nquit\n')
+    assert 'Hint (only candidate): row 1 col 1 -> 5.' in stdout
+    assert stdout.count('undo 0, redo 0') == 2
+    assert stdout.count('Error: unknown command or invalid arguments') == 1
+    assert not stderr
+    checks += 1
+
+    # This 25-clue puzzle has a unique solution and no naked singles; only
+    # the hidden-single column search can report the first forced step.
+    hidden_single_puzzle = '500600902000105308000000500800001020000003000010920800060500004280000000305000070'
+    stdout, stderr = run(['--puzzle', hidden_single_puzzle],
+                         'hint\nstatus\nhint\nstatus\nquit\n')
+    assert stdout.count('Hint (only place in column 8): row 7 col 8 -> 8.') == 2, stdout
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
+    # A completed valid grid is not offered any irrelevant candidate hint.
+    stdout, stderr = run(['--puzzle', solution], 'hint\nquit\n')
+    assert 'Puzzle already solved; no hint needed.' in stdout and not stderr
+    checks += 1
+
     # A reset on an untouched board must not create phantom undo history.
     stdout, stderr = run(['--puzzle', near_win], 'reset\nstatus\nundo\nquit\n')
     assert 'undo 0, redo 0' in stdout and 'no action to undo or redo' in stdout
