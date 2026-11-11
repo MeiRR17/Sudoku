@@ -489,6 +489,65 @@ static int check_history_steps(void) {
     free(game);
     return 0;
 }
+/* Selective pencil elimination must preflight all inputs and record at
+ * most one Undo step even when several notes in different cells change. */
+static int check_note_elimination(void){
+    SudokuBoard board;
+    SudokuGame *game=malloc(sizeof *game);
+    uint16_t masks[SUDOKU_CELL_COUNT]={0};
+    unsigned removed=99u,cursor,length;
+    CHECK(game!=NULL);
+    CHECK(sudoku_board_parse(&board,(const unsigned char*)classic,81u,NULL)==SUDOKU_OK);
+    CHECK(sudoku_game_start(game,&board)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_note(game,1u,3u,1u)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_note(game,1u,3u,2u)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_note(game,1u,3u,4u)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_note(game,1u,4u,2u)==SUDOKU_GAME_OK);
+    cursor=game->history_cursor;
+    masks[2]=(uint16_t)((1u<<1)|(1u<<4));
+    masks[3]=(uint16_t)(1u<<2);
+    CHECK(sudoku_game_eliminate_notes(game,masks,&removed)==SUDOKU_GAME_OK);
+    CHECK(removed==3u && game->history_cursor==cursor+1u);
+    CHECK(game->state.notes[2]==(1u<<2) && game->state.notes[3]==0u);
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==((1u<<1)|(1u<<2)|(1u<<4)));
+    CHECK(game->state.notes[3]==(1u<<2));
+    CHECK(sudoku_game_redo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==(1u<<2) && game->state.notes[3]==0u);
+    cursor=game->history_cursor;
+    length=game->history_len;
+    CHECK(sudoku_game_eliminate_notes(game,masks,&removed)==SUDOKU_GAME_OK);
+    CHECK(removed==0u && game->history_cursor==cursor &&
+          game->history_len==length);
+    /* An invalid request or a no-op preserves an existing redo branch. */
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    cursor=game->history_cursor;
+    length=game->history_len;
+    masks[0]=(uint16_t)(1u<<5); /* immutable original clue */
+    CHECK(sudoku_game_eliminate_notes(game,masks,&removed)==SUDOKU_GAME_NOT_EMPTY);
+    CHECK(removed==0u && game->history_cursor==cursor &&
+          game->history_len==length);
+    masks[0]=0u;
+    masks[2]=1u; /* bit zero is never a legal Sudoku pencil digit */
+    CHECK(sudoku_game_eliminate_notes(game,masks,&removed)==SUDOKU_GAME_RANGE);
+    CHECK(removed==0u && game->history_cursor==cursor);
+    masks[2]=0u;
+    CHECK(sudoku_game_eliminate_notes(game,NULL,&removed)==SUDOKU_GAME_INVALID);
+    CHECK(removed==0u);
+    CHECK(sudoku_game_eliminate_notes(game,masks,&removed)==SUDOKU_GAME_OK);
+    CHECK(removed==0u && game->history_cursor==cursor &&
+          game->history_len==length);
+    CHECK(sudoku_game_redo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==(1u<<2));
+    /* External corruption must fail without updating any history entry. */
+    masks[2]=(uint16_t)(1u<<2);
+    game->state.board.cells[2]=10u;
+    cursor=game->history_cursor;
+    CHECK(sudoku_game_eliminate_notes(game,masks,&removed)==SUDOKU_GAME_INVALID);
+    CHECK(removed==0u && game->history_cursor==cursor);
+    free(game);
+    return 0;
+}
 int main(void){
     int result=check_game();
     if(result)return result;
@@ -497,6 +556,8 @@ int main(void){
     result=check_batch_set();
     if(result)return result;
     result=check_history_steps();
-    if(!result)puts("GAME ENGINE PASS: unique, givens, notes, history, reset, save/load/corruption, win, check-clear, batch-set, multi-step undo/redo");
+    if(result)return result;
+    result=check_note_elimination();
+    if(!result)puts("GAME ENGINE PASS: unique, givens, notes, history, reset, save/load/corruption, win, check-clear, batch-set, multi-step undo/redo, selective note elimination");
     return result;
 }
