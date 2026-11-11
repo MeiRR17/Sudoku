@@ -164,19 +164,22 @@ class PackageBudgetTests(unittest.TestCase):
                       'src/core/game.c', 'bin/sudoku.exe'):
             self.assertTrue(packager.portable_relative_name(value), value)
 
-    def test_changed_file_length_rejected_after_metadata_preflight(self):
-        class ChangingFile:
-            def stat(self):
-                class Status:
-                    st_size = 3
-                return Status()
+    def test_changed_file_length_rejected_after_descriptor_preflight(self):
+        # Regress the actual fd-based reader, not the obsolete path.stat/open
+        # interface that existed before v0.8.4 source-open hardening.
+        from types import SimpleNamespace
+        self.source([('src/changing.c', b'four')])
+        target = self.root / 'src' / 'changing.c'
+        real_fstat = os.fstat
 
-            def open(self, mode):
-                import io
-                return io.BytesIO(b'four')
+        def initial_size_before_growth(fd):
+            info = real_fstat(fd)
+            return SimpleNamespace(st_mode=info.st_mode, st_size=3)
 
-        with self.assertRaisesRegex(ValueError, 'package source changed during read'):
-            packager.bounded_file_bytes(ChangingFile(), 8)
+        with patch.object(packager.os, 'fstat',
+                          side_effect=initial_size_before_growth):
+            with self.assertRaisesRegex(ValueError, 'package content changed during read'):
+                packager.bounded_file_bytes(target, 8)
 
 
 if __name__ == '__main__':
