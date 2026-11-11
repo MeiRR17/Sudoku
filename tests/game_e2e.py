@@ -16,10 +16,10 @@ near_win = '0' + solution[1:]
 checks = 0
 
 
-def run(args, commands='', exit_code=0):
+def run(args, commands='', exit_code=0, timeout=25):
     global checks
     p = subprocess.run([str(exe), 'play', *map(str, args)], input=commands,
-                       text=True, encoding='utf-8', capture_output=True, timeout=25)
+                       text=True, encoding='utf-8', capture_output=True, timeout=timeout)
     assert p.returncode == exit_code, (args, p.returncode, p.stderr, p.stdout)
     assert '\x1b[' not in p.stdout, 'Unexpected ANSI escape/color codes'
     checks += 1
@@ -110,6 +110,14 @@ with tempfile.TemporaryDirectory() as directory:
         checks += 1
     # Gameplay file loading must use bounded heap storage instead of a >1 MiB
     # stack frame (especially relevant for the default Windows/MSVC stack).
+    # Gameplay --file reserves stdin for player commands; a FIFO with no
+    # writer must be rejected immediately, rather than hanging at fopen.
+    if os.name == 'posix' and hasattr(os, 'mkfifo'):
+        fifo = folder / 'writerless-game-puzzle.fifo'
+        os.mkfifo(fifo)
+        stdout, stderr = run(['--file', fifo], exit_code=4, timeout=3)
+        assert not stdout and 'Puzzle open failed:' in stderr
+        checks += 1
     copied = folder / 'unique puzzle from file with spaces.txt'
     copied.write_text(near_win + '\n', encoding='ascii')
     stdout, stderr = run(['--file', copied], 'status\nquit\n')
