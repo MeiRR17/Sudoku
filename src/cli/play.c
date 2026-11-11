@@ -47,13 +47,14 @@ static int use(const char *message){
 }
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
-    puts("          notes ROW COL, candidates ROW COL, auto-notes, prune-notes,");
+    puts("          notes ROW COL, candidates ROW COL, focus [N], auto-notes, prune-notes,");
     puts("          clear-notes, hint [all|chain [N]|apply [all|chain [N]]], undo [N], redo [N], reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
     puts("prints entered digits too; neither is a full save or stored solution.");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'note' toggles pencil marks; 'candidates' lists legal digits without guessing.");
+    puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
     puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
     puts("'hint' shows one forced single; 'hint all' lists each distinct forced cell.");
     puts("'hint chain [N]' previews up to N successive forced singles (1..81).");
@@ -288,6 +289,53 @@ static void print_candidates(const SudokuGame *game,unsigned r,unsigned c){
     for(d=1u;d<=9u;++d)
         if((mask&(uint16_t)(1u<<d))!=0u)printf(" %u",d);
     putchar('\n');
+}
+/* Read-only candidate pressure report for players who want to choose
+ * their next cell without asking the cached solution for an answer.
+ * Sort by increasing candidate count, then row/column in reading order.
+ * A cell with zero legal candidates is surfaced as a contradiction instead
+ * of being silently excluded from the search. */
+static void print_focus(const SudokuGame *game,unsigned limit){
+    uint16_t masks[SUDOKU_CELL_COUNT]={0};
+    unsigned char counts[SUDOKU_CELL_COUNT]={0};
+    unsigned i,d,rank,shown=0u,empty=0u,dead=0u;
+    if(sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot inspect focus: invalid current board.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+        if(game->state.board.cells[i])continue;
+        ++empty;
+        masks[i]=candidate_mask(game,i);
+        for(d=1u;d<=9u;++d)
+            if(masks[i]&(uint16_t)(1u<<d))++counts[i];
+        if(counts[i]==0u)++dead;
+    }
+    if(!empty){
+        puts("Puzzle already filled; no focus needed.");
+        return;
+    }
+    printf("Focus cells (%u of %u empty, fewest candidates first):\n",
+           empty<limit?empty:limit,empty);
+    for(rank=0u;rank<=9u && shown<limit;++rank){
+        for(i=0u;i<SUDOKU_CELL_COUNT && shown<limit;++i){
+            if(game->state.board.cells[i] || counts[i]!=rank)continue;
+            printf("row %u col %u: %u candidate%s",
+                   i/9u+1u,i%9u+1u,rank,rank==1u?"":"s");
+            if(rank==0u){
+                puts(" (no legal digits)");
+            }else{
+                fputs(":",stdout);
+                for(d=1u;d<=9u;++d)
+                    if(masks[i]&(uint16_t)(1u<<d))printf(" %u",d);
+                if(rank==1u)fputs(" (forced single)",stdout);
+                putchar('\n');
+            }
+            ++shown;
+        }
+    }
+    if(dead)printf("Warning: %u empty cell%s have no legal digits; inspect entries.\n",
+                   dead,dead==1u?"":"s");
 }
 typedef struct LogicalHint {
     unsigned index, digit, group;
@@ -669,6 +717,13 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             if(!a||strcmp(a,"givens")==0)export_board(game,0);
             else if(strcmp(a,"current")==0)export_board(game,1);
             else{export_board(game,0);export_board(game,1);}
+            continue;
+        }
+        if(strcmp(command,"focus")==0){
+            uint64_t limit=5u;
+            if(!a||(!b&&decimal(a,SUDOKU_CELL_COUNT,&limit)&&limit>=1u))
+                print_focus(game,(unsigned)limit);
+            else puts("Error: unknown command or invalid arguments. Type 'help'.");
             continue;
         }
         if(strcmp(command,"show")==0&&!a){display(game);continue;}
