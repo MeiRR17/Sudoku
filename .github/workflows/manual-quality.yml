@@ -92,6 +92,8 @@ jobs:
           python scripts/verify_receipt_matrix.py
           --require-sha "${{ github.sha }}"
           --metadata-only
+          --require-run-id "${{ github.run_id }}"
+          --require-run-attempt "${{ github.run_attempt }}"
           --linux evidence/ubuntu-latest
           --windows evidence/windows-latest
           --macos evidence/macos-latest
