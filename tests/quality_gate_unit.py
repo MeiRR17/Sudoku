@@ -1,6 +1,7 @@
 """Fast tests for the mandatory CTest inventory guard (no compiler needed)."""
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -137,6 +138,17 @@ class PythonAssertionIntegrityTests(unittest.TestCase):
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn('Python optimization disables required assertions',
                                   result.stderr)
+
+    def test_pythonoptimize_environment_cannot_skip_tests(self):
+        env = dict(os.environ, PYTHONOPTIMIZE='1')
+        for script in (SOURCE, SOURCE.parent.parent / 'tests' / 'package_smoke.py'):
+            with self.subTest(script=script.name):
+                result = subprocess.run(
+                    [sys.executable, str(script)], env=env,
+                    text=True, capture_output=True, timeout=8)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Python optimization disables required',
+                              result.stderr)
 
     def test_optimized_quality_gate_fails_before_build(self):
         for mode in ('-O', '-OO'):
