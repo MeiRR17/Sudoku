@@ -79,6 +79,31 @@ static int check_game(void){
     CHECK(game->state.notes[2]==0u);
     CHECK(sudoku_game_note(game,1,3,4)==SUDOKU_GAME_OK);
     CHECK(game->state.notes[2] == (1u<<4));
+    /* Prune only stale handwritten notes after a legal placement:
+     * no added marks, exactly one history edit and an undoable result. */
+    {
+        unsigned cursor=game->history_cursor, length=game->history_len;
+        CHECK(sudoku_game_prune_notes(game)==SUDOKU_GAME_OK);
+        CHECK(game->history_cursor==cursor && game->history_len==length);
+    }
+    CHECK(sudoku_game_note(game,1,3,8)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_set(game,1,6,4)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_prune_notes(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==0u);
+    {
+        unsigned cursor=game->history_cursor, length=game->history_len;
+        CHECK(sudoku_game_prune_notes(game)==SUDOKU_GAME_OK);
+        CHECK(game->history_cursor==cursor && game->history_len==length);
+    }
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==((1u<<4)|(1u<<8)));
+    CHECK(sudoku_game_redo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==0u);
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==(1u<<4));
+    CHECK(game->state.board.cells[5]==0u);
     CHECK(sudoku_game_note(game,1,3,8)==SUDOKU_GAME_OK);
     CHECK(game->state.notes[2]==((1u<<4)|(1u<<8)));
     CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
