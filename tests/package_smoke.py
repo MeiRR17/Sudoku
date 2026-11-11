@@ -2,6 +2,13 @@
 
 Never claims other OS support. Requires Python stdlib, CMake and C11 compiler.
 """
+# These executable E2E scripts intentionally use Python 'assert' for
+# required release checks. -O/-OO and PYTHONOPTIMIZE remove all assertions;
+# refusing optimization prevents a silent false-positive acceptance.
+if not __debug__:
+    raise SystemExit('SUDOKU TEST FAIL: Python optimization disables required assertions')
+
+
 import hashlib
 from pathlib import Path
 import platform
