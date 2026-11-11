@@ -97,7 +97,13 @@ def read_manifest(path):
     return records
 
 
-def verify_one(folder, platform_name, sha, version):
+def verify_metadata_one(folder, platform_name, sha, version):
+    """Validate only unsigned receipt metadata and SHA256SUMS.
+
+    Deliberately does NOT certify archive bytes, source contents, build
+    execution, platform provenance or an actual release. This supports
+    comparing GitHub Actions evidence after development binaries are withheld.
+    """
     system, arches, compilers, platform_suffix = PLATFORMS[platform_name]
     receipt = json.loads(bounded_text(folder / 'platform-receipt.json',
                                       MAX_RECEIPT_BYTES, 'utf-8'),
@@ -141,13 +147,21 @@ def verify_one(folder, platform_name, sha, version):
         raise ValueError(f'{platform_name}: invalid archive SHA-256')
     if read_manifest(folder / 'SHA256SUMS') != digests:
         raise ValueError(f'{platform_name}: receipt and SHA256SUMS differ')
+    source_tree = receipt.get('source_tree_sha256')
+    if not isinstance(source_tree, str) or DIGEST_RE.fullmatch(source_tree) is None:
+        raise ValueError(f'{platform_name}: invalid canonical source content SHA-256')
+    return receipt
+
+
+def verify_one(folder, platform_name, sha, version):
+    """Full local package check; unlike metadata mode, requires all archives."""
+    receipt = verify_metadata_one(folder, platform_name, sha, version)
+    digests = receipt['archive_sha256']
+    source_tree = receipt['source_tree_sha256']
     # Matching two unsigned text records does not prove the artifact bytes
     # remain present and unchanged. Stream and hash each claimed local file.
     for name, digest in sorted(digests.items()):
         verify_archive_hash(folder / name, digest)
-    source_tree = receipt.get('source_tree_sha256')
-    if not isinstance(source_tree, str) or DIGEST_RE.fullmatch(source_tree) is None:
-        raise ValueError(f'{platform_name}: invalid canonical source content SHA-256')
     # The receipt and SHA256SUMS are both unsigned and controlled by whoever
     # supplied the bundle. Also verify actual source archive *contents* and
     # bind the receipt's canonical source digest to those bytes.
@@ -167,12 +181,13 @@ def verify_one(folder, platform_name, sha, version):
     return receipt
 
 
-def verify_matrix(folders, sha, version):
+def verify_matrix(folders, sha, version, metadata_only=False):
     if not isinstance(sha, str) or SHA_RE.fullmatch(sha) is None:
         raise ValueError('require one exact 40-character lowercase Git SHA')
     if set(folders) != set(PLATFORMS):
         raise ValueError('require precisely Linux, Windows and macOS evidence')
-    receipts = {name: verify_one(Path(folders[name]), name, sha, version)
+    checker = verify_metadata_one if metadata_only else verify_one
+    receipts = {name: checker(Path(folders[name]), name, sha, version)
                 for name in PLATFORMS}
     # ZIP and GZip compressors can emit different bytes across operating
     # systems even when their extracted, validated source trees are identical.
@@ -190,6 +205,9 @@ def main():
                         help='Exact 40-character lowercase Git commit SHA')
     parser.add_argument('--local', type=Path,
                         help='Verify one platform bundle before its archives are discarded')
+    parser.add_argument('--metadata-only', action='store_true',
+                        help='Compare three unsigned metadata bundles without binaries; '
+                             'not archive verification or release acceptance')
     parser.add_argument('--expected', choices=tuple(PLATFORMS),
                         help='Required host label when checking --local')
     parser.add_argument('--linux', type=Path)
@@ -204,6 +222,8 @@ def main():
         raise ValueError('CMake project version missing')
     folders = (args.linux, args.windows, args.macos)
     if args.local is not None:
+        if args.metadata_only:
+            parser.error('--metadata-only requires three-platform matrix mode')
         if args.expected is None or any(folder is not None for folder in folders):
             parser.error('--local requires --expected and forbids matrix folders')
         receipt = verify_one(args.local, args.expected, args.require_sha, match.group(1))
@@ -215,12 +235,17 @@ def main():
     receipts = verify_matrix({'ubuntu-latest': args.linux,
                               'windows-latest': args.windows,
                               'macos-latest': args.macos}, args.require_sha,
-                             match.group(1))
+                             match.group(1), metadata_only=args.metadata_only)
     for name, receipt in receipts.items():
         print(name, receipt['observed_arch'], receipt['c_compiler_id'],
               receipt['quality_gate_mode'])
-    print('EVIDENCE MATRIX CONSISTENT: exact SHA and matching source archives')
-    print('NOT RELEASE APPROVAL: receipts unsigned; license and actual artifact inspection remain required')
+    if args.metadata_only:
+        print('UNSIGNED METADATA MATRIX CONSISTENT: claimed SHA, platform and source digest')
+        print('NOT ARTIFACT VERIFICATION OR RELEASE ACCEPTANCE: archives absent/unverified; '
+              'source content, native execution, authenticity, license and rollback NOT proved')
+    else:
+        print('EVIDENCE MATRIX CONSISTENT: exact SHA and matching source archives')
+        print('NOT RELEASE APPROVAL: receipts unsigned; license and actual artifact inspection remain required')
 
 
 if __name__ == '__main__':
