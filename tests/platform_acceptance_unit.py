@@ -85,6 +85,39 @@ class CompilerIdentityTests(unittest.TestCase):
                 acceptance.compiler_identity(Path(folder))
 
 
+class WorkflowIdentityTests(unittest.TestCase):
+    def test_offline_receipt_does_not_claim_an_actions_run(self):
+        self.assertEqual(acceptance.workflow_identity_from_env({}), {})
+
+    def test_accepts_exact_actions_identity(self):
+        self.assertEqual(
+            acceptance.workflow_identity_from_env(
+                {'GITHUB_RUN_ID': '123456789012', 'GITHUB_RUN_ATTEMPT': '2'}),
+            {'github_run_id': '123456789012', 'github_run_attempt': 2})
+
+    def test_missing_id_or_attempt_fails_closed(self):
+        for env in ({'GITHUB_RUN_ID': '42'},
+                    {'GITHUB_RUN_ATTEMPT': '1'}):
+            with self.subTest(env=env):
+                with self.assertRaisesRegex(ValueError, 'run identity'):
+                    acceptance.workflow_identity_from_env(env)
+
+    def test_malformed_actions_identifiers_fail_closed(self):
+        for key, value in (('GITHUB_RUN_ID', '0'),
+                           ('GITHUB_RUN_ID', '00012'),
+                           ('GITHUB_RUN_ID', 'abc'),
+                           ('GITHUB_RUN_ID', '1' * 21),
+                           ('GITHUB_RUN_ATTEMPT', '0'),
+                           ('GITHUB_RUN_ATTEMPT', '02'),
+                           ('GITHUB_RUN_ATTEMPT', 'nan'),
+                           ('GITHUB_RUN_ATTEMPT', '1' * 11)):
+            with self.subTest(key=key, value=value):
+                env = {'GITHUB_RUN_ID': '42', 'GITHUB_RUN_ATTEMPT': '1'}
+                env[key] = value
+                with self.assertRaisesRegex(ValueError, 'run identity'):
+                    acceptance.workflow_identity_from_env(env)
+
+
 class ReceiptWriteTests(unittest.TestCase):
     def test_private_atomic_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
