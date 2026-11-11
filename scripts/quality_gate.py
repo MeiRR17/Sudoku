@@ -60,6 +60,25 @@ C_TEST_PROGRAMS = {
     'sudoku_solver_unit': 'sudoku_solver_tests',
     'sudoku_windows_save_concurrency': 'sudoku_windows_save_concurrency_tests',
 }
+# Preserve the actual subcommand and fixture for each required CTest,
+# not only the executable name. A sudoku --help stand-in for sudoku solve
+# can otherwise produce a false-positive mandatory test listing.
+CLI_TEST_ARGUMENTS = {
+    'sudoku_count_unique': ('count', '--file', 'unique.txt', '--format', 'compact'),
+    'sudoku_solve_unique': ('solve', '--file', 'unique.txt', '--format', 'compact'),
+    'sudoku_help': ('--help',),
+    'sudoku_version': ('--version',),
+    'sudoku_demo_smoke': ('--demo',),
+    'sudoku_validate_compact': ('validate', '--puzzle', '0' * 81,
+                                '--format', 'compact'),
+    'sudoku_validate_file': ('validate', '--file', 'valid.txt'),
+    'sudoku_invalid_row': ('validate', '--file', 'invalid_row.txt'),
+    'sudoku_count_unsolvable': ('count', '--file', 'unsolvable.txt',
+                                '--format', 'compact'),
+    'sudoku_solve_unsolvable': ('solve', '--file', 'unsolvable.txt',
+                                '--format', 'compact'),
+}
+
 PYTHON_TEST_SCRIPTS = {
     'sudoku_game_e2e': 'game_e2e.py',
     'sudoku_generator_golden': 'generator_golden.py',
@@ -122,6 +141,21 @@ def validate_ctest_command(name, command, build_dir=None):
         require_build_binary(binary, 'sudoku')
     else:
         require_build_binary(command[0], 'sudoku')
+        if name in CLI_TEST_ARGUMENTS:
+            expected = CLI_TEST_ARGUMENTS[name]
+            actual = command[1:]
+            if len(actual) != len(expected):
+                raise ValueError('Required CTest CLI arguments mismatch: ' + name)
+            for provided, wanted in zip(actual, expected):
+                # File fixtures must be the checked-in fixture paths, but CTest
+                # may normalize the spelling of paths on its native host.
+                if wanted in ('unique.txt', 'valid.txt',
+                              'invalid_row.txt', 'unsolvable.txt'):
+                    fixture = (ROOT / 'tests' / 'fixtures' / wanted).resolve()
+                    if pathlib.Path(provided).resolve() != fixture:
+                        raise ValueError('Required CTest CLI fixture mismatch: ' + name)
+                elif provided != wanted:
+                    raise ValueError('Required CTest CLI arguments mismatch: ' + name)
 
 
 def validate_test_manifest(raw, sanitizer=False, coverage=False, system=None,
