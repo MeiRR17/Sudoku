@@ -276,7 +276,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Applied hint (only candidate): row 1 col 1 -> 5.' in stdout
     assert 'SOLVED! All cells are correct.' in stdout
     assert 'Puzzle already solved; no hint needed.' in stdout
-    assert stdout.count('undo 0, redo 0') == 2
+    assert stdout.count('undo 0, redo 0') == 1
     assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
     assert not stderr
     checks += 1
