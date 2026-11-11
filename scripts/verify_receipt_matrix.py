@@ -150,6 +150,16 @@ def verify_metadata_one(folder, platform_name, sha, version):
     source_tree = receipt.get('source_tree_sha256')
     if not isinstance(source_tree, str) or DIGEST_RE.fullmatch(source_tree) is None:
         raise ValueError(f'{platform_name}: invalid canonical source content SHA-256')
+    # An offline receipt may omit Actions identity. If present, both fields
+    # must be well-formed; the issuer is still untrusted and unsigned.
+    run_id = receipt.get('github_run_id')
+    attempt = receipt.get('github_run_attempt')
+    if run_id is not None or attempt is not None:
+        if (not isinstance(run_id, str) or
+            re.fullmatch(r'[1-9][0-9]{0,19}', run_id) is None or
+            type(attempt) is not int or
+            not (1 <= attempt <= 9999999999)):
+            raise ValueError(f'{platform_name}: invalid Actions run identity')
     return receipt
 
 
@@ -181,11 +191,19 @@ def verify_one(folder, platform_name, sha, version):
     return receipt
 
 
-def verify_matrix(folders, sha, version, metadata_only=False):
+def verify_matrix(folders, sha, version, metadata_only=False,
+                  require_run_id=None, require_run_attempt=None):
     if not isinstance(sha, str) or SHA_RE.fullmatch(sha) is None:
         raise ValueError('require one exact 40-character lowercase Git SHA')
     if set(folders) != set(PLATFORMS):
         raise ValueError('require precisely Linux, Windows and macOS evidence')
+    if require_run_id is not None or require_run_attempt is not None:
+        if (not metadata_only or
+            not isinstance(require_run_id, str) or
+            re.fullmatch(r'[1-9][0-9]{0,19}', require_run_id) is None or
+            type(require_run_attempt) is not int or
+            not (1 <= require_run_attempt <= 9999999999)):
+            raise ValueError('require valid paired Actions run ID and attempt in metadata-only mode')
     checker = verify_metadata_one if metadata_only else verify_one
     receipts = {name: checker(Path(folders[name]), name, sha, version)
                 for name in PLATFORMS}
@@ -196,6 +214,11 @@ def verify_matrix(folders, sha, version, metadata_only=False):
     source_hashes = {r['source_tree_sha256'] for r in receipts.values()}
     if len(source_hashes) != 1:
         raise ValueError('source content differs across target platforms')
+    if require_run_id is not None:
+        for name, receipt in receipts.items():
+            if (receipt.get('github_run_id') != require_run_id or
+                receipt.get('github_run_attempt') != require_run_attempt):
+                raise ValueError(f'{name}: Actions run ID or attempt mismatch')
     return receipts
 
 
@@ -208,6 +231,10 @@ def main():
     parser.add_argument('--metadata-only', action='store_true',
                         help='Compare three unsigned metadata bundles without binaries; '
                              'not archive verification or release acceptance')
+    parser.add_argument('--require-run-id',
+                        help='Require exact claimed GitHub Actions run ID in metadata-only mode')
+    parser.add_argument('--require-run-attempt', type=int,
+                        help='Require exact claimed Actions attempt in metadata-only mode')
     parser.add_argument('--expected', choices=tuple(PLATFORMS),
                         help='Required host label when checking --local')
     parser.add_argument('--linux', type=Path)
@@ -222,8 +249,8 @@ def main():
         raise ValueError('CMake project version missing')
     folders = (args.linux, args.windows, args.macos)
     if args.local is not None:
-        if args.metadata_only:
-            parser.error('--metadata-only requires three-platform matrix mode')
+        if args.metadata_only or args.require_run_id is not None or args.require_run_attempt is not None:
+            parser.error('Actions metadata-only run identity requires three-platform matrix mode')
         if args.expected is None or any(folder is not None for folder in folders):
             parser.error('--local requires --expected and forbids matrix folders')
         receipt = verify_one(args.local, args.expected, args.require_sha, match.group(1))
@@ -232,10 +259,15 @@ def main():
         return
     if args.expected is not None or any(folder is None for folder in folders):
         parser.error('matrix mode requires --linux --windows --macos, without --expected')
+    if ((args.require_run_id is None) != (args.require_run_attempt is None) or
+        (args.require_run_id is not None and not args.metadata_only)):
+        parser.error('both Actions run identity fields require --metadata-only')
     receipts = verify_matrix({'ubuntu-latest': args.linux,
                               'windows-latest': args.windows,
                               'macos-latest': args.macos}, args.require_sha,
-                             match.group(1), metadata_only=args.metadata_only)
+                             match.group(1), metadata_only=args.metadata_only,
+                             require_run_id=args.require_run_id,
+                             require_run_attempt=args.require_run_attempt)
     for name, receipt in receipts.items():
         print(name, receipt['observed_arch'], receipt['c_compiler_id'],
               receipt['quality_gate_mode'])
