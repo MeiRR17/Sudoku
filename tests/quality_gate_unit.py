@@ -1,6 +1,8 @@
 """Fast tests for the mandatory CTest inventory guard (no compiler needed)."""
 import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -107,6 +109,44 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(args[0], ['ctest', '--test-dir', str(build), '-C', 'Release',
                                    '--show-only=json-v1'])
         self.assertTrue(kwargs['check'])
+
+
+class PythonAssertionIntegrityTests(unittest.TestCase):
+    def test_nonoptimized_mode_is_accepted(self):
+        self.assertIsNone(quality.require_assertions_enabled(0))
+
+    def test_optimized_modes_cannot_start_quality_gate(self):
+        for mode in (1, 2):
+            with self.subTest(mode=mode):
+                with self.assertRaisesRegex(ValueError, 'disables required Sudoku E2E'):
+                    quality.require_assertions_enabled(mode)
+
+    def test_each_assert_based_e2e_refuses_python_dash_o(self):
+        # Launch the REAL checked-in executable scripts without any binary
+        # arguments. The early guard must fail before opening a build path
+        # or invoking subprocesses, under both -O and -OO.
+        root = SOURCE.parent.parent
+        checks = ('package_smoke.py', 'game_e2e.py', 'cli_golden.py',
+                  'generator_golden.py', 'package_integrity.py', 'save_faults.py')
+        for script in checks:
+            for mode in ('-O', '-OO'):
+                with self.subTest(script=script, mode=mode):
+                    result = subprocess.run(
+                        [sys.executable, mode, str(root / 'tests' / script)],
+                        text=True, capture_output=True, timeout=8)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('Python optimization disables required assertions',
+                                  result.stderr)
+
+    def test_optimized_quality_gate_fails_before_build(self):
+        for mode in ('-O', '-OO'):
+            with self.subTest(mode=mode):
+                result = subprocess.run(
+                    [sys.executable, mode, str(SOURCE), '--mode', 'fast'],
+                    text=True, capture_output=True, timeout=8)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Python optimization disables required Sudoku E2E',
+                              result.stderr)
 
 
 if __name__ == '__main__':
