@@ -273,3 +273,23 @@ The local acceptance generator and three-platform receipt matrix both consume un
 `scripts/platform_acceptance.py` now exposes `open_regular_input(path, kind)`, which uses `os.open` with `O_NONBLOCK`, `O_NOFOLLOW`, `O_CLOEXEC` where supported, a Windows no-inherit/binary flag where available, and validates `S_ISREG(os.fstat(fd).st_mode)` on the resulting descriptor. It refuses a final-component symlink (portable preflight, plus kernel-enforced `O_NOFOLLOW` where available), FIFO, device, directory or missing file before attempting to parse or hash it. The caller receives the already-open descriptor as a binary stream, with explicit ownership/close semantics. Archive size caps now use `fstat` of that descriptor, and the streaming byte caps remain in place. The cross-platform matrix imports the same helper rather than duplicating an unsafe path preflight. This is a **local artifact-integrity hardening**; Windows reparse-point race semantics and all native platform acceptance remain unverified.
 
 Five regressions were committed to `tests/platform_acceptance_unit.py` and `tests/receipt_matrix_unit.py`: FIFO manifest, FIFO archive, final-component symlink substitution between precheck and open (POSIX `O_NOFOLLOW`), FIFO platform receipt and FIFO matrix archive. The new tests use real named pipes and do not depend on a native Sudoku binary. No signed/independently authenticated artifact or accepted release is asserted.
+
+
+### Compare three unsigned Actions evidence bundles without publishing binaries (2026-11-11)
+
+The manual GitHub Actions workflow intentionally **does not upload unlicensed development ZIP/TAR.GZ archives**. It retains only `dist/platform-receipt.json` and `dist/SHA256SUMS` per runner. A full three-platform verification requires the archive bytes and therefore cannot be run on downloaded metadata alone. Do not mistake the absence of binaries for evidence that they were tested on another machine.
+
+A new strictly scoped `--metadata-only` mode on `scripts/verify_receipt_matrix.py` solves the separate administrative problem of comparing these **unsigned text claims** after downloading all three evidence artifacts. Unpack each into a separate directory containing `platform-receipt.json` and `SHA256SUMS`, then run:
+
+```sh
+python scripts/verify_receipt_matrix.py \
+  --require-sha 0123456789abcdef0123456789abcdef01234567 \
+  --metadata-only \
+  --linux evidence/linux \
+  --windows evidence/windows \
+  --macos evidence/macos
+```
+
+Replace the example SHA with the **actual exact 40-character commit SHA** tested by each host. The command rejects any missing/mismatched platform, architecture, compiler identity, required checks, timestamps lacking timezones, altered or duplicated JSON keys, missing checksum manifest, wrong archive filename set, changed manifest digests and conflicting source-tree claims. It does **not** inspect or prove the existence of any ZIP/TAR.GZ bytes, the actual source content, authenticity of a host or signer, native application execution, rollback or license compliance. A malicious party can forge self-consistent unsigned claims. Output is conspicuously labeled `UNSIGNED METADATA MATRIX CONSISTENT` and `NOT ARTIFACT VERIFICATION OR RELEASE ACCEPTANCE`.
+
+The **default** three-platform mode and single-host `--local --expected` mode have not been weakened: they still require actual physical archives and perform streaming SHA-256, ZIP/TAR file type/mode/content checks, source membership and binary/source parity. Combining `--metadata-only` with `--local` is rejected as a command-line usage error. The new mode is an intermediate administrative aid while issue #10 and native release approval remain HOLD, not an alternative exit criterion.
