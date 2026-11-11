@@ -323,6 +323,19 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Applied hint' not in stdout and not stderr
     checks += 1
 
+    # A listed hint does not erase handwritten notes or consume a history
+    # slot; a later explicit apply is still exactly one undoable placement.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'note 1 1 5\nstatus\nhint all\nstatus\nnotes 1 1\n'
+                         'hint apply\nstatus\nundo\nstatus\nnotes 1 1\nquit\n')
+    assert stdout.count('Notes for row 1 col 1: 5') == 2, stdout
+    assert stdout.count('undo 1, redo 0') == 3, stdout
+    assert 'undo 1, redo 1' in stdout, stdout
+    assert stdout.count('Hint (only candidate): row 1 col 1 -> 5.') >= 1
+    assert 'Applied hint (only candidate): row 1 col 1 -> 5.' in stdout
+    assert not stderr
+    checks += 1
+
     # A solved board has no hints; wrong moves block listing just as they
     # block preview/apply, without clearing or undoing the player's entries.
     stdout, stderr = run(['--puzzle', solution], 'hint all\nquit\n')
