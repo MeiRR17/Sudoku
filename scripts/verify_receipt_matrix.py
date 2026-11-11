@@ -66,9 +66,8 @@ def verify_archive_hash(path, expected):
     total = 0
     with ACCEPTANCE.open_regular_input(path, 'archive: ' + path.name) as stream:
         # Ensure a path swap cannot defeat the archive size preflight.
-        if stream.seekable() and stream.fileno() >= 0:
-            if ACCEPTANCE.os.fstat(stream.fileno()).st_size > MAX_ARCHIVE_BYTES:
-                raise ValueError(f'archive exceeds size budget: {path.name}')
+        if ACCEPTANCE.os.fstat(stream.fileno()).st_size > MAX_ARCHIVE_BYTES:
+            raise ValueError(f'archive exceeds size budget: {path.name}')
         while True:
             chunk = stream.read(65536)
             if not chunk:
