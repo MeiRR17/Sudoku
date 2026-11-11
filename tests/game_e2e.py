@@ -329,8 +329,8 @@ with tempfile.TemporaryDirectory() as directory:
                          'note 1 1 5\nstatus\nhint all\nstatus\nnotes 1 1\n'
                          'hint apply\nstatus\nundo\nstatus\nnotes 1 1\nquit\n')
     assert stdout.count('Notes for row 1 col 1: 5') == 2, stdout
-    assert stdout.count('undo 1, redo 0') == 3, stdout
-    assert 'undo 1, redo 1' in stdout, stdout
+    assert stdout.count('undo 1, redo 0') == 2, stdout
+    assert 'undo 2, redo 0' in stdout and 'undo 1, redo 1' in stdout, stdout
     assert stdout.count('Hint (only candidate): row 1 col 1 -> 5.') >= 1
     assert 'Applied hint (only candidate): row 1 col 1 -> 5.' in stdout
     assert not stderr
