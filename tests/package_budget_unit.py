@@ -195,6 +195,86 @@ class PackageBudgetTests(unittest.TestCase):
                       'src/core/game.c', 'bin/sudoku.exe'):
             self.assertTrue(packager.portable_relative_name(value), value)
 
+    def package_publication_fixture(self):
+        stage = Path(self.temp.name) / 'verified-stage'
+        destination = Path(self.temp.name) / 'published'
+        stage.mkdir()
+        destination.mkdir()
+        names = ['sudoku-source.tar.gz', 'sudoku-source.zip',
+                 'sudoku-linux.tar.gz', 'sudoku-linux.zip', 'SHA256SUMS']
+        for name in names:
+            (stage / name).write_bytes(name.encode('ascii'))
+        return stage, destination, names
+
+    def test_publish_complete_verified_package_set(self):
+        staged, destination, names = self.package_publication_fixture()
+        packager.publish_checked_package_set(staged, destination, names)
+        for name in names:
+            self.assertEqual((destination / name).read_bytes(),
+                             (staged / name).read_bytes())
+        # The verified private stage can be removed without invalidating
+        # the newly published links to the same inodes.
+        for name in names:
+            (staged / name).unlink()
+        self.assertEqual((destination / names[0]).read_bytes(),
+                         names[0].encode('ascii'))
+
+    def test_publish_existing_artifact_preserved_without_partial_write(self):
+        staged, destination, names = self.package_publication_fixture()
+        conflict = destination / names[2]
+        conflict.write_bytes(b'previous approved bytes')
+        with self.assertRaisesRegex(ValueError, 'refusing to overwrite'):
+            packager.publish_checked_package_set(staged, destination, names)
+        self.assertEqual(conflict.read_bytes(), b'previous approved bytes')
+        self.assertEqual(sorted(p.name for p in destination.iterdir()),
+                         [names[2]])
+
+    def test_publish_symlink_destination_preserved(self):
+        staged, destination, names = self.package_publication_fixture()
+        external = Path(self.temp.name) / 'outside-publication'
+        external.write_bytes(b'unmodified')
+        existing = destination / names[0]
+        try:
+            existing.symlink_to(external)
+        except (OSError, NotImplementedError):
+            self.skipTest('symlink creation unavailable')
+        with self.assertRaisesRegex(ValueError, 'refusing to overwrite'):
+            packager.publish_checked_package_set(staged, destination, names)
+        self.assertTrue(existing.is_symlink())
+        self.assertEqual(external.read_bytes(), b'unmodified')
+        self.assertEqual(len(list(destination.iterdir())), 1)
+
+    def test_publish_link_failure_rolls_back_only_new_links(self):
+        staged, destination, names = self.package_publication_fixture()
+        unrelated = destination / 'unrelated.txt'
+        unrelated.write_bytes(b'keep')
+        actual_link = os.link
+        calls = 0
+
+        def fail_second_link(source, target):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError('simulated publication interruption')
+            return actual_link(source, target)
+
+        with patch.object(packager.os, 'link', side_effect=fail_second_link):
+            with self.assertRaisesRegex(OSError, 'publication interruption'):
+                packager.publish_checked_package_set(staged, destination, names)
+        self.assertEqual(unrelated.read_bytes(), b'keep')
+        self.assertEqual(sorted(p.name for p in destination.iterdir()),
+                         ['unrelated.txt'])
+        self.assertTrue(all((staged / name).exists() for name in names))
+
+    def test_publish_invalid_artifact_set_refused(self):
+        staged, destination, names = self.package_publication_fixture()
+        for malformed in (names[:-1], names[:-1] + [names[0]],
+                          names[:-1] + ['../SHA256SUMS']):
+            with self.subTest(malformed=malformed):
+                with self.assertRaisesRegex(ValueError, 'invalid development package publication'):
+                    packager.publish_checked_package_set(staged, destination, malformed)
+        self.assertEqual(list(destination.iterdir()), [])
+
     def test_changed_file_length_rejected_after_descriptor_preflight(self):
         # Regress the actual fd-based reader, not the obsolete path.stat/open
         # interface that existed before v0.8.4 source-open hardening.
