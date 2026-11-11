@@ -378,6 +378,37 @@ with tempfile.TemporaryDirectory() as directory:
     assert not stderr
     checks += 1
 
+    # Iterative forced-single chain reaches deductions that were NOT present
+    # in the initial hint-all snapshot. Preview is repeatable and read-only.
+    # The standard 30-given sample has 16 immediate singles but 51 reachable
+    # successive forced placements, solving it without guessing.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint all\nhint chain\nstatus\nhint chain\nstatus\n'
+                         'hint apply chain\nstatus\nundo\nstatus\n'
+                         'redo\nstatus\nhint apply chain extra\nquit\n')
+    assert 'Logical hints (16):' in stdout, stdout
+    assert stdout.count('Logical hint chain (51 steps):') == 2, stdout
+    assert stdout.count('Step 1 (only candidate): row 5 col 5 -> 5.') == 2, stdout
+    assert stdout.count('Step 51 ') == 2, stdout
+    assert 'Applied 51 chained logical hints in one undoable move.' in stdout
+    assert 'Progress: 30/81 filled' in stdout and 'Progress: 81/81 filled' in stdout
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
+    assert stdout.count('Error: unknown command or invalid arguments') == 1
+    assert not stderr
+    checks += 1
+
+    # Existing incorrect digits block both preview and group application;
+    # neither command adds an undo entry or leaks the cached solution.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 1\nstatus\nhint chain\n'
+                         'hint apply chain\nstatus\nquit\n')
+    assert 'Cannot preview hint chain: correct the existing mistakes first.' in stdout
+    assert 'Cannot apply hints: correct the existing mistakes first.' in stdout
+    assert 'Logical hint chain (' not in stdout
+    assert stdout.count('undo 1, redo 0') == 2 and not stderr
+    checks += 1
+
     # This 25-clue puzzle has a unique solution and no naked singles; only
     # the hidden-single column search can report the first forced step.
     hidden_single_puzzle = '500600902000105308000000500800001020000003000010920800060500004280000000305000070'
@@ -386,6 +417,20 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('Hint (only place in column 8): row 7 col 8 -> 8.') == 2, stdout
     assert stdout.count('undo 0, redo 0') == 2 and not stderr
     checks += 1
+    # This 25-clue puzzle cannot be completed by singles alone. The chain
+    # stops when deductions are exhausted rather than guessing from the
+    # stored unique answer, and all 8 steps form one reversible batch.
+    stdout, stderr = run(['--puzzle', hidden_single_puzzle],
+                         'hint chain\nstatus\nhint apply chain\n'
+                         'status\nundo\nstatus\nquit\n')
+    assert 'Logical hint chain (8 steps):' in stdout, stdout
+    assert 'Step 1 (only place in column 8): row 7 col 8 -> 8.' in stdout
+    assert 'Applied 8 chained logical hints in one undoable move.' in stdout
+    assert 'SOLVED!' not in stdout
+    assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
     # Listing all hidden singles must be deterministic, deduplicate cells
     # forced by multiple units, and leave the live board and history alone.
     stdout, stderr = run(['--puzzle', hidden_single_puzzle],
