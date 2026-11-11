@@ -90,18 +90,26 @@ SudokuGameStatus sudoku_game_erase(SudokuGame *game, unsigned row, unsigned col)
  * Returns 0 for a filled cell, invalid coordinates or an invalid game. */
 uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned col) {
     int idx = cell_index(row, col);
-    SudokuBoard trial;
-    uint16_t mask = 0u;
-    unsigned digit;
+    const SudokuBoard *board;
+    uint16_t used = 0u;
+    unsigned k, base_row, base_col;
     if (!valid_game(game) || idx < 0 || game->state.board.cells[idx])
         return 0u;
-    trial = game->state.board;
-    for (digit = 1u; digit <= 9u; ++digit) {
-        trial.cells[idx] = (uint8_t)digit;
-        if (sudoku_board_validate(&trial, NULL) == SUDOKU_OK)
-            mask = (uint16_t)(mask | (uint16_t)(1u << digit));
+    board = &game->state.board;
+    /* Preserve the previous fail-closed contract when callers mutate the
+     * public board struct directly: a conflicting or out-of-range digit
+     * anywhere must never yield a candidate as though the board were legal. */
+    if (sudoku_board_validate(board, NULL) != SUDOKU_OK)
+        return 0u;
+    base_row = ((row - 1u) / 3u) * 3u;
+    base_col = ((col - 1u) / 3u) * 3u;
+    for (k = 0u; k < 9u; ++k) {
+        used = (uint16_t)(used | (uint16_t)(1u << board->cells[(row - 1u) * 9u + k]));
+        used = (uint16_t)(used | (uint16_t)(1u << board->cells[k * 9u + (col - 1u)]));
+        used = (uint16_t)(used | (uint16_t)(1u << board->cells[
+            (base_row + k / 3u) * 9u + base_col + k % 3u]));
     }
-    return mask;
+    return (uint16_t)(0x3feu & (unsigned)~used);
 }
 /* Recompute all pencil marks for editable empty cells as a single undoable
  * snapshot. The user's deliberate notes are replaced only on this command;
