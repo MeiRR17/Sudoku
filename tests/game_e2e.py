@@ -141,6 +141,98 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Pair 1 in ' not in stdout and not stderr
     checks += 1
 
+    # Hidden pairs are different from naked pairs: exactly two numbers can
+    # occupy only the same two cells of a unit, even if each cell currently
+    # permits more than two candidates. Extra candidates in those two cells
+    # may be removed, but unrelated pencil digits must remain untouched.
+    stdout, stderr = run(['--puzzle', pair_puzzle],
+                         'hint hidden-pairs\nhint hidden-pairs 1\n'
+                         'hint hidden-pairs 3\nstatus\nquit\n')
+    row_hidden = ('Hidden pair 1 in row 5: r5c2 + r5c3 reserve 2,6; '
+                  'remove from r5c2(3,7) r5c3(3,7)')
+    column_hidden = ('Hidden pair 2 in column 5: r8c5 + r9c5 reserve 1,8; '
+                     'remove from r8c5(2,4) r9c5(2,3)')
+    assert stdout.count(row_hidden) == 3, stdout
+    assert stdout.count(column_hidden) == 2, stdout
+    assert 'Hidden pair 3 ' not in stdout  # duplicate box-8 pair suppressed
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--puzzle', pair_puzzle],
+                         'note 5 2 2\nnote 5 2 3\nnote 5 2 7\n'
+                         'note 5 3 3\nnote 5 3 7\n'
+                         'note 8 5 2\nnote 8 5 4\n'
+                         'note 9 5 2\nnote 9 5 3\n'
+                         'hint apply hidden-pairs 1\n'
+                         'notes 5 2\nnotes 5 3\nnotes 8 5\nstatus\n'
+                         'undo\nnotes 5 2\nstatus\n'
+                         'redo\nnotes 5 2\nstatus\nquit\n')
+    assert 'Removed 4 hidden-pair pencil candidates in one undoable edit.' in stdout
+    assert 'Notes for row 5 col 2: 2\n' in stdout
+    assert 'Notes for row 5 col 3:\n' in stdout
+    assert 'Notes for row 8 col 5: 2 4\n' in stdout  # second pair not applied
+    assert 'Notes for row 5 col 2: 2 3 7\n' in stdout  # Undo restores notes
+    assert stdout.count('undo 10, redo 0') == 2, stdout
+    assert 'undo 9, redo 1' in stdout
+    assert 'Progress: 24/81 filled' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--puzzle', pair_puzzle],
+                         'note 5 2 2\nnote 5 2 3\nnote 5 2 7\n'
+                         'note 5 3 3\nnote 5 3 7\n'
+                         'note 8 5 2\nnote 8 5 4\n'
+                         'note 9 5 2\nnote 9 5 3\n'
+                         'hint apply hidden-pairs 2\n'
+                         'notes 5 2\nnotes 8 5\nnotes 9 5\nstatus\n'
+                         'hint apply hidden-pairs 2\nstatus\n'
+                         'undo\nnotes 8 5\nstatus\nquit\n')
+    assert 'Removed 8 hidden-pair pencil candidates in one undoable edit.' in stdout
+    assert 'No matching hidden-pair pencil notes to remove; history unchanged.' in stdout
+    assert 'Notes for row 5 col 2: 2\n' in stdout
+    assert 'Notes for row 8 col 5:\n' in stdout
+    assert 'Notes for row 9 col 5:\n' in stdout
+    assert 'Notes for row 8 col 5: 2 4\n' in stdout
+    assert stdout.count('undo 10, redo 0') == 2
+    assert 'undo 9, redo 1' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--puzzle', pair_puzzle],
+                         'hint apply hidden-pairs\nstatus\nundo\nquit\n')
+    assert 'No matching hidden-pair pencil notes to remove; history unchanged.' in stdout
+    assert 'undo 0, redo 0' in stdout
+    assert 'Error: no action to undo or redo' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 9 4\nhint hidden-pairs\n'
+                         'hint apply hidden-pairs\nstatus\nquit\n')
+    assert 'Cannot preview hidden pairs: correct the existing mistakes first.' in stdout
+    assert 'Cannot apply hidden pairs: correct the existing mistakes first.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--puzzle', solution],
+                         'hint hidden-pairs\nhint apply hidden-pairs\nstatus\nquit\n')
+    assert stdout.count('Puzzle already solved; no hidden pair hint needed.') == 2
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    invalid_hidden = [
+        'hint hidden-pairs 0', 'hint hidden-pairs 82',
+        'hint hidden-pairs -1', 'hint hidden-pairs nope',
+        'hint hidden-pairs 2 extra',
+        'hint apply hidden-pairs 0', 'hint apply hidden-pairs 82',
+        'hint apply hidden-pairs -1', 'hint apply hidden-pairs nope',
+        'hint apply hidden-pairs 2 extra',
+    ]
+    stdout, stderr = run(['--puzzle', pair_puzzle],
+                         'status\n' + '\n'.join(invalid_hidden) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_hidden)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'Hidden pair 1 ' not in stdout and not stderr
+    checks += 1
+
     # Candidate-pressure explorer is read-only, deterministic, and sorted
     # first by fewest legal candidates, then by row/column reading order.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],
