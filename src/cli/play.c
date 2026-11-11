@@ -583,7 +583,7 @@ static void locked_report(unsigned number,const char *kind,
 static void locked_candidates(SudokuGame *game,unsigned limit,int apply){
     uint16_t masks[SUDOKU_CELL_COUNT]={0};
     uint16_t eliminations[SUDOKU_CELL_COUNT]={0};
-    unsigned pass,unit,digit,k,n,total=0u,i;
+    unsigned pass,unit,digit,k,total=0u,i;
     if(sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
         puts("Cannot inspect locked candidates: invalid current board.");
         return;
