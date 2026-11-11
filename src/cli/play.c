@@ -1,3 +1,6 @@
+#if !defined(_WIN32)
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "sudoku/play.h"
 #include "sudoku/board.h"
 #include "sudoku/game.h"
@@ -8,6 +11,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if !defined(_WIN32)
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#endif
 
 typedef struct PlayOptions {
     const char *puzzle;
@@ -68,6 +76,40 @@ static void display(const SudokuGame *game) {
            sudoku_game_empty(game), sudoku_game_mistakes(game), sudoku_game_elapsed(game));
     if(sudoku_game_won(game))puts("SOLVED! Congratulations: all 81 cells match the unique solution.");
 }
+/* POSIX --file is a regular on-disk puzzle, not an interactive pipe.
+ * O_NONBLOCK prevents a writer-less FIFO from trapping the CLI at open;
+ * fstat validates the already-open descriptor rather than a racy pathname.
+ * Keep symlinks to regular files supported. Windows retains fopen. */
+static FILE *open_regular_puzzle(const char *path) {
+#if defined(_WIN32)
+    return fopen(path, "rb");
+#else
+    int fd = open(path, O_RDONLY | O_NONBLOCK);
+    struct stat metadata;
+    FILE *input;
+    int saved_errno;
+    if (fd < 0) return NULL;
+    if (fstat(fd, &metadata) != 0) {
+        saved_errno = errno;
+        (void)close(fd);
+        errno = saved_errno;
+        return NULL;
+    }
+    if (!S_ISREG(metadata.st_mode)) {
+        (void)close(fd);
+        errno = EINVAL;
+        return NULL;
+    }
+    input = fdopen(fd, "rb");
+    if (input == NULL) {
+        saved_errno = errno;
+        (void)close(fd);
+        errno = saved_errno;
+    }
+    return input;
+#endif
+}
+
 static int puzzle_file(const char *path,SudokuBoard *board){
     /* Never reserve >1 MiB on the call stack (notably Windows' default stack).
      * One extra byte still distinguishes an oversized file from the limit. */
@@ -76,7 +118,7 @@ static int puzzle_file(const char *path,SudokuBoard *board){
     SudokuError error;
     size_t n;
     SudokuStatus valid;
-    FILE *f=fopen(path,"rb");
+    FILE *f=open_regular_puzzle(path);
     if(!f){fprintf(stderr,"Puzzle open failed: %s\n",strerror(errno));return 4;}
     bytes=malloc(capacity);
     if(!bytes){
