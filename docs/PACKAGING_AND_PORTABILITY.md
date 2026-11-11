@@ -34,6 +34,10 @@ The platform label is detected from the **actual packaging host**, not inferred 
 
 A CPack TGZ/ZIP definition is also available via `cpack --config build/CPackConfig.cmake`; it is **not** the canonical deterministic archive with the checked manifest. The canonical command above uses Python standard library.
 
+### Canonical checksum format and target-label gate (v0.8.4)
+
+The v0.8.4 verifier accepts only four lowercase-SHA256 checksum records in **filename** order, using strict ASCII text and exactly one trailing LF for each record. Alternate CRLF/CR endings, missing final newline, reordered records, duplicate archive names and invalid digest syntax are rejected before archive validation. Only `linux-x86_64`, `windows-x86_64` and `macos-arm64` are recognized binary release labels. `target_platform()` refuses unsupported architecture combinations rather than producing a misleading platform label. This is a metadata safeguard, **not** a claim that any unexecuted target build passes.
+
 ## Required but missing native acceptance gates
 
 Before checking off issue #10 and publishing any release:
