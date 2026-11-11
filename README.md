@@ -4,6 +4,8 @@ A fully offline Sudoku engine with deterministic exact solving, solution classif
 
 ## Build and use
 
+The v0.8.4 development package verifier now validates each original archive once into a bounded private snapshot, then computes its checksum and decodes ZIP/TAR from **the same stored bytes**. This eliminates archive-path replacement between hashing and parsing on supported systems. Temporary copies are cleaned up; the checksum list remains unsigned, and this is not a signed or approved production release.
+
 Development package verification checks `SHA256SUMS` and each ZIP/TAR archive on the **opened regular-file descriptor** before reading, rather than trusting a path-only preflight. POSIX FIFO, device and final-component symlink substitutions are rejected without a blocking open, and archive hashing enforces size and concurrent-content-length limits. This is local integrity hardening, not cryptographic signing or release approval.
 
 The development source packager now pins each parent directory while opening the source manifest, manifested source files, and staged installation files on supported POSIX hosts; swapping a parent path to a symlink cannot redirect package reads outside the relevant root. On Windows this descriptor-relative traversal is unavailable, and packaging relies on the existing path/symlink and opened-file checks pending native validation. This improves source package integrity but does not constitute a signed or approved release.
