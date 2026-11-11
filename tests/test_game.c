@@ -315,4 +315,68 @@ static int check_game(void){
     free(orig);free(restored);free(game);
     return 0;
 }
-int main(void){int result=check_game();if(!result)puts("GAME ENGINE PASS: unique, givens, notes, history, reset, save/load/corruption, win");return result;}
+/* A bulk correction must be explicit, reversible and never disclose the
+ * expected solution. A history-neutral repeat must retain redo branches. */
+static int check_mistake_clear(void) {
+    SudokuBoard board;
+    SudokuGame *game=malloc(sizeof *game);
+    unsigned cursor, length;
+    CHECK(game != NULL);
+    CHECK(sudoku_board_parse(&board,(const unsigned char *)classic,81u,NULL)==SUDOKU_OK);
+    CHECK(sudoku_game_start(game,&board)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_set(game,1,3,1)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_set(game,1,4,2)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_note(game,2,2,5)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_mistakes(game)==2u);
+    cursor=game->history_cursor;
+    CHECK(sudoku_game_clear_mistakes(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.board.cells[2]==0u && game->state.board.cells[3]==0u);
+    CHECK(game->state.board.cells[0]==5u && game->state.board.cells[4]==7u);
+    CHECK(game->state.notes[10]==(1u<<5));
+    CHECK(sudoku_game_mistakes(game)==0u);
+    CHECK(game->history_cursor==cursor+1u);
+    cursor=game->history_cursor;length=game->history_len;
+    CHECK(sudoku_game_clear_mistakes(game)==SUDOKU_GAME_OK);
+    CHECK(game->history_cursor==cursor && game->history_len==length);
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.board.cells[2]==1u && game->state.board.cells[3]==2u);
+    CHECK(game->state.notes[10]==(1u<<5));
+    CHECK(sudoku_game_redo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.board.cells[2]==0u && game->state.board.cells[3]==0u);
+    /* Undo to a clean snapshot with pending redo; a no-op must not erase it. */
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(game->history_cursor==0u);
+    length=game->history_len;
+    CHECK(sudoku_game_clear_mistakes(game)==SUDOKU_GAME_OK);
+    CHECK(game->history_cursor==0u && game->history_len==length);
+    CHECK(sudoku_game_redo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.board.cells[2]==1u);
+    /* The public structure can be edited outside the mutators; refuse
+     * corrupted givens/solution/current board without touching history. */
+    cursor=game->history_cursor;length=game->history_len;
+    game->state.board.cells[0]=0u;
+    CHECK(sudoku_game_clear_mistakes(game)==SUDOKU_GAME_INVALID);
+    CHECK(game->state.board.cells[0]==0u);
+    CHECK(game->history_cursor==cursor && game->history_len==length);
+    game->state.board.cells[0]=5u;
+    game->solution.cells[0]=0u;
+    CHECK(sudoku_game_clear_mistakes(game)==SUDOKU_GAME_INVALID);
+    CHECK(game->history_cursor==cursor && game->history_len==length);
+    game->solution.cells[0]=5u;
+    game->state.board.cells[3]=5u; /* Duplicate existing row-1 given. */
+    CHECK(sudoku_game_clear_mistakes(game)==SUDOKU_GAME_INVALID);
+    CHECK(game->state.board.cells[3]==5u);
+    CHECK(game->history_cursor==cursor && game->history_len==length);
+    free(game);
+    return 0;
+}
+int main(void){
+    int result=check_game();
+    if(result)return result;
+    result=check_mistake_clear();
+    if(!result)puts("GAME ENGINE PASS: unique, givens, notes, history, reset, save/load/corruption, win, check-clear");
+    return result;
+}
