@@ -17,6 +17,7 @@
 #include <io.h>
 #else
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #endif
 
@@ -211,8 +212,42 @@ static int read_all(FILE *stream, unsigned char **out, size_t *length) {
 
 /* Keep ownership of a newly opened stream inside a dedicated helper.
  * fclose runs on both successful and failed reads; stdin is not closed. */
+/* POSIX --file is a regular on-disk puzzle, not an interactive pipe.
+ * O_NONBLOCK prevents a writer-less FIFO from trapping the CLI at open;
+ * fstat validates the already-open descriptor rather than a racy pathname.
+ * Keep symlinks to regular files supported. Windows retains fopen. */
+static FILE *open_regular_puzzle(const char *path) {
+#if defined(_WIN32)
+    return fopen(path, "rb");
+#else
+    int fd = open(path, O_RDONLY | O_NONBLOCK);
+    struct stat metadata;
+    FILE *input;
+    int saved_errno;
+    if (fd < 0) return NULL;
+    if (fstat(fd, &metadata) != 0) {
+        saved_errno = errno;
+        (void)close(fd);
+        errno = saved_errno;
+        return NULL;
+    }
+    if (!S_ISREG(metadata.st_mode)) {
+        (void)close(fd);
+        errno = EINVAL;
+        return NULL;
+    }
+    input = fdopen(fd, "rb");
+    if (input == NULL) {
+        saved_errno = errno;
+        (void)close(fd);
+        errno = saved_errno;
+    }
+    return input;
+#endif
+}
+
 static int read_from_path(const char *path, unsigned char **out, size_t *length) {
-    FILE *input = fopen(path, "rb");
+    FILE *input = open_regular_puzzle(path);
     int result, close_result;
     int read_errno;
     if (input == NULL) {
