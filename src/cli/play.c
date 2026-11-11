@@ -48,12 +48,13 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, auto-notes, prune-notes,");
-    puts("          clear-notes, hint [apply], undo, redo, reset, check [details|clear],");
+    puts("          clear-notes, hint [apply|all], undo, redo, reset, check [details|clear],");
     puts("          status, save [PATH], help, quit");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'note' toggles pencil marks; 'candidates' lists legal digits without guessing.");
     puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
-    puts("'hint' finds a forced single; 'hint apply' places it as an undoable move.");
+    puts("'hint' shows one forced single; 'hint all' lists each distinct forced cell.");
+    puts("'hint apply' places one logical deduction as an undoable move.");
     puts("'check details' locates wrong entries; 'check clear' erases them (undoable).");
     puts("No color, network or special keys required.");
 }
@@ -272,20 +273,25 @@ typedef struct LogicalHint {
     unsigned index, digit, group;
     int hidden;
 } LogicalHint;
-/* Naked singles first; if none exist, scan for a hidden single in a
- * row, column or 3x3 box. Never look up the completed solution. */
-static int find_hint(const SudokuGame *game,LogicalHint *hint){
+/* Collect distinct logically forced cells without consulting the solution.
+ * Prefer naked singles; then hidden singles in row, column and box order.
+ * The seen bitmap prevents double-counting the same cell in several units.
+ * A cap of one preserves the original deterministic 'hint' preference. */
+static unsigned collect_hints(const SudokuGame *game,LogicalHint *hints,unsigned limit){
     uint16_t masks[SUDOKU_CELL_COUNT]={0};
-    unsigned i,d,group,slot,count,chosen;
+    unsigned char seen[SUDOKU_CELL_COUNT]={0};
+    unsigned i,d,group,slot,count,chosen,total=0u;
+    if(!limit)return 0u;
     for(i=0u;i<SUDOKU_CELL_COUNT;++i){
         masks[i]=candidate_mask(game,i);
         d=single_candidate(masks[i]);
         if(d){
-            hint->index=i;
-            hint->digit=d;
-            hint->group=0u;
-            hint->hidden=0;
-            return 1;
+            hints[total].index=i;
+            hints[total].digit=d;
+            hints[total].group=0u;
+            hints[total].hidden=0;
+            seen[i]=1u;
+            if(++total==limit)return total;
         }
     }
     for(group=0u;group<27u;++group){
@@ -304,16 +310,20 @@ static int find_hint(const SudokuGame *game,LogicalHint *hint){
                     chosen=i;
                 }
             }
-            if(count==1u){
-                hint->index=chosen;
-                hint->digit=d;
-                hint->group=group;
-                hint->hidden=1;
-                return 1;
+            if(count==1u && !seen[chosen]){
+                hints[total].index=chosen;
+                hints[total].digit=d;
+                hints[total].group=group;
+                hints[total].hidden=1;
+                seen[chosen]=1u;
+                if(++total==limit)return total;
             }
         }
     }
-    return 0;
+    return total;
+}
+static int find_hint(const SudokuGame *game,LogicalHint *hint){
+    return collect_hints(game,hint,1u)!=0u;
 }
 /* 'hint' is observational. 'hint apply' explicitly places exactly one
  * logical single via the normal game setter (and therefore supports undo).
@@ -355,6 +365,38 @@ static void print_hint(SudokuGame *game,int apply){
                hint.index/9u+1u,hint.index%9u+1u,hint.digit);
     }
     if(apply&&sudoku_game_won(game))puts("SOLVED! All cells are correct.");
+}
+/* Enumerate available logical singles without placing a digit or touching
+ * pencil notes, timers or history. Each cell is shown at most once. */
+static void print_hint_all(const SudokuGame *game){
+    LogicalHint hints[SUDOKU_CELL_COUNT];
+    unsigned count,i;
+    if(sudoku_game_won(game)){
+        puts("Puzzle already solved; no hint needed.");
+        return;
+    }
+    if(sudoku_game_mistakes(game)){
+        puts("Cannot list hints: correct the existing mistakes first. Use 'check details'.");
+        return;
+    }
+    count=collect_hints(game,hints,SUDOKU_CELL_COUNT);
+    if(!count){
+        puts("No simple hint found. Try candidates ROW COL.");
+        return;
+    }
+    printf("Logical hints (%u):\\n",count);
+    for(i=0u;i<count;++i){
+        const LogicalHint *hint=&hints[i];
+        if(!hint->hidden){
+            printf("Hint (only candidate): row %u col %u -> %u.\\n",
+                   hint->index/9u+1u,hint->index%9u+1u,hint->digit);
+        }else{
+            const char *unit=hint->group<9u?"row":hint->group<18u?"column":"box";
+            printf("Hint (only place in %s %u): row %u col %u -> %u.\\n",
+                   unit,hint->group%9u+1u,
+                   hint->index/9u+1u,hint->index%9u+1u,hint->digit);
+        }
+    }
 }
 /* Identify mistakes against the verified solution without disclosing any
  * answer digit. Read-only: no note, timer, save or undo/redo side effects. */
@@ -469,8 +511,10 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         }
         if(strcmp(command,"help")==0&&!a){commands();continue;}
         if(strcmp(command,"hint")==0&&
-           (!a||(strcmp(a,"apply")==0&&!b))){
-            print_hint(game,a!=NULL);continue;
+           (!a||((strcmp(a,"apply")==0||strcmp(a,"all")==0)&&!b))){
+            if(a&&strcmp(a,"all")==0)print_hint_all(game);
+            else print_hint(game,a!=NULL);
+            continue;
         }
         if(strcmp(command,"show")==0&&!a){display(game);continue;}
         if(strcmp(command,"status")==0&&!a){
