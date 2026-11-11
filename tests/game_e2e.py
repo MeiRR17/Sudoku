@@ -343,6 +343,19 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('Hint (only place in column 8): row 7 col 8 -> 8.') == 2, stdout
     assert stdout.count('undo 0, redo 0') == 2 and not stderr
     checks += 1
+    # Listing all hidden singles must be deterministic, deduplicate cells
+    # forced by multiple units, and leave the live board and history alone.
+    stdout, stderr = run(['--puzzle', hidden_single_puzzle],
+                         'hint all\nstatus\nhint all\nstatus\nquit\n')
+    lines = [line for line in stdout.splitlines() if line.startswith('Hint (')]
+    assert lines and len(lines) % 2 == 0, stdout
+    midpoint = len(lines) // 2
+    assert lines[:midpoint] == lines[midpoint:], stdout
+    assert lines[0] == 'Hint (only place in column 8): row 7 col 8 -> 8.', stdout
+    assert 'Logical hints (' in stdout and stdout.count('undo 0, redo 0') == 2
+    assert all('only place' in line or 'only candidate' in line for line in lines)
+    assert not stderr
+    checks += 1
 
     # Transposition preserves unique solutions and turns the above hidden
     # column single into a hidden row single. No answer lookup is permitted.
