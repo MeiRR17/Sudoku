@@ -205,7 +205,7 @@ class SourceManifestSafetyTests(unittest.TestCase):
     def test_manifest_parent_symlink_swap_rejected(self):
         alternate = Path(self.tmp.name) / 'external-scripts'
         alternate.mkdir()
-        (alternate / 'release_files.txt').write_text('src/board.c\\n',
+        (alternate / 'release_files.txt').write_text('src/board.c\n',
                                                      encoding='utf-8')
         (self.root / 'scripts').rename(self.root / 'original-scripts')
         (self.root / 'scripts').symlink_to(alternate, target_is_directory=True)
