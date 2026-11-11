@@ -48,7 +48,7 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, focus [N], auto-notes, prune-notes,");
-    puts("          clear-notes, hint [all|chain [N]|apply [all|chain [N]]], undo [N], redo [N], reset, check [details|clear],");
+    puts("          clear-notes, hint [all|pairs [N]|chain [N]|apply [all|chain [N]]], undo [N], redo [N], reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
     puts("prints entered digits too; neither is a full save or stored solution.");
@@ -57,6 +57,7 @@ static void commands(void){
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
     puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
     puts("'hint' shows one forced single; 'hint all' lists each distinct forced cell.");
+    puts("'hint pairs [N]' shows up to N actionable naked pairs (default 5).");
     puts("'hint chain [N]' previews up to N successive forced singles (1..81).");
     puts("'hint apply' places one; 'hint apply all' batches current forced cells.");
     puts("'hint apply chain [N]' commits at most N singles in one undo.");
@@ -336,6 +337,94 @@ static void print_focus(const SudokuGame *game,unsigned limit){
     }
     if(dead)printf("Warning: %u empty cell%s %s no legal digits; inspect entries.\n",
                    dead,dead==1u?"":"s",dead==1u?"has":"have");
+}
+/* Report actionable naked pairs. Exactly two cells in one unit must each
+ * have the same two candidates; those two digits can then be removed from
+ * candidate sets of all OTHER cells in that unit. This is logical candidate
+ * guidance, not a placement or a mutation of the player's pencil notes.
+ * Compute from the board, never from the hidden solved grid. */
+static unsigned pair_unit_cell(unsigned unit,unsigned slot){
+    if(unit<9u)return unit*9u+slot;
+    if(unit<18u)return slot*9u+unit-9u;
+    {
+        unsigned box=unit-18u;
+        return ((box/3u)*3u+slot/3u)*9u+(box%3u)*3u+slot%3u;
+    }
+}
+static void print_naked_pairs(const SudokuGame *game,unsigned limit){
+    uint16_t masks[SUDOKU_CELL_COUNT]={0};
+    unsigned unit,a,b,k,i,j,d,pair_digits,match,targets,total=0u;
+    if(sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot inspect pairs: invalid current board.");
+        return;
+    }
+    if(sudoku_game_won(game)){
+        puts("Puzzle already solved; no pair hint needed.");
+        return;
+    }
+    if(sudoku_game_mistakes(game)){
+        puts("Cannot preview pairs: correct the existing mistakes first.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        masks[i]=candidate_mask(game,i);
+    for(unit=0u;unit<27u;++unit){
+        const char *kind=unit<9u?"row":unit<18u?"column":"box";
+        unsigned number=unit%9u+1u;
+        for(a=0u;a<8u;++a){
+            i=pair_unit_cell(unit,a);
+            if(game->state.board.cells[i])continue;
+            pair_digits=0u;
+            for(d=1u;d<=9u;++d)
+                if(masks[i]&(uint16_t)(1u<<d))++pair_digits;
+            if(pair_digits!=2u)continue;
+            for(b=a+1u;b<9u;++b){
+                uint16_t pair=masks[i];
+                j=pair_unit_cell(unit,b);
+                if(game->state.board.cells[j]||masks[j]!=pair)continue;
+                /* Reject three matching two-digit cells: they do not make
+                 * a pair and must not authorize candidate elimination. */
+                match=0u;
+                targets=0u;
+                for(k=0u;k<9u;++k){
+                    unsigned index=pair_unit_cell(unit,k);
+                    if(!game->state.board.cells[index]&&masks[index]==pair)
+                        ++match;
+                    if(k!=a&&k!=b&&(masks[index]&pair)!=0u)
+                        ++targets;
+                }
+                if(match!=2u||targets==0u)continue;
+                {
+                    unsigned first=0u,second=0u;
+                    for(d=1u;d<=9u;++d)
+                        if(pair&(uint16_t)(1u<<d)){
+                            if(!first)first=d;
+                            else second=d;
+                        }
+                    printf("Pair %u in %s %u: r%uc%u + r%uc%u reserve %u,%u; eliminate from",
+                           total+1u,kind,number,i/9u+1u,i%9u+1u,
+                           j/9u+1u,j%9u+1u,first,second);
+                }
+                for(k=0u;k<9u;++k){
+                    uint16_t eliminated;
+                    unsigned index=pair_unit_cell(unit,k),separator=0u;
+                    if(k==a||k==b)continue;
+                    eliminated=(uint16_t)(masks[index]&pair);
+                    if(!eliminated)continue;
+                    printf(" r%uc%u(",index/9u+1u,index%9u+1u);
+                    for(d=1u;d<=9u;++d)
+                        if(eliminated&(uint16_t)(1u<<d)){
+                            if(separator++)putchar(',');
+                            printf("%u",d);
+                        }
+                    putchar(')');
+                }
+                putchar('\n');
+                if(++total==limit)return;
+            }
+        }
+    }
+    if(total==0u)puts("No actionable naked pairs found.");
 }
 typedef struct LogicalHint {
     unsigned index, digit, group;
@@ -697,6 +786,9 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             uint64_t limit=81u;
             if(!a)print_hint(game,0);
             else if(strcmp(a,"all")==0&&!b)print_hint_all(game);
+            else if(strcmp(a,"pairs")==0&&
+                    (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
+                print_naked_pairs(game,(unsigned)(b?limit:5u));
             else if(strcmp(a,"apply")==0&&!b)print_hint(game,1);
             else if(strcmp(a,"chain")==0&&
                     (!b||(!c&&decimal(b,81u,&limit)&&limit>=1u)))
