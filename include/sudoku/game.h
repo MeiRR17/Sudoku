@@ -37,6 +37,12 @@ SudokuGameStatus sudoku_game_start(SudokuGame *game, const SudokuBoard *givens);
 SudokuGameStatus sudoku_game_set(SudokuGame *game, unsigned row, unsigned col, unsigned digit);
 SudokuGameStatus sudoku_game_erase(SudokuGame *game, unsigned row, unsigned col);
 SudokuGameStatus sudoku_game_note(SudokuGame *game, unsigned row, unsigned col, unsigned digit);
+/* 1 << digit bitmask (digits 1..9), based only on the current board.
+ * Returns 0 on invalid arguments or a filled cell. Observational. */
+uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned col);
+/* Fill candidate notes on all empty editable cells in one undoable step.
+ * Replaces existing pencil notes; repeated unchanged action is a no-op. */
+SudokuGameStatus sudoku_game_auto_notes(SudokuGame *game);
 /* Clear every pencil note as one undoable edit; empty note sets are a no-op. */
 SudokuGameStatus sudoku_game_clear_notes(SudokuGame *game);
 SudokuGameStatus sudoku_game_undo(SudokuGame *game);
