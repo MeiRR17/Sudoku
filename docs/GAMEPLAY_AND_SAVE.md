@@ -12,7 +12,7 @@ Sudoku `play` is a local, plain-text terminal interface. It never makes network 
 ./build/sudoku play --help
 ```
 
-The `--file` argument reads a puzzle file (max 1 MiB), not a saved game. `--resume` reads only versioned Sudoku game saves. For an interactive game, puzzle input through stdin is not supported because stdin is reserved for player commands. A generated game requires both `--seed` and `--difficulty`; `--symmetry` applies only to generated games. There is no network dependency.
+The `--file` argument reads a puzzle file (max 1 MiB), not a saved game. On POSIX, `--resume` accepts only regular saved files (including ordinary symlinks to regular files): it opens the path nonblocking and rejects named pipes or character devices before reading, avoiding a terminal session hanging on an accidental FIFO path. The loader returns a file-operation error without changing an existing game. Windows retains the previous standard-file loader until native acceptance. `--resume` reads only versioned Sudoku game saves. For an interactive game, puzzle input through stdin is not supported because stdin is reserved for player commands. A generated game requires both `--seed` and `--difficulty`; `--symmetry` applies only to generated games. There is no network dependency.
 
 ## Interactive commands
 
