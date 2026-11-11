@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import hashlib
 import importlib.util
 import json
+import os
 import zipfile
 import contextlib
 import io
@@ -81,6 +82,26 @@ class ReceiptMatrixTests(unittest.TestCase):
 
     def check(self):
         return MATRIX.verify_matrix(self.folders, SHA, VERSION)
+
+
+    @unittest.skipUnless(hasattr(os, 'mkfifo'), 'POSIX FIFO support required')
+    def test_fifo_receipt_file_is_rejected_without_writer(self):
+        folder = self.folders['ubuntu-latest']
+        path = folder / 'platform-receipt.json'
+        path.unlink()
+        os.mkfifo(path)
+        with self.assertRaisesRegex(ValueError, 'missing or unsafe evidence file'):
+            MATRIX.bounded_text(path, MATRIX.MAX_RECEIPT_BYTES, 'utf-8')
+
+    @unittest.skipUnless(hasattr(os, 'mkfifo'), 'POSIX FIFO support required')
+    def test_fifo_archive_is_rejected_without_writer(self):
+        folder = self.folders['ubuntu-latest']
+        name = 'sudoku-v0.8.4-source.zip'
+        path = folder / name
+        path.unlink()
+        os.mkfifo(path)
+        with self.assertRaisesRegex(ValueError, 'missing or unsafe archive'):
+            MATRIX.verify_archive_hash(path, '0' * 64)
 
     def test_local_cli_validates_real_single_platform_archives(self):
         stdout = io.StringIO()
