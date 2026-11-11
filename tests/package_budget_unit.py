@@ -266,6 +266,28 @@ class PackageBudgetTests(unittest.TestCase):
                          ['unrelated.txt'])
         self.assertTrue(all((staged / name).exists() for name in names))
 
+    def test_publish_racing_destination_is_not_overwritten_or_unlinked(self):
+        staged, destination, names = self.package_publication_fixture()
+        actual_link = os.link
+        calls = 0
+        competing = destination / names[1]
+
+        def racing_link(source, target):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                competing.write_bytes(b'another publisher won')
+                raise FileExistsError('simulated exclusive-link conflict')
+            return actual_link(source, target)
+
+        with patch.object(packager.os, 'link', side_effect=racing_link):
+            with self.assertRaises(FileExistsError):
+                packager.publish_checked_package_set(staged, destination, names)
+        self.assertEqual(competing.read_bytes(), b'another publisher won')
+        self.assertFalse((destination / names[0]).exists())
+        self.assertEqual(sorted(p.name for p in destination.iterdir()),
+                         [names[1]])
+
     def test_publish_invalid_artifact_set_refused(self):
         staged, destination, names = self.package_publication_fixture()
         for malformed in (names[:-1], names[:-1] + [names[0]],
