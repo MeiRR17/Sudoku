@@ -47,8 +47,75 @@ sudoku_game_e2e sudoku_generator_golden sudoku_cli_golden
 PACKAGE_TESTS = frozenset(('sudoku_package_e2e', 'sudoku_package_integrity'))
 WINDOWS_TESTS = frozenset(('sudoku_windows_save_concurrency',))
 
+# CTest inventories can retain all expected names while accidentally running
+# the wrong binary, a substitute Python script, or even a no-op echo command.
+# Match expected executables and the exact source test-script paths before
+# accepting an inventory as evidence that the real suite was registered.
+C_TEST_PROGRAMS = {
+    'sudoku_board_unit': 'sudoku_board_tests',
+    'sudoku_properties': 'sudoku_property_tests',
+    'sudoku_game_unit': 'sudoku_game_tests',
+    'sudoku_generator_unit': 'sudoku_generator_tests',
+    'sudoku_generator_clock': 'sudoku_generator_clock_tests',
+    'sudoku_solver_unit': 'sudoku_solver_tests',
+    'sudoku_windows_save_concurrency': 'sudoku_windows_save_concurrency_tests',
+}
+PYTHON_TEST_SCRIPTS = {
+    'sudoku_game_e2e': 'game_e2e.py',
+    'sudoku_generator_golden': 'generator_golden.py',
+    'sudoku_cli_golden': 'cli_golden.py',
+    'sudoku_package_e2e': 'package_smoke.py',
+    'sudoku_package_integrity': 'package_integrity.py',
+    'sudoku_save_fault_injection': 'save_faults.py',
+}
 
-def validate_test_manifest(raw, sanitizer=False, coverage=False, system=None):
+
+def validate_ctest_command(name, command, build_dir=None):
+    """Require a real, expected test executable/script, not merely its name."""
+    if (not isinstance(command, list) or not command or
+            any(not isinstance(x, str) or not x for x in command)):
+        raise ValueError('Required CTest command missing or malformed: ' + name)
+
+    def executable_name(path):
+        # The inventory is inspected on its native host (including Windows).
+        return pathlib.Path(path).name.lower()
+
+    def require_build_binary(path, expected):
+        program = executable_name(path)
+        if program not in (expected, expected + '.exe'):
+            raise ValueError('Required CTest executable mismatch: ' + name)
+        if build_dir is not None:
+            resolved = pathlib.Path(path).resolve()
+            root = pathlib.Path(build_dir).resolve()
+            if root not in resolved.parents:
+                raise ValueError('Required CTest executable outside build: ' + name)
+
+    if name in C_TEST_PROGRAMS:
+        require_build_binary(command[0], C_TEST_PROGRAMS[name])
+    elif name in PYTHON_TEST_SCRIPTS:
+        if len(command) < 2 or 'python' not in executable_name(command[0]):
+            raise ValueError('Required CTest Python runner mismatch: ' + name)
+        expected = ROOT / 'tests' / PYTHON_TEST_SCRIPTS[name]
+        if pathlib.Path(command[1]).resolve() != expected.resolve():
+            raise ValueError('Required CTest Python script mismatch: ' + name)
+        if name in ('sudoku_game_e2e', 'sudoku_cli_golden',
+                    'sudoku_generator_golden'):
+            if len(command) < 3:
+                raise ValueError('Required CTest game executable missing: ' + name)
+            require_build_binary(command[2], 'sudoku')
+    elif name == 'sudoku_stdin':
+        if (executable_name(command[0]) not in ('cmake', 'cmake.exe') or
+                '-P' not in command or
+                not any(pathlib.Path(x).resolve() ==
+                        (ROOT / 'tests' / 'run_stdin.cmake').resolve()
+                        for x in command[1:] if x.endswith('.cmake'))):
+            raise ValueError('Required CTest stdin driver mismatch: ' + name)
+    else:
+        require_build_binary(command[0], 'sudoku')
+
+
+def validate_test_manifest(raw, sanitizer=False, coverage=False, system=None,
+                           build_dir=None):
     """Fail closed on absent/duplicate named CTest checks before executing any."""
     try:
         manifest = json.loads(raw)
@@ -87,6 +154,7 @@ def validate_test_manifest(raw, sanitizer=False, coverage=False, system=None):
             if (label == 'DISABLED' and prop.get('value')) or label in (
                     'SKIP_RETURN_CODE', 'SKIP_REGULAR_EXPRESSION'):
                 raise ValueError('Required CTest check disabled or skippable: ' + test['name'])
+        validate_ctest_command(test['name'], test.get('command'), build_dir)
     print(f'CTEST INVENTORY PASS: {len(required)} mandatory / {len(names)} listed', flush=True)
     return len(required)
 
@@ -95,7 +163,8 @@ def verify_ctest_inventory(path, sanitizer=False, coverage=False):
     command = ['ctest', '--test-dir', str(path), '-C', 'Release', '--show-only=json-v1']
     print('+', ' '.join(command), flush=True)
     result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=True)
-    validate_test_manifest(result.stdout, sanitizer=sanitizer, coverage=coverage)
+    validate_test_manifest(result.stdout, sanitizer=sanitizer, coverage=coverage,
+                           build_dir=path)
 
 
 def build(path, compiler=None, sanitizer=False, coverage=False):
