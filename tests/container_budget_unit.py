@@ -164,6 +164,82 @@ class ContainerBudgetTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'archive exceeds compressed size budget'):
                 package.verified_archive_members(original, '0' * 64, prefix)
 
+    def canonical_manifest_fixture(self):
+        prefix = 'sudoku-v' + package.VERSION
+        names = sorted((prefix + '-source.zip', prefix + '-source.tar.gz',
+                        prefix + '-linux-x86_64.zip',
+                        prefix + '-linux-x86_64.tar.gz'))
+        records = [(str(i + 1) * 64, name) for i, name in enumerate(names)]
+        raw = ''.join(digest + '  ' + name + '\n'
+                      for digest, name in records).encode('ascii')
+        return records, raw
+
+    def test_canonical_manifest_exact_records_accepted(self):
+        records, raw = self.canonical_manifest_fixture()
+        self.assertEqual(package.canonical_checksum_records(raw),
+                         [[digest, name] for digest, name in records])
+
+    def test_canonical_manifest_rejects_alternate_line_endings(self):
+        _, raw = self.canonical_manifest_fixture()
+        invalid = (raw[:-1], raw.replace(b'\n', b'\r\n'), raw + b'\n',
+                   raw.replace(b'\n', b'\r'))
+        for blob in invalid:
+            with self.subTest(blob=blob[-12:]):
+                with self.assertRaises(ValueError):
+                    package.canonical_checksum_records(blob)
+
+    def test_canonical_manifest_rejects_reordered_names_before_io(self):
+        _, raw = self.canonical_manifest_fixture()
+        lines = raw.decode('ascii').splitlines()
+        lines[0], lines[1] = lines[1], lines[0]
+        invalid = ('\n'.join(lines) + '\n').encode('ascii')
+        with self.assertRaisesRegex(ValueError, 'non-canonical SHA256SUMS filename ordering'):
+            package.canonical_checksum_records(invalid)
+        (self.root / 'SHA256SUMS').write_bytes(invalid)
+        with patch.object(package, 'verified_archive_members',
+                          side_effect=AssertionError('archive must not open')):
+            with self.assertRaisesRegex(ValueError, 'filename ordering'):
+                package.verify_packages(self.root)
+
+    def test_canonical_manifest_rejects_duplicate_and_bad_records(self):
+        records, raw = self.canonical_manifest_fixture()
+        lines = raw.decode('ascii').splitlines()
+        bad_cases = [
+            ('\n'.join(lines[:3] + [lines[0]]) + '\n').encode(),
+            ('\n'.join(lines[:3] + ['g' * 64 + '  ' + records[3][1]]) + '\n').encode(),
+            ('\n'.join(lines[:3] + ['a' * 64 + '  ' + records[2][1]]) + '\n').encode(),
+        ]
+        for blob in bad_cases:
+            with self.subTest(blob=blob[-90:]):
+                with self.assertRaises(ValueError):
+                    package.canonical_checksum_records(blob)
+
+    def test_release_prefixes_only_include_approved_native_targets(self):
+        root = 'sudoku-v' + package.VERSION + '-'
+        for suffix in ('source', 'linux-x86_64', 'windows-x86_64', 'macos-arm64'):
+            self.assertTrue(package.valid_release_prefix(root + suffix))
+        for suffix in ('linux-arm64', 'windows-arm64', 'macos-x86_64',
+                       'unknown-x86_64', 'source-dev', '../source'):
+            self.assertFalse(package.valid_release_prefix(root + suffix))
+
+    def test_host_label_requires_approved_native_cpu(self):
+        for system, machine, label in (
+                ('Linux', 'x86_64', 'linux-x86_64'),
+                ('Windows', 'AMD64', 'windows-x86_64'),
+                ('Darwin', 'arm64', 'macos-arm64')):
+            with self.subTest(system=system, machine=machine):
+                with patch.object(package.platform, 'system', return_value=system):
+                    with patch.object(package.platform, 'machine', return_value=machine):
+                        self.assertEqual(package.target_platform(), label)
+        for system, machine in (
+                ('Linux', 'aarch64'), ('Darwin', 'x86_64'),
+                ('Windows', 'arm64'), ('Haiku', 'x86_64')):
+            with self.subTest(system=system, machine=machine):
+                with patch.object(package.platform, 'system', return_value=system):
+                    with patch.object(package.platform, 'machine', return_value=machine):
+                        with self.assertRaisesRegex(ValueError, 'unsupported packaging host'):
+                            package.target_platform()
+
     def test_nonascii_checksum_manifest_rejected(self):
         (self.root / 'SHA256SUMS').write_bytes(b'\xff\n')
         with self.assertRaisesRegex(ValueError, 'SHA256SUMS must be ASCII'):
