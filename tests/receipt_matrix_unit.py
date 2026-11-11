@@ -103,6 +103,64 @@ class ReceiptMatrixTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'missing or unsafe archive'):
             MATRIX.verify_archive_hash(path, '0' * 64)
 
+    def test_metadata_only_accepts_exact_three_unsigned_receipt_bundles(self):
+        # Actions uploads only receipt JSON + SHA256SUMS, not unlicensed
+        # binaries. This mode compares claims, NOT downloaded file bytes.
+        for folder in self.folders.values():
+            for archive in folder.glob('*.zip'):
+                archive.unlink()
+            for archive in folder.glob('*.tar.gz'):
+                archive.unlink()
+        matched = MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                       metadata_only=True)
+        self.assertEqual(set(matched), set(MATRIX.PLATFORMS))
+        with self.assertRaisesRegex(ValueError, 'missing or unsafe archive'):
+            self.check()
+
+    def test_metadata_only_rejects_different_git_shas(self):
+        self.receipts['windows-latest']['git_commit_sha'] = 'b' * 40
+        self.write('windows-latest')
+        with self.assertRaisesRegex(ValueError, 'git_commit_sha'):
+            MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                 metadata_only=True)
+
+    def test_metadata_only_rejects_source_digest_disagreement(self):
+        self.receipts['macos-latest']['source_tree_sha256'] = 'f' * 64
+        self.write('macos-latest')
+        with self.assertRaisesRegex(ValueError, 'source content differs'):
+            MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                 metadata_only=True)
+
+    def test_metadata_only_rejects_manifest_receipt_disagreement(self):
+        label = 'ubuntu-latest'
+        first = sorted(self.receipts[label]['archive_sha256'])[0]
+        self.receipts[label]['archive_sha256'][first] = '0' * 64
+        # Deliberately do not rewrite SHA256SUMS.
+        (self.folders[label] / 'platform-receipt.json').write_text(
+            json.dumps(self.receipts[label]), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'receipt and SHA256SUMS differ'):
+            MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                 metadata_only=True)
+
+    def test_metadata_only_cannot_detect_forged_archive_bytes(self):
+        # An intentionally corrupted binary cannot be certified by metadata.
+        source = self.folders['ubuntu-latest'] / f'sudoku-v{VERSION}-source.zip'
+        source.write_bytes(b'altered after receipt issuance')
+        MATRIX.verify_matrix(self.folders, SHA, VERSION, metadata_only=True)
+        with self.assertRaisesRegex(ValueError, 'archive hash mismatch'):
+            self.check()
+
+    def test_metadata_only_refuses_local_platform_mode(self):
+        with patch.object(sys, 'argv',
+                          ['verify_receipt_matrix.py', '--require-sha', SHA,
+                           '--metadata-only', '--local',
+                           str(self.folders['ubuntu-latest']),
+                           '--expected', 'ubuntu-latest']):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    MATRIX.main()
+        self.assertEqual(error.exception.code, 2)
+
     def test_local_cli_validates_real_single_platform_archives(self):
         stdout = io.StringIO()
         with patch.object(sys, 'argv',
