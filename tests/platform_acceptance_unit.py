@@ -4,6 +4,7 @@ Never creates a receipt or requires a native toolchain. The full acceptance
 script still must run on each real target host before any release claim.
 """
 import importlib.util
+import hashlib
 import json
 import os
 import stat
@@ -137,6 +138,77 @@ class ReceiptWriteTests(unittest.TestCase):
                 acceptance.write_receipt(dest, {'value': object()})
             self.assertFalse(dest.exists())
             self.assertFalse(dest.with_name(dest.name + '.tmp').exists())
+
+class ArchiveReceiptHashTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix='sudoku-archive-receipt-')
+        self.addCleanup(self.directory.cleanup)
+        self.dist = Path(self.directory.name)
+        self.version = '0.8.4'
+        self.names = sorted('sudoku-v0.8.4-' + kind + ext
+                            for kind in ('source', 'linux-x86_64')
+                            for ext in ('.zip', '.tar.gz'))
+        for name in self.names:
+            (self.dist / name).write_bytes(name.encode('ascii'))
+        self.rehash()
+
+    def rehash(self):
+        (self.dist / 'SHA256SUMS').write_text(''.join(
+            hashlib.sha256((self.dist / name).read_bytes()).hexdigest() +
+            '  ' + name + '\n' for name in self.names), encoding='ascii')
+
+    def check(self):
+        return acceptance.verified_archive_hashes(self.dist, self.version,
+                                                   'ubuntu-latest')
+
+    def test_four_exact_archive_hashes_pass(self):
+        self.assertEqual(sorted(self.check()), self.names)
+
+    def test_modified_archive_fails(self):
+        (self.dist / self.names[0]).write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'archive changed'):
+            self.check()
+
+    def test_sparse_oversized_archive_is_rejected_before_hash(self):
+        with (self.dist / self.names[0]).open('wb') as stream:
+            stream.truncate(acceptance.MAX_ARCHIVE_BYTES + 1)
+        with self.assertRaisesRegex(ValueError, 'archive exceeds size budget'):
+            self.check()
+
+    def test_symlinked_archive_is_rejected(self):
+        source = self.dist / self.names[0]
+        backup = self.dist / 'backup.archive'
+        source.rename(backup)
+        try:
+            source.symlink_to(backup)
+        except (OSError, NotImplementedError):
+            self.skipTest('symlink creation unavailable')
+        with self.assertRaisesRegex(ValueError, 'missing or unsafe archive'):
+            self.check()
+
+    def test_oversized_checksum_manifest_is_rejected(self):
+        (self.dist / 'SHA256SUMS').write_bytes(b'x' *
+                                               (acceptance.MAX_CHECKSUM_BYTES + 1))
+        with self.assertRaisesRegex(ValueError, 'SHA256SUMS exceeds size budget'):
+            self.check()
+
+    def test_duplicate_or_unsorted_manifest_rejected(self):
+        path = self.dist / 'SHA256SUMS'
+        lines = path.read_text().splitlines()
+        path.write_text('\n'.join(lines[::-1]) + '\n', encoding='ascii')
+        with self.assertRaisesRegex(ValueError, 'wrong or unsorted'):
+            self.check()
+        path.write_text('\n'.join([lines[0]] * 4) + '\n', encoding='ascii')
+        with self.assertRaisesRegex(ValueError, 'duplicate SHA256SUMS'):
+            self.check()
+
+    def test_unexpected_platform_archive_rejected(self):
+        filename = self.names[0].replace('linux-x86_64', 'macos-arm64')
+        (self.dist / filename).write_bytes(b'wrong platform')
+        self.names[0] = filename
+        self.rehash()
+        with self.assertRaisesRegex(ValueError, 'wrong or unsorted'):
+            self.check()
 
 
 if __name__ == '__main__':
