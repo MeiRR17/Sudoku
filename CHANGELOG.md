@@ -4,6 +4,9 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-11 packaged binary gameplay acceptance:** Extend the existing mandatory `sudoku_package_e2e` CTest to execute the real CLI from both the extracted native distribution ZIP and the independently built **shipped source ZIP**. Each executable must successfully write a checksummed save under a path containing spaces, resume the real saved pencil mark with fresh Undo history, reject a byte-corrupted save (exit 3), and avoid creating an implicit save on quit. This closes a native-package test coverage gap without adding a separate CI job. `platform_acceptance.py` now records `packaged_game_save_resume` only after the required quality gate succeeds; `verify_receipt_matrix.py` refuses missing declarations, with new metadata regression. Original built/native acceptance is NOT claimed here; v0.8.4 remains HOLD.
+
+
 - **2026-11-11 source-receipt snapshot consistency:** Fixed both the native `platform_acceptance.py` source-content receipt calculation and the offline `verify_receipt_matrix.py` ZIP/TAR parity check so each opens a bounded private archive snapshot and hashes/parses that same copy against the SHA-256 claim. This avoids a path-replacement race between standalone archive hash checks and source-content extraction. Source digests stay compression-independent and receipts remain unsigned. Added seven tracked stdlib Python regression tests, including real ZIP verification, forged hash/prefix, POSIX pathname replacement after descriptor open and a separate ZIP swap after the matrix's first hash. Exact source-verified isolated Linux Python ZIP/TAR harnesses passed **9/9** focused checks with simplified package membership and format dependencies; original full project suites/native platform acceptance were not run. Release HOLD unchanged.
 
 
