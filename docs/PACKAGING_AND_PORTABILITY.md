@@ -84,7 +84,7 @@ This receipt is **unsigned, self-reported execution evidence** for one exact Git
 
 #### Receipt publication integrity (v0.8.4)
 
-Acceptance receipts are written locally through an exclusively created mode-0600 temporary file and fsynced before being published with a same-directory hard link. This refuses to overwrite an existing receipt even in a concurrent race, and refuses a pre-existing temporary file or symlink. Unsupported hard-link filesystems fail closed; there is no fallback that claims release readiness. The test-only Linux validation of this writer passed 14/14 targeted Python unit tests. The receipt remains unsigned, is neither an artifact signature nor full provenance, and native Windows/macOS filesystem behavior still requires acceptance.
+Acceptance receipts are written locally through a fresh, unpredictable, exclusively created mode-0600 `tempfile.mkstemp` stage in the destination directory, fsynced before publication with a same-directory hard link. The hard link still **refuses to overwrite** an existing receipt even if another process creates it concurrently. Unlike the earlier fixed `platform-receipt.json.tmp` path, stale orphan files from a crash and a symlink at that old predictable path are ignored rather than followed or accidentally removed. Failure removes only the new stage; unsupported hard-link filesystems fail closed. Local focused regression tests cover prior orphan isolation, symlink isolation, concurrent publication and stage cleanup. The receipt remains unsigned, is neither an artifact signature nor full provenance, and native Windows/macOS filesystem behavior still requires acceptance.
 
 
 #### Fail-closed CTest registration (v0.8.4)
