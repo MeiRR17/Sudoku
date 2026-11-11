@@ -86,6 +86,39 @@ class StreamedTarVerificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'non-zero trailing TAR data'):
             package.ensure_safe_archive(self.path, PREFIX)
 
+    def test_zero_only_concatenated_gzip_member_rejected(self):
+        self.archive(['a.txt'], payload=b'hello')
+        self.path.write_bytes(self.path.read_bytes() + gzip.compress(b'\0' * 10240))
+        with self.assertRaisesRegex(ValueError, 'non-canonical TAR padding length'):
+            package.ensure_safe_archive(self.path, PREFIX)
+
+    def test_empty_concatenated_gzip_member_rejected(self):
+        self.archive(['a.txt'], payload=b'hello')
+        self.path.write_bytes(self.path.read_bytes() + gzip.compress(b''))
+        with self.assertRaisesRegex(ValueError, 'non-canonical GZIP trailer or extra member'):
+            package.ensure_safe_archive(self.path, PREFIX)
+
+    def test_raw_zero_bytes_after_gzip_trailer_rejected(self):
+        self.archive(['a.txt'], payload=b'hello')
+        self.path.write_bytes(self.path.read_bytes() + b'\0' * 64)
+        with self.assertRaisesRegex(ValueError, 'non-canonical GZIP trailer or extra member'):
+            package.ensure_safe_archive(self.path, PREFIX)
+
+    def test_valid_gzip_with_extra_zero_tar_records_rejected(self):
+        self.archive(['a.txt'], payload=b'hello')
+        uncompressed = gzip.decompress(self.path.read_bytes())
+        # Valid recomputed CRC/ISIZE, but too many TAR padding records.
+        with gzip.open(self.path, 'wb') as stream:
+            stream.write(uncompressed + b'\0' * 10240)
+        with self.assertRaisesRegex(ValueError, 'non-canonical TAR padding length'):
+            package.ensure_safe_archive(self.path, PREFIX)
+
+    def test_long_pax_tar_member_still_accepted(self):
+        filename = 'nested/' + 'longfile' * 18 + '.txt'
+        self.archive([filename], payload=b'hello')
+        self.assertEqual(package.ensure_safe_archive(self.path, PREFIX),
+                         {filename: b'hello'})
+
     def test_decoded_tar_padding_budget_is_enforced(self):
         self.archive(['a.txt'], payload=b'hello')
         # Standard TAR has at least 10 KiB of data and zero padding; a
