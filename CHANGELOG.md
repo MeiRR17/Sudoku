@@ -4,6 +4,9 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-11 prevent silent optimized-test pass:** All six assertion-dependent Python CTest scripts (`package_smoke`, `game_e2e`, `cli_golden`, `generator_golden`, `package_integrity`, Linux `save_faults`) now refuse `python -O`, `python -OO` and `PYTHONOPTIMIZE` before running child binaries or writing test artifacts; optimized Python removes `assert` statements and could otherwise return a false-green CTest result. `scripts/quality_gate.py` also rejects optimized execution before building. Five regression methods in `tests/quality_gate_unit.py` check the guard and exercise the real six scripts in optimized subprocesses, including environment-triggered optimization. Verified the same GitHub guard snippet was installed in all six sources (322 chars / FNV-1a32 `a6c05352`). Executed 4/4 local Python guard subprocess checks (normal, -O, -OO, PYTHONOPTIMIZE), **not** the checked-in suite or real native package E2E. Release HOLD unchanged.
+
+
 - **2026-11-11 packaged binary gameplay acceptance:** Extend the existing mandatory `sudoku_package_e2e` CTest to execute the real CLI from both the extracted native distribution ZIP and the independently built **shipped source ZIP**. Each executable must successfully write a checksummed save under a path containing spaces, resume the real saved pencil mark with fresh Undo history, reject a byte-corrupted save (exit 3), and avoid creating an implicit save on quit. This closes a native-package test coverage gap without adding a separate CI job. `platform_acceptance.py` now records `packaged_game_save_resume` only after the required quality gate succeeds; `verify_receipt_matrix.py` refuses missing declarations, with new metadata regression. Original built/native acceptance is NOT claimed here; v0.8.4 remains HOLD.
 
 
