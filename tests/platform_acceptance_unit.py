@@ -210,6 +210,42 @@ class ArchiveReceiptHashTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'wrong or unsorted'):
             self.check()
 
+    @unittest.skipUnless(hasattr(os, 'mkfifo'), 'POSIX FIFO support required')
+    def test_fifo_archive_is_rejected_without_a_writer(self):
+        path = self.dist / self.names[0]
+        path.unlink()
+        os.mkfifo(path)
+        with self.assertRaisesRegex(ValueError, 'missing or unsafe archive'):
+            self.check()
+
+    @unittest.skipUnless(hasattr(os, 'mkfifo'), 'POSIX FIFO support required')
+    def test_fifo_checksum_manifest_is_rejected_without_a_writer(self):
+        path = self.dist / 'SHA256SUMS'
+        path.unlink()
+        os.mkfifo(path)
+        with self.assertRaisesRegex(ValueError, 'missing or unsafe SHA256SUMS'):
+            self.check()
+
+    @unittest.skipUnless(hasattr(os, 'O_NOFOLLOW'), 'POSIX O_NOFOLLOW required')
+    def test_archive_symlink_swap_after_preflight_is_rejected(self):
+        archive = self.dist / self.names[0]
+        backup = self.dist / 'source-backup.bin'
+        real_open = os.open
+        swapped = False
+
+        def swapping_open(path, flags, *args, **kwargs):
+            nonlocal swapped
+            if Path(path) == archive and not swapped:
+                archive.rename(backup)
+                archive.symlink_to(backup)
+                swapped = True
+            return real_open(path, flags, *args, **kwargs)
+
+        with patch.object(acceptance.os, 'open', side_effect=swapping_open):
+            with self.assertRaisesRegex(ValueError, 'missing or unsafe archive'):
+                self.check()
+        self.assertTrue(swapped)
+
 
 if __name__ == '__main__':
     unittest.main()
