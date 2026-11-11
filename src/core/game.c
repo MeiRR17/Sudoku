@@ -88,19 +88,13 @@ SudokuGameStatus sudoku_game_erase(SudokuGame *game, unsigned row, unsigned col)
 }
 /* Current-board row/column/box candidates. Never consult game->solution.
  * Returns 0 for a filled cell, invalid coordinates or an invalid game. */
-uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned col) {
-    int idx = cell_index(row, col);
-    const SudokuBoard *board;
+/* Requires a previously validated SudokuBoard, with row and column in 1..9.
+ * Keeps one-shot bulk note operations from validating the board 81 times. */
+static uint16_t validated_candidates(const SudokuBoard *board,
+                                     unsigned row, unsigned col) {
     uint16_t used = 0u;
-    unsigned k, base_row, base_col;
-    if (!valid_game(game) || idx < 0 || game->state.board.cells[idx])
-        return 0u;
-    board = &game->state.board;
-    /* Preserve the previous fail-closed contract when callers mutate the
-     * public board struct directly: a conflicting or out-of-range digit
-     * anywhere must never yield a candidate as though the board were legal. */
-    if (sudoku_board_validate(board, NULL) != SUDOKU_OK)
-        return 0u;
+    unsigned k, base_row, base_col, index = (row - 1u) * 9u + col - 1u;
+    if (board->cells[index]) return 0u;
     base_row = ((row - 1u) / 3u) * 3u;
     base_col = ((col - 1u) / 3u) * 3u;
     for (k = 0u; k < 9u; ++k) {
@@ -111,6 +105,16 @@ uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned c
     }
     return (uint16_t)(0x3feu & (unsigned)~used);
 }
+uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned col) {
+    int idx = cell_index(row, col);
+    if (!valid_game(game) || idx < 0 || game->state.board.cells[idx])
+        return 0u;
+    /* The public state can be changed by callers. Never derive candidate
+     * masks from a malformed, conflicting or out-of-range public board. */
+    if (sudoku_board_validate(&game->state.board, NULL) != SUDOKU_OK)
+        return 0u;
+    return validated_candidates(&game->state.board, row, col);
+}
 /* Recompute all pencil marks for editable empty cells as a single undoable
  * snapshot. The user's deliberate notes are replaced only on this command;
  * repeat without board changes is history-neutral. Filled/given cells remain
@@ -120,11 +124,16 @@ SudokuGameStatus sudoku_game_auto_notes(SudokuGame *game) {
     unsigned index;
     int changed = 0;
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
+    /* Fail closed before touching notes or history when a caller altered
+     * the public grid into a conflicting or out-of-range board. */
+    if (sudoku_board_validate(&game->state.board, NULL) != SUDOKU_OK)
+        return SUDOKU_GAME_INVALID;
     proposed = game->state;
     for (index = 0u; index < SUDOKU_CELL_COUNT; ++index) {
         uint16_t mask;
         if (game->state.board.cells[index]) continue;
-        mask = sudoku_game_candidates(game, index / 9u + 1u, index % 9u + 1u);
+        mask = validated_candidates(&game->state.board,
+                                    index / 9u + 1u, index % 9u + 1u);
         if (proposed.notes[index] != mask) {
             proposed.notes[index] = mask;
             changed = 1;
@@ -143,11 +152,14 @@ SudokuGameStatus sudoku_game_prune_notes(SudokuGame *game) {
     unsigned index;
     int changed = 0;
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
+    if (sudoku_board_validate(&game->state.board, NULL) != SUDOKU_OK)
+        return SUDOKU_GAME_INVALID;
     proposed = game->state;
     for (index = 0u; index < SUDOKU_CELL_COUNT; ++index) {
         uint16_t allowed, retained;
         if (!proposed.notes[index]) continue;
-        allowed = sudoku_game_candidates(game, index / 9u + 1u, index % 9u + 1u);
+        allowed = validated_candidates(&game->state.board,
+                                       index / 9u + 1u, index % 9u + 1u);
         retained = (uint16_t)(proposed.notes[index] & allowed);
         if (retained != proposed.notes[index]) {
             proposed.notes[index] = retained;
