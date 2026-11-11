@@ -384,15 +384,15 @@ static void print_hint_all(const SudokuGame *game){
         puts("No simple hint found. Try candidates ROW COL.");
         return;
     }
-    printf("Logical hints (%u):\\n",count);
+    printf("Logical hints (%u):\n",count);
     for(i=0u;i<count;++i){
         const LogicalHint *hint=&hints[i];
         if(!hint->hidden){
-            printf("Hint (only candidate): row %u col %u -> %u.\\n",
+            printf("Hint (only candidate): row %u col %u -> %u.\n",
                    hint->index/9u+1u,hint->index%9u+1u,hint->digit);
         }else{
             const char *unit=hint->group<9u?"row":hint->group<18u?"column":"box";
-            printf("Hint (only place in %s %u): row %u col %u -> %u.\\n",
+            printf("Hint (only place in %s %u): row %u col %u -> %u.\n",
                    unit,hint->group%9u+1u,
                    hint->index/9u+1u,hint->index%9u+1u,hint->digit);
         }
