@@ -48,13 +48,15 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, auto-notes, prune-notes,");
-    puts("          clear-notes, hint [apply [all]|all], undo, redo, reset, check [details|clear],");
+    puts("          clear-notes, hint [all|chain|apply [all|chain]], undo, redo, reset, check [details|clear],");
     puts("          status, save [PATH], help, quit");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'note' toggles pencil marks; 'candidates' lists legal digits without guessing.");
     puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
     puts("'hint' shows one forced single; 'hint all' lists each distinct forced cell.");
-    puts("'hint apply' places one deduction; 'hint apply all' groups them in one undo.");
+    puts("'hint chain' previews successive singles opened by earlier deductions.");
+    puts("'hint apply' places one; 'hint apply all' batches current forced cells.");
+    puts("'hint apply chain' commits the successive singles in a single undo.");
     puts("'check details' locates wrong entries; 'check clear' erases them (undoable).");
     puts("No color, network or special keys required.");
 }
@@ -432,6 +434,85 @@ static void apply_all_hints(SudokuGame *game){
     printf("Applied %u logical hints in one undoable move.\n",applied);
     if(sudoku_game_won(game))puts("SOLVED! All cells are correct.");
 }
+/* Build a deterministic sequence of only live-board singles. A private
+ * game copy advances after every placement, so later hints can depend on
+ * earlier ones. The original game, notes and history are never touched.
+ * Each iteration fills one cell; the 81-cell bound guarantees termination. */
+static SudokuGameStatus collect_hint_chain(const SudokuGame *game,
+                                            LogicalHint hints[SUDOKU_CELL_COUNT],
+                                            unsigned *count){
+    SudokuGame *trial=malloc(sizeof *trial);
+    SudokuGameStatus result=SUDOKU_GAME_OK;
+    *count=0u;
+    if(!trial)return SUDOKU_GAME_IO;
+    *trial=*game;
+    while(*count<SUDOKU_CELL_COUNT){
+        LogicalHint next;
+        if(!find_hint(trial,&next))break;
+        result=sudoku_game_set(trial,next.index/9u+1u,
+                              next.index%9u+1u,next.digit);
+        if(result!=SUDOKU_GAME_OK)break;
+        hints[(*count)++]=next;
+    }
+    free(trial);
+    return result;
+}
+/* Preview successive forced deductions or commit all of them through the
+ * transactional set-many API as ONE Undo step. No guess or solution lookup
+ * supplies a placement; the verified solution is used only to block a
+ * board that already contains wrong user entries. */
+static void hint_chain(SudokuGame *game,int apply){
+    LogicalHint hints[SUDOKU_CELL_COUNT];
+    SudokuGameMove moves[SUDOKU_CELL_COUNT];
+    SudokuGameStatus status;
+    unsigned count,i,applied=0u;
+    if(sudoku_game_won(game)){
+        puts("Puzzle already solved; no hint needed.");
+        return;
+    }
+    if(sudoku_game_mistakes(game)){
+        puts(apply?"Cannot apply hints: correct the existing mistakes first.":
+                   "Cannot preview hint chain: correct the existing mistakes first.");
+        return;
+    }
+    status=collect_hint_chain(game,hints,&count);
+    if(status!=SUDOKU_GAME_OK){
+        printf("Error: %s\n",sudoku_game_status_text(status));
+        return;
+    }
+    if(count==0u){
+        puts("No simple hint found. Try candidates ROW COL.");
+        return;
+    }
+    if(apply){
+        for(i=0u;i<count;++i){
+            moves[i].row=hints[i].index/9u+1u;
+            moves[i].col=hints[i].index%9u+1u;
+            moves[i].digit=hints[i].digit;
+        }
+        status=sudoku_game_set_many(game,moves,count,&applied);
+        if(status!=SUDOKU_GAME_OK){
+            printf("Error: %s\n",sudoku_game_status_text(status));
+            return;
+        }
+        printf("Applied %u chained logical hints in one undoable move.\n",applied);
+        if(sudoku_game_won(game))puts("SOLVED! All cells are correct.");
+        return;
+    }
+    printf("Logical hint chain (%u steps):\n",count);
+    for(i=0u;i<count;++i){
+        const LogicalHint *hint=&hints[i];
+        if(!hint->hidden){
+            printf("Step %u (only candidate): row %u col %u -> %u.\n",
+                   i+1u,hint->index/9u+1u,hint->index%9u+1u,hint->digit);
+        }else{
+            const char *unit=hint->group<9u?"row":hint->group<18u?"column":"box";
+            printf("Step %u (only place in %s %u): row %u col %u -> %u.\n",
+                   i+1u,unit,hint->group%9u+1u,
+                   hint->index/9u+1u,hint->index%9u+1u,hint->digit);
+        }
+    }
+}
 /* Identify mistakes against the verified solution without disclosing any
  * answer digit. Read-only: no note, timer, save or undo/redo side effects. */
 static void print_check_details(const SudokuGame *game){
@@ -545,9 +626,13 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         }
         if(strcmp(command,"help")==0&&!a){commands();continue;}
         if(strcmp(command,"hint")==0&&
-           (!a||((strcmp(a,"apply")==0||strcmp(a,"all")==0)&&!b)||
-            (strcmp(a,"apply")==0&&b&&strcmp(b,"all")==0&&!c))){
-            if(a&&strcmp(a,"all")==0)print_hint_all(game);
+           (!a||((strcmp(a,"apply")==0||strcmp(a,"all")==0||
+                   strcmp(a,"chain")==0)&&!b)||
+            (strcmp(a,"apply")==0&&b&&
+             (strcmp(b,"all")==0||strcmp(b,"chain")==0)&&!c))){
+            if(a&&strcmp(a,"chain")==0)hint_chain(game,0);
+            else if(a&&b&&strcmp(b,"chain")==0)hint_chain(game,1);
+            else if(a&&strcmp(a,"all")==0)print_hint_all(game);
             else if(a&&b)apply_all_hints(game);
             else print_hint(game,a!=NULL);
             continue;
