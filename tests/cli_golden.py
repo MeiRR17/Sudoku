@@ -19,9 +19,10 @@ EMPTY = "0" * 81
 checks = 0
 
 
-def run(*args, input_bytes=None, code=0, stdout=None, stderr_contains=None):
+def run(*args, input_bytes=None, code=0, stdout=None, stderr_contains=None, timeout=15):
     global checks
-    p = subprocess.run([str(EXE), *map(str, args)], input=input_bytes, capture_output=True, check=False)
+    p = subprocess.run([str(EXE), *map(str, args)], input=input_bytes,
+                       capture_output=True, check=False, timeout=timeout)
     out = p.stdout.decode("utf-8").replace("\r\n", "\n")
     err = p.stderr.decode("utf-8").replace("\r\n", "\n")
     assert p.returncode == code, (args, p.returncode, code, out, err)
@@ -97,6 +98,21 @@ run("--demo")
 
 with tempfile.TemporaryDirectory() as tmp:
     temp = pathlib.Path(tmp)
+    # --file must not block forever on a POSIX FIFO with no writer.
+    # Stdin remains the supported streaming input for solve/count/validate.
+    if os.name == "posix" and hasattr(os, "mkfifo"):
+        fifo = temp / "writerless-puzzle.fifo"
+        os.mkfifo(fifo)
+        for command in ("validate", "solve", "count"):
+            run(command, "--file", fifo, code=4, stdout="",
+                stderr_contains="Input open failed:", timeout=3)
+        # Symlinks to ordinary puzzle files retain the previous behavior.
+        regular = temp / "regular-puzzle.txt"
+        regular.write_text(GIVENS + "\n", encoding="ascii")
+        linked = temp / "linked-puzzle.txt"
+        linked.symlink_to(regular)
+        run("validate", "--file", linked, "--format", "compact",
+            stdout=GIVENS + "\n")
     output = temp / "result.json"
     run("solve", "--file", FIX / "unique.txt", "--format", "json", "--output", output,
         stdout="")
