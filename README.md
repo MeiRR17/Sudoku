@@ -52,6 +52,9 @@ Exit codes: **0** successful validation/solving/counting (including count=0), **
 
 ## Offline interactive play and saves
 
+**History navigation:** `undo [N]` and `redo [N]` now accept an optional positive decimal count (1–127, default 1). A multi-step request moves the history cursor atomically; requesting more steps than remain returns `no action to undo or redo` with the board, handwritten notes and redo branch unchanged. Invalid counts, negative numbers and extra arguments fail without edits. This is independent of the existing `hint apply chain [N]` grouping and does not change the save-file format or autosave.
+
+
 To share a portable puzzle without making a save file, type `export` or `export givens` during play. The CLI prints the original 81-digit clue string in the existing `sudoku play --puzzle DIGITS` format. `export current` prints your currently entered digits instead (including possible incorrect player entries), and `export both` prints both values. These commands are **read-only** and reveal no cached solution or pencil notes; they do not preserve notes, timer, history or save destination. For a faithful session backup use `save PATH`. Only the original givens are guaranteed to remain the same uniquely solvable puzzle on import.
 
 
