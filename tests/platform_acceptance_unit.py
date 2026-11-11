@@ -19,6 +19,12 @@ spec = importlib.util.spec_from_file_location('sudoku_platform_acceptance', SOUR
 acceptance = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(acceptance)
 
+PACKAGE_SOURCE = SOURCE.with_name('package_release.py')
+package_spec = importlib.util.spec_from_file_location('sudoku_package_for_acceptance_tests',
+                                                       PACKAGE_SOURCE)
+packager = importlib.util.module_from_spec(package_spec)
+package_spec.loader.exec_module(packager)
+
 SHA = 'a' * 40
 OTHER_SHA = 'b' * 40
 
@@ -314,6 +320,88 @@ class ArchiveReceiptHashTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'missing or unsafe archive'):
                 self.check()
         self.assertTrue(swapped)
+
+
+
+class SourceArchiveReceiptSnapshotTests(unittest.TestCase):
+    """Source tree receipt must match the same ZIP bytes as the SHA-256."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='sudoku-source-receipt-')
+        self.addCleanup(self.temp.cleanup)
+        self.folder = Path(self.temp.name)
+        self.version = '0.8.4'
+        self.prefix = 'sudoku-v0.8.4-source'
+        self.name = self.prefix + '.zip'
+        self.archive = self.folder / self.name
+        self.source = {'README.md': b'verified original source data\n',
+                       'src/core/solver.c': b'/* no embedded solution */\n'}
+
+    def make_archive(self, path, source):
+        packager.create_zip(path, self.prefix,
+                            [(name, content, 0o644)
+                             for name, content in source.items()])
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def digest(self, checksum):
+        # The native script imports the packager at call time. Route that
+        # import to the actual file loaded above, not a simplified stub.
+        with patch.dict('sys.modules', {'package_release': packager}):
+            return acceptance.verified_source_tree_digest(
+                self.folder, self.version, checksum)
+
+    def test_source_digest_matches_actual_verified_zip_content(self):
+        sha = self.make_archive(self.archive, self.source)
+        self.assertEqual(self.digest({self.name: sha}),
+                         acceptance.source_tree_digest(self.source))
+
+    def test_source_archive_mutation_rejected_against_claimed_hash(self):
+        sha = self.make_archive(self.archive, self.source)
+        self.make_archive(self.archive, {'README.md': b'tampered code\n'})
+        with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+            self.digest({self.name: sha})
+
+    def test_missing_or_invalid_expected_archive_digest_rejected(self):
+        self.make_archive(self.archive, self.source)
+        for record in ({}, {self.name: 1}, {self.name: 'g' * 64},
+                       {self.name: 'A' * 64}):
+            with self.subTest(record=record):
+                with self.assertRaisesRegex(ValueError, 'missing or invalid verified'):
+                    self.digest(record)
+
+    @unittest.skipUnless(os.name == 'posix', 'rename of opened inode tested on POSIX')
+    def test_source_path_swap_after_open_cannot_change_receipt_digest(self):
+        original_sha = self.make_archive(self.archive, self.source)
+        competitor = self.folder / 'competing.zip'
+        self.make_archive(competitor, {'README.md': b'competing ZIP data\n'})
+        actual_open = packager.open_checked_binary
+        swaps = 0
+
+        def replace_after_open(path, kind):
+            nonlocal swaps
+            stream = actual_open(path, kind)
+            if Path(path) == self.archive:
+                swaps += 1
+                os.replace(competitor, self.archive)
+            return stream
+
+        with patch.object(packager, 'open_checked_binary',
+                          side_effect=replace_after_open):
+            # Digest must describe the original opened descriptor, not the
+            # new archive that replaced the path after preflight.
+            digest = self.digest({self.name: original_sha})
+        self.assertEqual(swaps, 1)
+        self.assertEqual(digest, acceptance.source_tree_digest(self.source))
+        self.assertNotEqual(hashlib.sha256(self.archive.read_bytes()).hexdigest(),
+                            original_sha)
+
+    def test_wrong_member_prefix_fails_despite_matching_archive_hash(self):
+        packager.create_zip(self.archive, 'sudoku-v0.8.4-wrong',
+                            [('README.md', b'different root', 0o644)])
+        sha = hashlib.sha256(self.archive.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, 'unsafe archive member'):
+            self.digest({self.name: sha})
+
 
 
 if __name__ == '__main__':
