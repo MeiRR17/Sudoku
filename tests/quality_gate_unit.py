@@ -15,9 +15,27 @@ quality = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(quality)
 
 
-def inventory(names):
+def test_command(name, build_dir=None):
+    """Synthetic native-looking CTest command matching CMake registration."""
+    build = Path(build_dir) if build_dir is not None else SOURCE.parent.parent / 'build'
+    binary = str(build / 'sudoku')
+    if name in quality.C_TEST_PROGRAMS:
+        return [str(build / quality.C_TEST_PROGRAMS[name])]
+    if name in quality.PYTHON_TEST_SCRIPTS:
+        return [sys.executable,
+                str(SOURCE.parent.parent / 'tests' / quality.PYTHON_TEST_SCRIPTS[name]),
+                binary]
+    if name == 'sudoku_stdin':
+        return ['cmake', '-DSUDOKU_BIN=' + binary, '-P',
+                str(SOURCE.parent.parent / 'tests' / 'run_stdin.cmake')]
+    return [binary]
+
+
+def inventory(names, build_dir=None):
     return json.dumps({'kind': 'ctestInfo', 'version': {'major': 1, 'minor': 0},
-                       'tests': [{'name': name} for name in names]})
+                       'tests': [{'name': name,
+                                  'command': test_command(name, build_dir)}
+                                 for name in names]})
 
 
 class InventoryTests(unittest.TestCase):
@@ -101,9 +119,84 @@ class InventoryTests(unittest.TestCase):
                     quality.validate_test_manifest(json.dumps({'tests': tests}),
                                                    sanitizer=True, system='Linux')
 
+    def test_registered_test_cannot_be_replaced_with_noop(self):
+        tests = json.loads(inventory(sorted(quality.BASE_TESTS)))['tests']
+        cases = (
+            ('sudoku_game_unit', ['echo', 'PASSED']),
+            ('sudoku_help', ['cmake', '-E', 'true']),
+            ('sudoku_game_e2e', ['python3', 'other_script.py']),
+            ('sudoku_stdin', ['echo', 'OK']),
+        )
+        for name, command in cases:
+            with self.subTest(name=name):
+                changed = [dict(item) for item in tests]
+                next(item for item in changed if item['name'] == name)['command'] = command
+                with self.assertRaisesRegex(ValueError, 'Required CTest'):
+                    quality.validate_test_manifest(
+                        json.dumps({'tests': changed}), sanitizer=True, system='Linux')
+
+    def test_missing_and_malformed_required_commands_fail_closed(self):
+        for command in (None, [], '', [''], [4], ['sudoku', None]):
+            with self.subTest(command=command):
+                data = json.loads(inventory(sorted(quality.BASE_TESTS)))
+                target = next(t for t in data['tests'] if t['name'] == 'sudoku_game_unit')
+                if command is None:
+                    del target['command']
+                else:
+                    target['command'] = command
+                with self.assertRaisesRegex(ValueError, 'Required CTest command'):
+                    quality.validate_test_manifest(
+                        json.dumps(data), sanitizer=True, system='Linux')
+
+    def test_real_python_script_must_match_repository_test_path(self):
+        data = json.loads(inventory(sorted(quality.BASE_TESTS)))
+        target = next(t for t in data['tests'] if t['name'] == 'sudoku_game_e2e')
+        correct = list(target['command'])
+        for bad in ('fake_game_e2e.py',
+                    str(SOURCE.parent.parent / 'elsewhere' / 'game_e2e.py')):
+            with self.subTest(bad=bad):
+                target['command'] = [correct[0], bad, correct[2]]
+                with self.assertRaisesRegex(ValueError, 'Python script mismatch'):
+                    quality.validate_test_manifest(
+                        json.dumps(data), sanitizer=True, system='Linux')
+
+    def test_python_e2e_must_use_built_sudoku_binary(self):
+        data = json.loads(inventory(sorted(quality.BASE_TESTS)))
+        target = next(t for t in data['tests'] if t['name'] == 'sudoku_game_e2e')
+        target['command'] = [sys.executable, str(SOURCE.parent.parent / 'tests'
+                                               / 'game_e2e.py'), 'echo']
+        with self.assertRaisesRegex(ValueError, 'executable mismatch'):
+            quality.validate_test_manifest(json.dumps(data),
+                                           sanitizer=True, system='Linux')
+
+    def test_required_binary_outside_configured_build_fails(self):
+        build = SOURCE.parent.parent / 'expected-build'
+        data = json.loads(inventory(sorted(quality.BASE_TESTS),
+                                    build_dir=build))
+        target = next(t for t in data['tests'] if t['name'] == 'sudoku_game_unit')
+        target['command'] = [str(SOURCE.parent.parent / 'outside' /
+                                 'sudoku_game_tests')]
+        with self.assertRaisesRegex(ValueError, 'outside build'):
+            quality.validate_test_manifest(json.dumps(data),
+                                           sanitizer=True, system='Linux',
+                                           build_dir=build)
+
+    def test_valid_release_legacy_cli_python_and_cmake_drivers(self):
+        for host in ('Linux', 'Darwin', 'Windows'):
+            with self.subTest(system=host):
+                names = set(quality.BASE_TESTS) | set(quality.PACKAGE_TESTS)
+                if host == 'Linux':
+                    names.add('sudoku_save_fault_injection')
+                elif host == 'Windows':
+                    names.update(quality.WINDOWS_TESTS)
+                result = quality.validate_test_manifest(
+                    inventory(sorted(names)), system=host)
+                self.assertEqual(result, len(names))
+
     def test_ctest_query_is_scoped_to_actual_build(self):
-        result = SimpleNamespace(stdout=inventory(sorted(quality.BASE_TESTS)))
-        build = Path('my-build')
+        build = SOURCE.parent.parent / 'my-build'
+        result = SimpleNamespace(stdout=inventory(sorted(quality.BASE_TESTS),
+                                                  build_dir=build))
         with patch.object(quality.subprocess, 'run', return_value=result) as mocked:
             quality.verify_ctest_inventory(build, sanitizer=True)
         args, kwargs = mocked.call_args
