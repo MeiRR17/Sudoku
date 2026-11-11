@@ -298,7 +298,7 @@ The **default** three-platform mode and single-host `--local --expected` mode ha
 
 The existing `.github/workflows/manual-quality.yml` has one additional `runner_os` choice, `all`. It uses a **dynamic GitHub Actions matrix**, expanding to one runner by default (Ubuntu, Windows or macOS) or exactly the three target native runner labels when `all` is explicitly selected. The 20-minute per-runner timeout, platform architecture guard, Python acceptance tests, CMake/CTest and complete **local** package/receipt verification remain in every native job. `fail-fast: false` ensures the other native environments continue collecting diagnostic results if one fails; it is not a pass waiver.
 
-In all-host mode, a follow-up Ubuntu job runs **only after all three native jobs succeed**. Using the built-in `gh run download`, a read-only `GH_TOKEN`, the exact `GITHUB_RUN_ID`, commit SHA and `github.run_attempt`, it fetches the three existing signed-*neither* receipt metadata artifacts into separate directories. It then runs:
+In all-host mode, a follow-up Ubuntu job runs **only after all three native jobs succeed**. Using the built-in `gh run download`, a read-only `GH_TOKEN`, the exact `GITHUB_RUN_ID`, commit SHA and `github.run_attempt`, it fetches the three existing **unsigned** receipt metadata artifacts into separate directories. It then runs:
 
 ```sh
 python scripts/verify_receipt_matrix.py --metadata-only \
