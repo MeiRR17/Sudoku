@@ -48,6 +48,10 @@ SudokuGameStatus sudoku_game_auto_notes(SudokuGame *game);
 SudokuGameStatus sudoku_game_prune_notes(SudokuGame *game);
 /* Clear every pencil note as one undoable edit; empty note sets are a no-op. */
 SudokuGameStatus sudoku_game_clear_notes(SudokuGame *game);
+/* Remove all incorrect entered digits in one undoable move; never insert
+ * solution digits or modify immutable clues. No-op if there are no mistakes.
+ * Returns INVALID without mutation for inconsistent public game structs. */
+SudokuGameStatus sudoku_game_clear_mistakes(SudokuGame *game);
 SudokuGameStatus sudoku_game_undo(SudokuGame *game);
 SudokuGameStatus sudoku_game_redo(SudokuGame *game);
 SudokuGameStatus sudoku_game_reset(SudokuGame *game);
