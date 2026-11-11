@@ -4,7 +4,7 @@ A fully offline Sudoku engine with deterministic exact solving, solution classif
 
 ## Build and use
 
-The development source packager now pins each parent directory while opening manifested source files on supported POSIX hosts; swapping a parent path to a symlink cannot redirect source reads outside the checkout. On Windows this descriptor-relative traversal is unavailable, and packaging relies on the existing path/symlink and opened-file checks pending native validation. This improves source package integrity but does not constitute a signed or approved release.
+The development source packager now pins each parent directory while opening the source manifest, manifested source files, and staged installation files on supported POSIX hosts; swapping a parent path to a symlink cannot redirect package reads outside the relevant root. On Windows this descriptor-relative traversal is unavailable, and packaging relies on the existing path/symlink and opened-file checks pending native validation. This improves source package integrity but does not constitute a signed or approved release.
 
 Development source packaging rejects non-regular source or manifest inputs on the opened file descriptor, rather than relying solely on a pathname check. Untrusted writerless FIFOs do not block the packaging process on POSIX; this is source-integrity hardening, not an artifact signature or production certification.
 
