@@ -422,12 +422,13 @@ with tempfile.TemporaryDirectory() as directory:
     # stored unique answer, and all 8 steps form one reversible batch.
     stdout, stderr = run(['--puzzle', hidden_single_puzzle],
                          'hint chain\nstatus\nhint apply chain\n'
-                         'status\nundo\nstatus\nquit\n')
+                         'status\nhint apply chain\nstatus\nundo\nstatus\nquit\n')
     assert 'Logical hint chain (8 steps):' in stdout, stdout
     assert 'Step 1 (only place in column 8): row 7 col 8 -> 8.' in stdout
-    assert 'Applied 8 chained logical hints in one undoable move.' in stdout
+    assert stdout.count('Applied 8 chained logical hints in one undoable move.') == 1
+    assert 'No simple hint found. Try candidates ROW COL.' in stdout
     assert 'SOLVED!' not in stdout
-    assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
+    assert stdout.count('undo 1, redo 0') == 2 and 'undo 0, redo 1' in stdout
     assert not stderr
     checks += 1
 
