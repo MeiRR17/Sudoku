@@ -63,6 +63,8 @@ class ManualQualityWorkflowTests(unittest.TestCase):
         self.assertIn('GH_TOKEN: ${{ github.token }}', self.review)
         self.assertIn('EVIDENCE_SHA: ${{ github.sha }}', self.review)
         self.assertIn('EVIDENCE_ATTEMPT: ${{ github.run_attempt }}', self.review)
+        self.assertIn('--require-run-id "${{ github.run_id }}"', self.review)
+        self.assertIn('--require-run-attempt "${{ github.run_attempt }}"', self.review)
         self.assertIn('gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"', self.review)
         self.assertIn('"sudoku-evidence-${runner}-${EVIDENCE_SHA}-attempt-${EVIDENCE_ATTEMPT}"', self.review)
 
