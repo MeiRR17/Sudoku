@@ -4,6 +4,9 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-11 no-clobber development package publication:** Stage all four ZIP/TAR archives and the checksum manifest inside a private temporary directory on the destination filesystem, verify the entire set there before publication, then publish only through exclusive same-filesystem hard links. Existing package files and symlinks are preserved; expected link errors roll back only links that still belong to the newly staged files. A sudden process termination can still interrupt this five-file publication, so this is **not an atomic multi-file transaction or an approved release**. Six checked-in publication regressions added; a source-fingerprint-matched Linux helper passed 8/8 real-filesystem focused tests. Full CMake/CTest, native Windows/macOS, provenance and licensing gates remain HOLD.
+
+
 - **2026-11-11 immutable verifier snapshot:** `verify_packages` now opens each original distribution archive once and copies bounded regular-file bytes into an automatically removed, private temporary directory. It hashes and parses only that snapshot, closing the prior gap where `SHA256SUMS` could be verified against one inode and ZIP/TAR decoded from a different file after a path replacement. Hash failures stop before parsing; file-size limits and FIFO/symlink rejection are applied to the original opened fd. Four unit regressions include a real ZIP source-path swap and TAR readback. Focused source-identical Linux helper checks passed 7/7; clean checkout/CTest and native platform acceptance remain outstanding.
 
 
