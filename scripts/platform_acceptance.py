@@ -171,6 +171,11 @@ def verified_archive_hashes(dist, version, expected):
     if len(raw) > MAX_CHECKSUM_BYTES:
         raise ValueError('SHA256SUMS exceeds size budget')
     lines = raw.decode('ascii').splitlines()
+    # The packager writes one canonical LF-terminated record per archive.
+    # A receipt must not certify CRLF, CR or a truncated final newline that
+    # the package verifier itself would refuse at the same commit.
+    if raw != ('\n'.join(lines) + '\n').encode('ascii'):
+        raise ValueError('non-canonical SHA256SUMS line endings')
     parsed = {}
     for line in lines:
         if not re.fullmatch(r'[0-9a-f]{64}  [A-Za-z0-9._-]+', line):
