@@ -39,10 +39,12 @@ static int use(const char *message){
 }
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
-    puts("          notes ROW COL, clear-notes, undo, redo, reset, check, status,");
+    puts("          notes ROW COL, candidates ROW COL, clear-notes,");
+    puts("          undo, redo, reset, check, status,");
     puts("          save [PATH], help, quit");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
-    puts("'note' toggles pencil candidates. No color, network or special keys required.");
+    puts("'note' toggles pencil marks; 'candidates' lists legal digits without guessing.");
+    puts("No color, network or special keys required.");
 }
 static void display(const SudokuGame *game) {
     unsigned r,c;
@@ -189,6 +191,23 @@ static void print_notes(const SudokuGame *game,unsigned r,unsigned c){
     for(d=1u;d<=9u;++d)if(game->state.notes[i]&(1u<<d))printf(" %u",d);
     putchar('\n');
 }
+/* List rule-legal digits for an empty cell without using the stored unique
+ * solution (which would disclose an answer). Purely observational: no notes,
+ * placed values, elapsed timer base or undo/redo history are changed. */
+static void print_candidates(const SudokuGame *game,unsigned r,unsigned c){
+    unsigned i=(r-1u)*9u+c-1u,d;
+    SudokuBoard trial=game->state.board;
+    if(trial.cells[i]){
+        printf("Cell row %u col %u already contains %u.\n",r,c,(unsigned)trial.cells[i]);
+        return;
+    }
+    printf("Candidates for row %u col %u:",r,c);
+    for(d=1u;d<=9u;++d){
+        trial.cells[i]=(uint8_t)d;
+        if(sudoku_board_validate(&trial,NULL)==SUDOKU_OK)printf(" %u",d);
+    }
+    putchar('\n');
+}
 static int event_loop(SudokuGame *game,PlayOptions *opt){
     char line[4096 + 32];
     char last_save_path[4097];
@@ -304,6 +323,9 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             continue;
         }
         else if(strcmp(command,"notes")==0&&position(a,b,&r,&d)&&!c){print_notes(game,r,d);continue;}
+        else if(strcmp(command,"candidates")==0&&position(a,b,&r,&d)&&!c){
+            print_candidates(game,r,d);continue;
+        }
         else if(strcmp(command,"set")==0&&position(a,b,&r,&d)&&c&&!extra&&decimal(c,9,&digit)&&digit>=1u)
             status=sudoku_game_set(game,r,d,(unsigned)digit);
         else if(strcmp(command,"erase")==0&&position(a,b,&r,&d)&&!c)
