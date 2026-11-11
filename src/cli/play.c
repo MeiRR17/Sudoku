@@ -937,20 +937,50 @@ static void print_check_details(const SudokuGame *game){
     }
     if(count==0u)puts("No incorrect entries.");
 }
+/* Read a complete command line before interpreting any part of it. fgets
+ * plus strlen would silently truncate at an embedded NUL, potentially
+ * executing an unintended prefix such as "save path". Discard malformed
+ * or overlong lines in full so the next command is aligned correctly.
+ * 0 = EOF, 1 = valid line, 2 = rejected line, -1 = input error. */
+static int read_command_line(char line[], size_t capacity) {
+    size_t used = 0u;
+    int ch, seen = 0, too_long = 0, nul = 0;
+    if (capacity == 0u) return -1;
+    while ((ch = fgetc(stdin)) != EOF) {
+        seen = 1;
+        if (ch == '\n') break;
+        if (ch == '\0') nul = 1;
+        if (used + 1u < capacity) line[used++] = (char)ch;
+        else too_long = 1;
+    }
+    if (ferror(stdin)) return -1;
+    if (!seen && ch == EOF) return 0;
+    line[used] = '\0';
+    if (too_long) {
+        puts("Error: command too long");
+        return 2;
+    }
+    if (nul) {
+        puts("Error: command contains a NUL byte");
+        return 2;
+    }
+    return 1;
+}
 static int event_loop(SudokuGame *game,PlayOptions *opt){
     char line[4096 + 32];
     char last_save_path[4097];
     display(game);
-    while(fgets(line,sizeof line,stdin)){
+    for (;;) {
+        int line_status = read_command_line(line, sizeof line);
         char *command,*a,*b,*c,*extra;
         unsigned r,d;uint64_t digit;
         SudokuGameStatus status=SUDOKU_GAME_OK;
-        size_t len=strlen(line);
-        if(len==sizeof line-1u && line[len-1u]!='\n' && !feof(stdin)){
-            int ch;
-            while((ch=fgetc(stdin))!='\n'&&ch!=EOF){}
-            puts("Error: command too long");continue;
+        if (line_status == 0) break;
+        if (line_status < 0) {
+            fputs("Game input read failed\n", stderr);
+            return 4;
         }
+        if (line_status == 2) continue;
         /* Handle save before strtok: the complete remainder of the command is
          * a path, so filenames containing whitespace survive tokenization.
          * An optional surrounding pair of double quotes is accepted. */
@@ -1139,7 +1169,6 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         if(status!=SUDOKU_GAME_OK){printf("Error: %s\n",sudoku_game_status_text(status));continue;}
         display(game);
     }
-    if(ferror(stdin)){fputs("Game input read failed\n",stderr);return 4;}
     puts("End of input. Progress is only persisted if you used 'save'.");
     return 0;
 }

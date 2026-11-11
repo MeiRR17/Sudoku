@@ -34,8 +34,56 @@ def run(args, commands='', exit_code=0, timeout=25):
     return p.stdout, p.stderr
 
 
+def run_raw(args, commands, exit_code=0):
+    """Feed byte-exact commands, including NUL, through the real game CLI."""
+    global checks
+    p = subprocess.run([str(exe), 'play', *map(str, args)], input=commands,
+                       capture_output=True, timeout=25)
+    assert p.returncode == exit_code, (args, p.returncode, p.stderr, p.stdout)
+    checks += 1
+    return p.stdout.decode('utf-8'), p.stderr.decode('utf-8')
+
+
 with tempfile.TemporaryDirectory() as directory:
     folder = pathlib.Path(directory)
+    # Do not let embedded NUL truncate a save command into an executable
+    # prefix. The following status/quit commands must still be processed.
+    nul_save = folder / 'nul-injected.save'
+    stdout, stderr = run_raw(
+        ['--puzzle', near_win],
+        f'save {nul_save}'.encode('utf-8') + b'\x00ignored\nstatus\nquit\n')
+    assert stdout.count('Error: command contains a NUL byte') == 1, stdout
+    assert 'Progress: 80/81 filled' in stdout and not nul_save.exists()
+    assert not stderr
+    checks += 1
+
+    # A valid move followed by a hidden NUL suffix must not solve the board.
+    stdout, stderr = run_raw(
+        ['--puzzle', near_win], b'set 1 1 5\x00ignored\nstatus\nquit\n')
+    assert 'Error: command contains a NUL byte' in stdout
+    assert 'Progress: 80/81 filled' in stdout and 'SOLVED!' not in stdout
+    assert not stderr
+    checks += 1
+
+    # Drain an overlong line, even if it also contains NUL, and run the
+    # next complete command once (not a surviving tail fragment).
+    stdout, stderr = run_raw(
+        ['--puzzle', near_win],
+        b'ignored' + b'x' * 5000 + b'\x00suffix\nstatus\nquit\n')
+    assert stdout.count('Error: command too long') == 1, stdout
+    assert 'Error: command contains a NUL byte' not in stdout
+    assert stdout.count('Progress: 80/81 filled') == 1 and not stderr
+    checks += 1
+
+    # Reject quit with an embedded NUL; a final unterminated status line
+    # is still processed before reaching normal EOF.
+    stdout, stderr = run_raw(
+        ['--puzzle', near_win], b'quit\x00ignored\nstatus')
+    assert stdout.count('Error: command contains a NUL byte') == 1
+    assert 'Progress: 80/81 filled' in stdout
+    assert 'End of input. Progress is only persisted' in stdout
+    assert 'Goodbye.' not in stdout and not stderr
+    checks += 1
     # Locked candidates (pointing box -> row/column and claiming line ->
     # box) use current-board legality, not the stored solution. Preview must
     # not touch the player's board or game history.

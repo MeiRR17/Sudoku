@@ -16,6 +16,14 @@ The `--file` argument reads a puzzle file (max 1 MiB), not a saved game. On POSI
 
 ## Interactive commands
 
+Input is handled as a byte-counted line until newline or EOF. An embedded NUL
+byte causes the **entire** command to be rejected instead of silently executing
+the prefix before NUL (notably a dangerous partial `save PATH`). Commands
+longer than the fixed input buffer are likewise drained and rejected; the next
+complete command is processed normally. The last line remains valid without
+a trailing newline. Input read errors return exit code 4. This prevents
+malformed scripted input from being interpreted as different gameplay actions.
+
 | Command | Behavior |
 |---|---|
 | `show` | Print the complete board and progress. Zero cells appear as `.`. |
