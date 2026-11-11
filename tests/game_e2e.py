@@ -36,6 +36,49 @@ def run(args, commands='', exit_code=0, timeout=25):
 
 with tempfile.TemporaryDirectory() as directory:
     folder = pathlib.Path(directory)
+    # Genuine 24-given unique puzzle with two actionable naked pairs. A
+    # pair reserves two digits in exactly two unit cells; elimination reports
+    # which candidate marks other cells in that unit could remove.
+    pair_puzzle = (
+        '000670000600105008008002000000001020400850091'
+        '000000006001000284000009030040006000'
+    )
+    assert len(pair_puzzle) == 81
+    stdout, stderr = run(['--puzzle', pair_puzzle],
+                         'hint pairs\nstatus\nnote 1 1 2\n'
+                         'hint pairs 1\nstatus\nundo\n'
+                         'hint pairs 2\nstatus\nquit\n')
+    first_pair = ('Pair 1 in row 5: r5c6 + r5c7 reserve 3,7; '
+                  'eliminate from r5c2(3,7) r5c3(3,7)')
+    second_pair = ('Pair 2 in column 6: r5c6 + r7c6 reserve 3,7; '
+                   'eliminate from r1c6(3) r6c6(3,7)')
+    assert stdout.count(first_pair) == 3, stdout
+    assert stdout.count(second_pair) == 2, stdout
+    assert 'Progress: 24/81 filled' in stdout
+    assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # Pairs are not fabricated on a single-candidate puzzle, and a game
+    # with known wrong entries blocks strategy recommendations.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint pairs\nset 1 9 4\nhint pairs\nstatus\nquit\n')
+    assert 'No actionable naked pairs found.' in stdout
+    assert 'Cannot preview pairs: correct the existing mistakes first.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    invalid_pairs = ['hint pairs 0', 'hint pairs 82', 'hint pairs -1',
+                     'hint pairs nonsense', 'hint pairs 2 extra',
+                     'hint pairs 1.5']
+    stdout, stderr = run(['--puzzle', pair_puzzle],
+                         'status\n' + '\n'.join(invalid_pairs) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_pairs)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'Pair 1 ' not in stdout and not stderr
+    checks += 1
+
     # Candidate-pressure explorer is read-only, deterministic, and sorted
     # first by fewest legal candidates, then by row/column reading order.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],
