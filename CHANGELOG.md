@@ -4,6 +4,9 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-11 pinned source-directory traversal:** Source archives now resolve each manifested path component through an already-open directory descriptor on POSIX hosts with `openat`/`O_NOFOLLOW`. A replaced parent directory symlink cannot redirect package reads beyond the checkout, even after the pathname preflight; leaf and byte-count checks still use the opened inode. Added nested-path, hostile parent/leaf symlink, and traversal-rejection regressions; corrected an older package-budget test to use the new fd-based API. Exact GitHub function block (2,626 chars, FNV-1a32 `62da3c69`) passed 7/7 focused real-filesystem Linux checks; full checkout/CTest, native Windows/macOS, official acceptance receipts and release gates remain pending.
+
+
 - **2026-11-11 source-package trust boundary:** Open source manifest and included source files nonblockingly, validate the *opened descriptor* with `fstat` and enforce per-file limits before allocating the bounded read. This rejects special files, a leaf symlink substituted after pathname checks, and dynamically growing sources. Tests cover regular-file reads, budgets, symlinks, and a writerless FIFO with a subprocess timeout. An isolated POSIX helper test ran locally; complete checkout/CTest/package verification and native acceptance are still pending.
 
 - **2026-11-11 POSIX puzzle input safety:** `solve`/`count`/`validate --file` and `play --file` now nonblockingly open and `fstat`-check ordinary puzzle files, rejecting named pipes and devices without an indefinite `fopen` wait. Existing symlinks to regular files and solver `--stdin` continue to work. Added timeout-bounded CLI and gameplay E2E regressions. The matching POSIX opener was compiled and tested in an isolated Linux C11 harness; full application/CTest and Windows/macOS native checks remain unexecuted.
