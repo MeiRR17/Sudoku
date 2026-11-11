@@ -336,6 +336,44 @@ class ReceiptMatrixTests(unittest.TestCase):
         self.write(label)
         self.assertEqual(len(self.check()), 3)
 
+    def test_local_matrix_source_parser_binds_to_receipt_archive_hashes(self):
+        """Full matrix must hash-bind both source formats before extraction."""
+        label = 'ubuntu-latest'
+        folder = self.folders[label]
+        prefix = f'sudoku-v{VERSION}-source'
+        digests = self.receipts[label]['archive_sha256']
+        with patch.object(MATRIX.PACKAGE, 'verified_archive_members',
+                          wraps=MATRIX.PACKAGE.verified_archive_members) as verify:
+            MATRIX.verify_one(folder, label, SHA, VERSION)
+        observed = [tuple(c.args) for c in verify.call_args_list]
+        self.assertIn((folder / (prefix + '.zip'),
+                       digests[prefix + '.zip'], prefix), observed)
+        self.assertIn((folder / (prefix + '.tar.gz'),
+                       digests[prefix + '.tar.gz'], prefix), observed)
+
+    def test_source_zip_replaced_after_preflight_cannot_change_matrix_contents(self):
+        """Source bytes may change after the first standalone checksum pass."""
+        label = 'ubuntu-latest'
+        folder = self.folders[label]
+        name = f'sudoku-v{VERSION}-source.zip'
+        original_check = MATRIX.verify_archive_hash
+        replaced = False
+
+        def replace_after_checksum(path, sha):
+            nonlocal replaced
+            original_check(path, sha)
+            if Path(path) == folder / name and not replaced:
+                replaced = True
+                # A different regular file at the same pathname should be
+                # rejected by the snapshot's second hash BEFORE ZIP decoding.
+                (folder / name).write_bytes(b'replaced after receipt hash\n')
+
+        with patch.object(MATRIX, 'verify_archive_hash',
+                          side_effect=replace_after_checksum):
+            with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                MATRIX.verify_one(folder, label, SHA, VERSION)
+        self.assertTrue(replaced)
+
     def test_archive_tampering_after_receipt_rejected(self):
         name = f'sudoku-v{VERSION}-linux-x86_64.zip'
         (self.folders['ubuntu-latest'] / name).write_bytes(b'altered archive')
