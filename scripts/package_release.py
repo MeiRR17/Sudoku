@@ -585,6 +585,39 @@ def verify_source_membership(entries):
         raise ValueError(f'source archive manifest mismatch: missing={missing!r} extra={extra!r}')
 
 
+def verified_archive_members(path, expected_sha, expected_prefix):
+    """Hash and parse the *same* private archive snapshot, never reopen its source.
+
+    The original path is acquired once with O_NONBLOCK/O_NOFOLLOW where
+    available. The snapshot lives in a private, auto-cleaned directory and is
+    capped using fstat on the original opened inode, not a pathname precheck.
+    Hashing and format verification then consume the same staged bytes, even
+    if another process replaces the source pathname in the meantime.
+    This ensures input consistency; SHA256SUMS is still unsigned/untrusted.
+    """
+    name = path.name
+    limit = MAX_TAR_ARCHIVE_BYTES if name.endswith('.tar.gz') else MAX_ZIP_ARCHIVE_BYTES
+    with tempfile.TemporaryDirectory(prefix='sudoku-archive-verify-') as workdir:
+        snapshot = Path(workdir) / name
+        with open_checked_binary(path, 'release archive') as stream:
+            size = os.fstat(stream.fileno()).st_size
+            if size < 0 or size > limit:
+                raise ValueError('archive exceeds compressed size budget: ' + name)
+            with snapshot.open('xb') as destination:
+                remaining = size
+                while remaining:
+                    block = stream.read(min(65536, remaining + 1))
+                    if not block or len(block) > remaining:
+                        raise ValueError('release archive changed during snapshot')
+                    destination.write(block)
+                    remaining -= len(block)
+                if stream.read(1):
+                    raise ValueError('release archive changed during snapshot')
+        if file_hash(snapshot) != expected_sha:
+            raise ValueError('checksum mismatch: ' + name)
+        return check_archive(snapshot, expected_prefix)
+
+
 def verify_packages(dest):
     manifest = dest / 'SHA256SUMS'
     if not manifest.is_file() or manifest.is_symlink():
@@ -606,14 +639,8 @@ def verify_packages(dest):
         file = dest / name
         if not file.is_file() or file.is_symlink():
             raise ValueError(f'checksum mismatch: {name}')
-        # Bounds must precede even the streaming SHA-256 pass: a single
-        # sparse archive could otherwise consume unbounded I/O and time.
-        limit = (MAX_TAR_ARCHIVE_BYTES if name.endswith('.tar.gz')
-                 else MAX_ZIP_ARCHIVE_BYTES)
-        if file.stat().st_size > limit:
-            raise ValueError(f'archive exceeds compressed size budget: {name}')
-        if file_hash(file) != digest:
-            raise ValueError(f'checksum mismatch: {name}')
+        # Snapshot a single validated descriptor; hash and parse that same
+        # immutable private copy, never a second open of the attacker path.
         ext = '.tar.gz' if name.endswith('.tar.gz') else '.zip' if name.endswith('.zip') else ''
         if not ext:
             raise ValueError(f'unexpected release extension: {name}')
@@ -623,7 +650,7 @@ def verify_packages(dest):
             raise ValueError(f'unexpected release filename: {name}')
         if (prefix, ext) in parsed:
             raise ValueError(f'duplicate release variant: {name}')
-        parsed[(prefix, ext)] = check_archive(file, prefix)
+        parsed[(prefix, ext)] = verified_archive_members(file, digest, prefix)
     variants = {prefix for prefix, _ in parsed}
     if len(variants) != 2 or f'sudoku-v{VERSION}-source' not in variants:
         raise ValueError('must contain one binary platform and one source release')
