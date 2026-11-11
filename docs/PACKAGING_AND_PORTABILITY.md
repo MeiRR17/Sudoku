@@ -42,6 +42,12 @@ The v0.8.4 verifier accepts only four lowercase-SHA256 checksum records in **fil
 
 `scripts/verify_receipt_matrix.py` now imports and calls the development packager's exact `canonical_checksum_records` validation routine when reading a platform's unsigned SHA256SUMS evidence. `scripts/platform_acceptance.py` now independently refuses CRLF, CR, nonterminated checksum lines and trailing blank lines before issuing a platform receipt. All three paths require the canonical four-file filename order and lowercase SHA-256. No native platform evidence is inferred from parser success; unsigned metadata is still not a release signature.
 
+### Distribution executable save/resume smoke (v0.8.4)
+
+The existing `sudoku_package_e2e` CTest now goes beyond version, solver and source-rebuild checks: it launches `play` from the ZIP-extracted native executable and **again** from the binary rebuilt from the delivered source ZIP. For each, a private temporary directory is used to create a save with spaces in the path, resume it and recover a pencil note, reject an intentionally corrupted saved file with exit status 3, and verify that `quit` does not implicitly create a save. These are standard-library subprocess calls in `tests/package_smoke.py`, executed by the existing native `quality_gate.py` CTest inventory. No user save paths or network calls are used.
+
+After a successful on-host gate, the unsigned `platform-receipt.json` now includes `packaged_game_save_resume` in its checks array; the cross-host metadata/full matrix requires the same marker. Older receipts from a prior SHA cannot be carried into this acceptance cycle. **A marker is not an attestation:** do not claim Windows/MSVC or macOS arm64 acceptance before that exact native test genuinely runs there. Owner license, provenance and rollback decisions remain open.
+
 ## Required but missing native acceptance gates
 
 Before checking off issue #10 and publishing any release:
