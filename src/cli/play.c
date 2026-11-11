@@ -48,7 +48,7 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, focus [N], auto-notes, prune-notes,");
-    puts("          clear-notes, hint [all|pairs [N]|chain [N]|apply [all|chain [N]]], undo [N], redo [N], reset, check [details|clear],");
+    puts("          clear-notes, hint [all|pairs [N]|chain [N]|apply [all|pairs [N]|chain [N]]], undo [N], redo [N], reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
     puts("prints entered digits too; neither is a full save or stored solution.");
@@ -57,7 +57,8 @@ static void commands(void){
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
     puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
     puts("'hint' shows one forced single; 'hint all' lists each distinct forced cell.");
-    puts("'hint pairs [N]' shows up to N actionable naked pairs (default 5).");
+    puts("'hint pairs [N]' previews actionable naked pairs (default 5).");
+    puts("'hint apply pairs [N]' removes matching pencil marks in one undo.");
     puts("'hint chain [N]' previews up to N successive forced singles (1..81).");
     puts("'hint apply' places one; 'hint apply all' batches current forced cells.");
     puts("'hint apply chain [N]' commits at most N singles in one undo.");
@@ -338,11 +339,10 @@ static void print_focus(const SudokuGame *game,unsigned limit){
     if(dead)printf("Warning: %u empty cell%s %s no legal digits; inspect entries.\n",
                    dead,dead==1u?"":"s",dead==1u?"has":"have");
 }
-/* Report actionable naked pairs. Exactly two cells in one unit must each
- * have the same two candidates; those two digits can then be removed from
- * candidate sets of all OTHER cells in that unit. This is logical candidate
- * guidance, not a placement or a mutation of the player's pencil notes.
- * Compute from the board, never from the hidden solved grid. */
+/* Enumerate actionable naked pairs from live Sudoku constraints, not from
+ * the cached solved grid. Preview is read-only; explicit apply stages all
+ * candidate-note removals and commits them through one transactional engine
+ * operation. Existing pair cells and digits are never modified. */
 static unsigned pair_unit_cell(unsigned unit,unsigned slot){
     if(unit<9u)return unit*9u+slot;
     if(unit<18u)return slot*9u+unit-9u;
@@ -351,8 +351,9 @@ static unsigned pair_unit_cell(unsigned unit,unsigned slot){
         return ((box/3u)*3u+slot/3u)*9u+(box%3u)*3u+slot%3u;
     }
 }
-static void print_naked_pairs(const SudokuGame *game,unsigned limit){
+static void naked_pairs(SudokuGame *game,unsigned limit,int apply){
     uint16_t masks[SUDOKU_CELL_COUNT]={0};
+    uint16_t eliminations[SUDOKU_CELL_COUNT]={0};
     unsigned unit,a,b,k,i,j,d,pair_digits,match,targets,total=0u;
     if(sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
         puts("Cannot inspect pairs: invalid current board.");
@@ -363,7 +364,8 @@ static void print_naked_pairs(const SudokuGame *game,unsigned limit){
         return;
     }
     if(sudoku_game_mistakes(game)){
-        puts("Cannot preview pairs: correct the existing mistakes first.");
+        puts(apply?"Cannot apply pairs: correct the existing mistakes first.":
+                   "Cannot preview pairs: correct the existing mistakes first.");
         return;
     }
     for(i=0u;i<SUDOKU_CELL_COUNT;++i)
@@ -411,6 +413,7 @@ static void print_naked_pairs(const SudokuGame *game,unsigned limit){
                     if(k==a||k==b)continue;
                     eliminated=(uint16_t)(masks[index]&pair);
                     if(!eliminated)continue;
+                    if(apply)eliminations[index]=(uint16_t)(eliminations[index]|eliminated);
                     printf(" r%uc%u(",index/9u+1u,index%9u+1u);
                     for(d=1u;d<=9u;++d)
                         if(eliminated&(uint16_t)(1u<<d)){
@@ -420,11 +423,26 @@ static void print_naked_pairs(const SudokuGame *game,unsigned limit){
                     putchar(')');
                 }
                 putchar('\n');
-                if(++total==limit)return;
+                if(++total==limit)goto done_pairs;
             }
         }
     }
-    if(total==0u)puts("No actionable naked pairs found.");
+done_pairs:
+    if(total==0u){
+        puts("No actionable naked pairs found.");
+        return;
+    }
+    if(apply){
+        unsigned removed=0u;
+        SudokuGameStatus status=sudoku_game_eliminate_notes(game,eliminations,&removed);
+        if(status!=SUDOKU_GAME_OK)
+            printf("Error: %s\n",sudoku_game_status_text(status));
+        else if(removed)
+            printf("Removed %u pencil candidate%s in one undoable edit.\n",
+                   removed,removed==1u?"":"s");
+        else
+            puts("No matching pencil notes to remove; history unchanged.");
+    }
 }
 typedef struct LogicalHint {
     unsigned index, digit, group;
@@ -788,7 +806,7 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             else if(strcmp(a,"all")==0&&!b)print_hint_all(game);
             else if(strcmp(a,"pairs")==0&&
                     (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
-                print_naked_pairs(game,(unsigned)(b?limit:5u));
+                naked_pairs(game,(unsigned)(b?limit:5u),0);
             else if(strcmp(a,"apply")==0&&!b)print_hint(game,1);
             else if(strcmp(a,"chain")==0&&
                     (!b||(!c&&decimal(b,81u,&limit)&&limit>=1u)))
@@ -796,6 +814,10 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             else if(strcmp(a,"apply")==0&&b&&
                     strcmp(b,"all")==0&&!c)
                 apply_all_hints(game);
+            else if(strcmp(a,"apply")==0&&b&&
+                    strcmp(b,"pairs")==0&&
+                    (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
+                naked_pairs(game,(unsigned)(c?limit:5u),1);
             else if(strcmp(a,"apply")==0&&b&&
                     strcmp(b,"chain")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
