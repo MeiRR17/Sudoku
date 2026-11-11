@@ -108,30 +108,47 @@ def target_platform():
     return f'{system}-{arch}'
 
 
-def bounded_file_bytes(path, remaining):
-    """Read at most the remaining package budget; detect concurrent size drift.
+def read_regular_source(path, maximum, kind):
+    """Bound bytes on the opened regular-file inode, not a pathname precheck.
 
-    A metadata-only precheck rejects huge sparse files without allocating them.
-    The bounded read also prevents an expanding file from defeating that check.
+    O_NONBLOCK prevents a swapped-in FIFO from hanging during open, while
+    O_NOFOLLOW rejects leaf symlinks on POSIX. Earlier path-component checks
+    remain necessary for source containment. Windows uses available flags.
     """
-    size = path.stat().st_size
-    if size < 0 or size > remaining:
-        raise ValueError('package content exceeds size budget')
-    with path.open('rb') as stream:
-        payload = stream.read(size + 1)
-    if len(payload) != size:
-        raise ValueError('package source changed during read')
-    return payload
+    flags = (os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0) |
+             getattr(os, 'O_NOFOLLOW', 0) |
+             getattr(os, 'O_CLOEXEC', 0) |
+             getattr(os, 'O_BINARY', 0))
+    fd = os.open(path, flags)
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError(kind + ' must be a regular file')
+        size = metadata.st_size
+        if size < 0 or size > maximum:
+            raise ValueError(kind + ' exceeds size budget')
+        with os.fdopen(fd, 'rb') as stream:
+            fd = -1
+            payload = stream.read(size + 1)
+        if len(payload) != size:
+            raise ValueError(kind + ' changed during read')
+        return payload
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def bounded_file_bytes(path, remaining):
+    """Reject nonregular or concurrently growing source files before packing."""
+    return read_regular_source(path, remaining, 'package content')
 
 
 def source_paths():
     # A source manifest is itself part of the release trust boundary.
     if SOURCE_LIST.is_symlink():
         raise ValueError('symlinked source manifest refused')
-    with SOURCE_LIST.open('rb') as stream:
-        manifest = stream.read(MAX_SOURCE_MANIFEST_BYTES + 1)
-    if len(manifest) > MAX_SOURCE_MANIFEST_BYTES:
-        raise ValueError('source manifest exceeds size budget')
+    manifest = read_regular_source(
+        SOURCE_LIST, MAX_SOURCE_MANIFEST_BYTES, 'source manifest')
     raw = manifest.decode('utf-8').splitlines()
     files = []
     seen = set()
