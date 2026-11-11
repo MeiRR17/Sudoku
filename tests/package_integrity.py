@@ -156,7 +156,11 @@ with tempfile.TemporaryDirectory(prefix='sudoku-integrity-') as td:
 
     forged_name = scenario('forged-name')
     manifest = forged_name / 'SHA256SUMS'
-    manifest.write_text(manifest.read_text().replace('-source.zip', '-source.exe'))
+    # Preserve canonical filename order: this case must test a forged archive
+    # filename, not fail early on the independent ordering guard.
+    replaced = manifest.read_text().replace('-source.zip', '-source.exe')
+    rows = sorted(replaced.splitlines(), key=lambda row: row.split('  ', 1)[1])
+    manifest.write_text('\n'.join(rows) + '\n')
     tested_fail(forged_name, 'checksum mismatch')
 
 print(f'PACKAGE INTEGRITY PASS: {checks} independent normal/adversarial checks')
