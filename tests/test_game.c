@@ -434,12 +434,69 @@ static int check_batch_set(void) {
     free(game);
     return 0;
 }
+/* Multi-step history moves are atomic, including exhaustion and ring bound.
+ * A failed request must retain the board, notes and redo branch exactly. */
+static int check_history_steps(void) {
+    SudokuBoard board;
+    SudokuGame *game = malloc(sizeof *game);
+    unsigned cursor, length, i;
+    CHECK(game != NULL);
+    CHECK(sudoku_board_parse(&board,(const unsigned char *)classic,81u,NULL)==SUDOKU_OK);
+    CHECK(sudoku_game_start(game,&board)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_note(game,1u,3u,1u)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_note(game,1u,3u,2u)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_note(game,1u,3u,4u)==SUDOKU_GAME_OK);
+    CHECK(game->history_cursor==3u && game->history_len==4u);
+    CHECK(game->state.notes[2]==((1u<<1)|(1u<<2)|(1u<<4)));
+    CHECK(sudoku_game_undo_steps(game,2u)==SUDOKU_GAME_OK);
+    CHECK(game->history_cursor==1u && game->state.notes[2]==(1u<<1));
+    CHECK(sudoku_game_redo_steps(game,2u)==SUDOKU_GAME_OK);
+    CHECK(game->history_cursor==3u &&
+          game->state.notes[2]==((1u<<1)|(1u<<2)|(1u<<4)));
+    cursor=game->history_cursor;
+    length=game->history_len;
+    CHECK(sudoku_game_undo_steps(game,4u)==SUDOKU_GAME_NO_HISTORY);
+    CHECK(sudoku_game_redo_steps(game,1u)==SUDOKU_GAME_NO_HISTORY);
+    CHECK(sudoku_game_undo_steps(game,0u)==SUDOKU_GAME_RANGE);
+    CHECK(sudoku_game_redo_steps(game,0u)==SUDOKU_GAME_RANGE);
+    CHECK(sudoku_game_undo_steps(game,128u)==SUDOKU_GAME_RANGE);
+    CHECK(sudoku_game_redo_steps(game,128u)==SUDOKU_GAME_RANGE);
+    CHECK(game->history_cursor==cursor && game->history_len==length);
+    CHECK(game->state.notes[2]==((1u<<1)|(1u<<2)|(1u<<4)));
+    CHECK(sudoku_game_undo_steps(game,3u)==SUDOKU_GAME_OK);
+    CHECK(game->state.notes[2]==0u && game->history_cursor==0u);
+    CHECK(sudoku_game_redo_steps(game,4u)==SUDOKU_GAME_NO_HISTORY);
+    CHECK(game->state.notes[2]==0u && game->history_cursor==0u);
+    CHECK(sudoku_game_redo_steps(game,3u)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_undo_steps(game,2u)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_note(game,1u,3u,7u)==SUDOKU_GAME_OK);
+    CHECK(game->history_cursor==2u && game->history_len==3u);
+    CHECK(sudoku_game_redo_steps(game,1u)==SUDOKU_GAME_NO_HISTORY);
+    CHECK(game->state.notes[2]==((1u<<1)|(1u<<7)));
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_redo(game)==SUDOKU_GAME_OK);
+    /* Oldest records are evicted when the 128-state history fills. */
+    CHECK(sudoku_game_start(game,&board)==SUDOKU_GAME_OK);
+    for(i=0u;i<130u;++i)
+        CHECK(sudoku_game_note(game,1u,3u,1u)==SUDOKU_GAME_OK);
+    CHECK(game->history_len==SUDOKU_GAME_HISTORY &&
+          game->history_cursor==SUDOKU_GAME_HISTORY-1u);
+    CHECK(sudoku_game_undo_steps(game,SUDOKU_GAME_HISTORY-1u)==SUDOKU_GAME_OK);
+    CHECK(game->history_cursor==0u);
+    CHECK(sudoku_game_redo_steps(game,SUDOKU_GAME_HISTORY-1u)==SUDOKU_GAME_OK);
+    CHECK(game->history_cursor==SUDOKU_GAME_HISTORY-1u);
+    CHECK(game->state.notes[2]==0u);
+    free(game);
+    return 0;
+}
 int main(void){
     int result=check_game();
     if(result)return result;
     result=check_mistake_clear();
     if(result)return result;
     result=check_batch_set();
-    if(!result)puts("GAME ENGINE PASS: unique, givens, notes, history, reset, save/load/corruption, win, check-clear, batch-set");
+    if(result)return result;
+    result=check_history_steps();
+    if(!result)puts("GAME ENGINE PASS: unique, givens, notes, history, reset, save/load/corruption, win, check-clear, batch-set, multi-step undo/redo");
     return result;
 }
