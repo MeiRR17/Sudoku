@@ -221,6 +221,43 @@ SudokuGameStatus sudoku_game_note(SudokuGame *game, unsigned row, unsigned col, 
     remember(game);
     return SUDOKU_GAME_OK;
 }
+/* Validate the entire proposed elimination before changing one note bit.
+ * This is a general-purpose, solution-blind pencil-mark operation. */
+SudokuGameStatus sudoku_game_eliminate_notes(
+    SudokuGame *game, const uint16_t masks[SUDOKU_CELL_COUNT], unsigned *removed) {
+    SudokuGameSnapshot proposed;
+    unsigned i, d, total=0u;
+    if (removed) *removed=0u;
+    if (!valid_game(game) || !masks) return SUDOKU_GAME_INVALID;
+    if (sudoku_board_validate(&game->state.board, NULL) != SUDOKU_OK ||
+        sudoku_board_validate(&game->givens, NULL) != SUDOKU_OK)
+        return SUDOKU_GAME_INVALID;
+    for (i=0u;i<SUDOKU_CELL_COUNT;++i) {
+        if (game->givens.cells[i] &&
+            game->state.board.cells[i]!=game->givens.cells[i])
+            return SUDOKU_GAME_INVALID;
+        if ((masks[i] & (uint16_t)~0x3feu)!=0u)
+            return SUDOKU_GAME_RANGE;
+        if (masks[i] && game->state.board.cells[i])
+            return SUDOKU_GAME_NOT_EMPTY;
+        if (game->state.notes[i] & (uint16_t)~0x3feu)
+            return SUDOKU_GAME_INVALID;
+    }
+    proposed=game->state;
+    for (i=0u;i<SUDOKU_CELL_COUNT;++i) {
+        uint16_t deleted=(uint16_t)(proposed.notes[i]&masks[i]);
+        if (!deleted)continue;
+        proposed.notes[i]=(uint16_t)(proposed.notes[i]&(uint16_t)~deleted);
+        for (d=1u;d<=9u;++d)
+            if (deleted & (uint16_t)(1u<<d))++total;
+    }
+    if (total) {
+        game->state=proposed;
+        remember(game);
+    }
+    if (removed)*removed=total;
+    return SUDOKU_GAME_OK;
+}
 /* Clear all pencil marks in one undoable step, without changing placed
  * digits or givens. A second clear is history-neutral. */
 SudokuGameStatus sudoku_game_clear_notes(SudokuGame *game) {
