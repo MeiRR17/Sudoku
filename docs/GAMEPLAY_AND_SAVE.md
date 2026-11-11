@@ -36,7 +36,7 @@ The `--file` argument reads a puzzle file (max 1 MiB), not a saved game. On POSI
 | `auto-notes` | Replace pencil marks on every empty editable cell with all currently legal candidate digits, using one undoable action. Does not place digits, change givens or reveal the stored solution; repeating it without board changes is a no-op. Takes no arguments. |
 | `prune-notes` | Remove only pencil marks now ruled out by the live grid; preserve legal manual marks without auto-adding missing candidates. One undoable operation if notes change, otherwise a no-op. Takes no arguments. |
 | `clear-notes` | Remove all pencil notes from the whole board as **one undoable action**, retaining every placed digit. If no notes remain, no history entry is created. Takes no arguments. |
-| `undo`, `redo` | Revert or replay a placement, erasure, note or reset. New edits discard the redo branch. |
+| `undo [N]`, `redo [N]` | Revert or replay **N previous actions** (optional N=1–127, default 1), including placements, erasures, note edits and reset. The whole request is atomic: if insufficient steps remain, none are applied. New edits discard the redo branch. Invalid counts or surplus arguments leave the state untouched. |
 | `reset` | Restore original givens and clear notes. Can be undone while history remains. |
 | `check` | Count empty and incorrect cells without printing the answer. |
 | `check details` | List each incorrect player's row, column and currently placed digit, **never** the correct solution digit. Read-only, with no state or history edits. Empty/correct boards report no incorrect entries. |
