@@ -35,6 +35,17 @@ typedef struct SudokuGame {
 /* Unique-solution puzzles only; transactional on error. */
 SudokuGameStatus sudoku_game_start(SudokuGame *game, const SudokuBoard *givens);
 SudokuGameStatus sudoku_game_set(SudokuGame *game, unsigned row, unsigned col, unsigned digit);
+/* Apply 0..81 distinct placements as one atomic, undoable edit.
+ * Every target must be an empty non-given cell; malformed/duplicate/conflicting
+ * batches fail without changing state or history. A zero count is a no-op.
+ * Does NOT consult the cached solution; callers decide which moves to propose.
+ * When provided, applied is set to the number of committed placements. */
+typedef struct SudokuGameMove {
+    unsigned row, col, digit;
+} SudokuGameMove;
+SudokuGameStatus sudoku_game_set_many(SudokuGame *game,
+                                      const SudokuGameMove *moves,
+                                      unsigned count, unsigned *applied);
 SudokuGameStatus sudoku_game_erase(SudokuGame *game, unsigned row, unsigned col);
 SudokuGameStatus sudoku_game_note(SudokuGame *game, unsigned row, unsigned col, unsigned digit);
 /* 1 << digit bitmask (digits 1..9), based only on the current board.
