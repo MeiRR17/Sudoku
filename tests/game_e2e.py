@@ -36,6 +36,109 @@ def run(args, commands='', exit_code=0, timeout=25):
 
 with tempfile.TemporaryDirectory() as directory:
     folder = pathlib.Path(directory)
+    # Locked candidates (pointing box -> row/column and claiming line ->
+    # box) use current-board legality, not the stored solution. Preview must
+    # not touch the player's board or game history.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint locked\nhint locked 1\nhint locked 2\n'
+                         'hint locked 12\nstatus\nquit\n')
+    pointing1 = ('Locked 1 (pointing box 1 -> row 2, digit 7): '
+                 'sources r2c2 r2c3; eliminate r2c7 r2c9')
+    pointing2 = ('Locked 2 (pointing box 2 -> row 3, digit 3): '
+                 'sources r3c4 r3c5; eliminate r3c7')
+    claiming = ('Locked 12 (claiming row 2 -> box 3, digit 8): '
+                'sources r2c7 r2c9; eliminate r1c7 r1c9')
+    assert stdout.count(pointing1) == 4, stdout
+    assert stdout.count(pointing2) == 3, stdout
+    assert claiming in stdout, stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Applying the first two pointing patterns erases only existing manual
+    # candidate marks in one undoable edit. A further preview never alters
+    # history; repeating application with nothing left is a true no-op.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'note 2 7 7\nnote 2 9 7\nnote 3 7 3\n'
+                         'note 2 7 8\nstatus\nhint apply locked 1\n'
+                         'notes 2 7\nnotes 2 9\nnotes 3 7\nstatus\n'
+                         'undo\nnotes 2 7\nstatus\nredo\n'
+                         'hint apply locked 1\nstatus\nquit\n')
+    assert 'Removed 2 locked pencil candidates in one undoable edit.' in stdout
+    assert 'Notes for row 2 col 7: 8\n' in stdout
+    assert 'Notes for row 2 col 9:\n' in stdout
+    assert 'Notes for row 3 col 7: 3\n' in stdout
+    assert 'Notes for row 2 col 7: 7 8\n' in stdout
+    assert 'No matching locked pencil notes to remove; history unchanged.' in stdout
+    assert stdout.count('undo 5, redo 0') == 3, stdout
+    assert 'undo 4, redo 1' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'note 2 7 7\nnote 2 9 7\nnote 3 7 3\n'
+                         'note 2 7 8\nstatus\nhint apply locked 2\n'
+                         'notes 2 7\nnotes 3 7\nstatus\nundo\n'
+                         'notes 2 7\nstatus\nredo\nstatus\nquit\n')
+    assert 'Removed 3 locked pencil candidates in one undoable edit.' in stdout
+    assert 'Notes for row 2 col 7: 8\n' in stdout
+    assert 'Notes for row 3 col 7:\n' in stdout
+    assert 'Notes for row 2 col 7: 7 8\n' in stdout
+    assert stdout.count('undo 5, redo 0') == 3
+    assert 'undo 4, redo 1' in stdout and not stderr
+    checks += 1
+
+    # Claiming works even when the first few pointing patterns have no
+    # corresponding handwritten notes: it can eliminate the candidate 8
+    # from other box-3 cells using only row-2 constraints.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'note 1 7 8\nnote 1 9 8\n'
+                         'hint apply locked 12\nnotes 1 7\nnotes 1 9\n'
+                         'status\nundo\nnotes 1 7\nstatus\nquit\n')
+    assert 'Removed 2 locked pencil candidates in one undoable edit.' in stdout
+    assert 'Notes for row 1 col 7:\n' in stdout
+    assert 'Notes for row 1 col 9:\n' in stdout
+    assert 'Notes for row 1 col 7: 8\n' in stdout
+    assert 'undo 3, redo 0' in stdout and 'undo 2, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint apply locked\nstatus\nundo\nquit\n')
+    assert 'No matching locked pencil notes to remove; history unchanged.' in stdout
+    assert 'undo 0, redo 0' in stdout
+    assert 'Error: no action to undo or redo' in stdout and not stderr
+    checks += 1
+
+    # A locally rule-legal but wrong digit blocks both forms of strategy,
+    # so inferred eliminations cannot be based on a corrupted player board.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 9 4\nhint locked\nhint apply locked\n'
+                         'status\nquit\n')
+    assert 'Cannot preview locked candidates: correct the existing mistakes first.' in stdout
+    assert 'Cannot apply locked candidates: correct the existing mistakes first.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--puzzle', solution],
+                         'hint locked\nhint apply locked\nstatus\nquit\n')
+    assert stdout.count('Puzzle already solved; no locked hint needed.') == 2
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    invalid_locked = [
+        'hint locked 0', 'hint locked 82', 'hint locked -1',
+        'hint locked nope', 'hint locked 1 extra',
+        'hint apply locked 0', 'hint apply locked 82',
+        'hint apply locked -1', 'hint apply locked nope',
+        'hint apply locked 1 extra',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(invalid_locked) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_locked)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'Locked 1 ' not in stdout and not stderr
+    checks += 1
+
     # Genuine 24-given unique puzzle with two actionable naked pairs. A
     # pair reserves two digits in exactly two unit cells; elimination reports
     # which candidate marks other cells in that unit could remove.
