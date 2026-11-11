@@ -16,6 +16,19 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
+def require_assertions_enabled(optimization=None):
+    """Fail closed: our CLI/package E2E scripts use required Python asserts.
+
+    An optimized interpreter may report PASS without executing those checks.
+    This protects the full quality gate before any build/test subprocess.
+    Individual E2E scripts also reject optimization when invoked via CTest.
+    """
+    if optimization is None:
+        optimization = sys.flags.optimize
+    if optimization != 0:
+        raise ValueError('Python optimization disables required Sudoku E2E assertions')
+
+
 def run(*args):
     print('+', ' '.join(map(str, args)), flush=True)
     subprocess.run(list(map(str, args)), check=True, cwd=ROOT)
@@ -100,6 +113,7 @@ def build(path, compiler=None, sanitizer=False, coverage=False):
 
 
 def main():
+    require_assertions_enabled()
     ap = argparse.ArgumentParser()
     ap.add_argument('--mode', choices=['fast', 'full'], default='fast')
     ap.add_argument('--build-root', type=pathlib.Path, default=ROOT / '.quality-build')
