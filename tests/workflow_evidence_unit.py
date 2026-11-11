@@ -38,7 +38,7 @@ class EvidenceWorkflowTests(unittest.TestCase):
         self.assertLess(local, upload)
         self.assertIn('python scripts/verify_receipt_matrix.py '
                       '--require-sha "${{ github.sha }}" '
-                      '--local dist --expected "${{ inputs.runner_os }}"', source)
+                      '--local dist --expected "${{ matrix.runner }}"', source)
         self.assertIn('NOT uploaded', source)
 
     def test_only_receipt_and_hash_manifest_retained(self):
@@ -57,9 +57,27 @@ class EvidenceWorkflowTests(unittest.TestCase):
 
     def test_evidence_artifact_name_distinguishes_platform_sha_and_attempt(self):
         source = workflow()
-        self.assertIn('name: sudoku-evidence-${{ inputs.runner_os }}-'
+        self.assertIn('name: sudoku-evidence-${{ matrix.runner }}-'
                       '${{ github.sha }}-attempt-${{ github.run_attempt }}', source)
-        self.assertIn('runs-on: ${{ inputs.runner_os }}', source)
+        self.assertIn('runs-on: ${{ matrix.runner }}', source)
+
+
+    def test_native_receipts_require_real_distributed_gameplay(self):
+        # Guard the chain from workflow -> required CTest inventory ->
+        # extracted executable + rebuilt-source save/resume smoke -> receipt
+        # marker enforced by the matrix, with no added automatic CI trigger.
+        gate = (ROOT / 'scripts' / 'quality_gate.py').read_text(encoding='utf-8')
+        smoke = (ROOT / 'tests' / 'package_smoke.py').read_text(encoding='utf-8')
+        acceptance = (ROOT / 'scripts' / 'platform_acceptance.py').read_text(
+            encoding='utf-8')
+        matrix = (ROOT / 'scripts' / 'verify_receipt_matrix.py').read_text(
+            encoding='utf-8')
+        self.assertIn("'sudoku_package_e2e'", gate)
+        self.assertIn('verify_packaged_game_save_resume(exe,', smoke)
+        self.assertIn('verify_packaged_game_save_resume(from_source,', smoke)
+        self.assertIn("'packaged_game_save_resume'", acceptance)
+        self.assertIn("'packaged_game_save_resume'", matrix)
+
 
 
 if __name__ == '__main__':
