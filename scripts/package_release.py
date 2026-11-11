@@ -24,6 +24,9 @@ import zlib
 import unicodedata
 
 VERSION = '0.8.4'
+# This release gate supports three native targets, not every detected OS/CPU.
+SUPPORTED_ARCHIVE_PLATFORMS = frozenset((
+    'linux-x86_64', 'windows-x86_64', 'macos-arm64'))
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE_LIST = ROOT / 'scripts' / 'release_files.txt'
 EPOCH = 315532800  # 1980-01-01 UTC; valid in both ZIP and TAR.
@@ -133,9 +136,10 @@ def target_platform():
     machines = {'x86_64': 'x86_64', 'AMD64': 'x86_64', 'aarch64': 'arm64', 'arm64': 'arm64'}
     system = systems.get(platform.system())
     arch = machines.get(platform.machine())
-    if not system or not arch:
-        raise ValueError('unsupported packaging host; no platform label inferred')
-    return f'{system}-{arch}'
+    label = f'{system}-{arch}'
+    if label not in SUPPORTED_ARCHIVE_PLATFORMS:
+        raise ValueError('unsupported packaging host; no approved target label')
+    return label
 
 
 def _read_bounded_descriptor(fd, maximum, kind):
@@ -631,11 +635,20 @@ def verify_packages(dest):
         raise ValueError('SHA256SUMS must be ASCII') from exc
     if len(lines) != 4 or len(lines) != len(set(lines)):
         raise ValueError('expected four distinct archive checksums')
-    parsed = {}
+    # The writer emits four ASCII LF-terminated records sorted by filename.
+    # Reject CRLF, absent final newlines and reordered records before IO.
+    if raw != ('\n'.join(lines) + '\n').encode('ascii'):
+        raise ValueError('non-canonical SHA256SUMS line endings')
+    entries = []
     for line in lines:
         if not re.fullmatch(r'[0-9a-f]{64}  [a-zA-Z0-9._-]+', line):
             raise ValueError('invalid SHA256SUMS record')
-        digest, name = line.split('  ', 1)
+        entries.append(line.split('  ', 1))
+    names = [name for _, name in entries]
+    if names != sorted(set(names)):
+        raise ValueError('non-canonical SHA256SUMS filename ordering')
+    parsed = {}
+    for digest, name in entries:
         file = dest / name
         if not file.is_file() or file.is_symlink():
             raise ValueError(f'checksum mismatch: {name}')
@@ -645,8 +658,10 @@ def verify_packages(dest):
         if not ext:
             raise ValueError(f'unexpected release extension: {name}')
         prefix = name[:-len(ext)]
-        if not re.fullmatch(r'sudoku-v' + re.escape(VERSION) +
-                            r'-(?:source|(?:linux|windows|macos)-(?:x86_64|arm64))', prefix):
+        allowed = {f'sudoku-v{VERSION}-source'}
+        allowed.update(f'sudoku-v{VERSION}-{host}' for host in
+                       SUPPORTED_ARCHIVE_PLATFORMS)
+        if prefix not in allowed:
             raise ValueError(f'unexpected release filename: {name}')
         if (prefix, ext) in parsed:
             raise ValueError(f'duplicate release variant: {name}')
