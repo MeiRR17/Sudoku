@@ -39,11 +39,12 @@ static int use(const char *message){
 }
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
-    puts("          notes ROW COL, candidates ROW COL, clear-notes,");
+    puts("          notes ROW COL, candidates ROW COL, auto-notes, clear-notes,");
     puts("          hint [apply], undo, redo, reset, check, status,");
     puts("          save [PATH], help, quit");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'note' toggles pencil marks; 'candidates' lists legal digits without guessing.");
+    puts("'auto-notes' fills legal candidates for every empty cell in one undoable step.");
     puts("'hint' finds a forced single; 'hint apply' places it as an undoable move.");
     puts("No color, network or special keys required.");
 }
@@ -194,17 +195,8 @@ static void print_notes(const SudokuGame *game,unsigned r,unsigned c){
 }
 /* Calculate only locally legal digits from the *current* board; the
  * stored unique solution is deliberately never consulted. */
-static uint16_t candidate_mask(const SudokuBoard *board,unsigned i){
-    SudokuBoard trial=*board;
-    uint16_t mask=0u;
-    unsigned d;
-    if(trial.cells[i])return 0u;
-    for(d=1u;d<=9u;++d){
-        trial.cells[i]=(uint8_t)d;
-        if(sudoku_board_validate(&trial,NULL)==SUDOKU_OK)
-            mask=(uint16_t)(mask | (uint16_t)(1u<<d));
-    }
-    return mask;
+static uint16_t candidate_mask(const SudokuGame *game,unsigned i){
+    return sudoku_game_candidates(game,i/9u+1u,i%9u+1u);
 }
 /* Return a digit only when the cell has exactly one legal candidate. */
 static unsigned single_candidate(uint16_t mask){
@@ -227,7 +219,7 @@ static void print_candidates(const SudokuGame *game,unsigned r,unsigned c){
                (unsigned)game->state.board.cells[i]);
         return;
     }
-    mask=candidate_mask(&game->state.board,i);
+    mask=candidate_mask(game,i);
     printf("Candidates for row %u col %u:",r,c);
     for(d=1u;d<=9u;++d)
         if((mask&(uint16_t)(1u<<d))!=0u)printf(" %u",d);
@@ -243,7 +235,7 @@ static int find_hint(const SudokuGame *game,LogicalHint *hint){
     uint16_t masks[SUDOKU_CELL_COUNT]={0};
     unsigned i,d,group,slot,count,chosen;
     for(i=0u;i<SUDOKU_CELL_COUNT;++i){
-        masks[i]=candidate_mask(&game->state.board,i);
+        masks[i]=candidate_mask(game,i);
         d=single_candidate(masks[i]);
         if(d){
             hint->index=i;
@@ -427,7 +419,8 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             if(sudoku_game_won(game))puts("SOLVED!");
             continue;
         }
-        if(strcmp(command,"clear-notes")==0&&!a)status=sudoku_game_clear_notes(game);
+        if(strcmp(command,"auto-notes")==0&&!a)status=sudoku_game_auto_notes(game);
+        else if(strcmp(command,"clear-notes")==0&&!a)status=sudoku_game_clear_notes(game);
         else if(strcmp(command,"undo")==0&&!a)status=sudoku_game_undo(game);
         else if(strcmp(command,"redo")==0&&!a)status=sudoku_game_redo(game);
         else if(strcmp(command,"reset")==0&&!a)status=sudoku_game_reset(game);
