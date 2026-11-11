@@ -61,6 +61,25 @@ def source_tree_digest(members):
     return digest.hexdigest()
 
 
+def verified_source_tree_digest(dist, version, checksums):
+    """Bind source-content receipt to the exact SHA256SUMS archive bytes.
+
+    Never re-open the archive path for parsing after separate hash preflight:
+    a competing publisher could replace that pathname. The shared packager
+    makes a bounded private snapshot from one checked file descriptor, then
+    hashes and parses that *same* snapshot before returning source members.
+    """
+    source_prefix = f'sudoku-v{version}-source'
+    archive_name = source_prefix + '.zip'
+    declared_hash = checksums.get(archive_name)
+    if not isinstance(declared_hash, str) or not re.fullmatch(r'[0-9a-f]{64}', declared_hash):
+        raise ValueError('missing or invalid verified source archive SHA-256')
+    from package_release import verified_archive_members
+    members = verified_archive_members(dist / archive_name,
+                                       declared_hash, source_prefix)
+    return source_tree_digest(members)
+
+
 def verify_checkout(required_sha=None):
     """Bind evidence to the exact clean checkout, including untracked files."""
     sha = call('git', 'rev-parse', '--verify', 'HEAD', capture=True)
@@ -253,11 +272,7 @@ def main():
     # The ZIP/TAR parity verifier already checked every member's canonical
     # path, file type and size. Hash their extracted content rather than the
     # compressed bytes, which may differ across hosts/zlib implementations.
-    from package_release import ensure_safe_archive
-    source_prefix = f'sudoku-v{match.group(1)}-source'
-    source_members = ensure_safe_archive(dist / (source_prefix + '.zip'),
-                                         source_prefix)
-    source_sha = source_tree_digest(source_members)
+    source_sha = verified_source_tree_digest(dist, match.group(1), checksums)
     receipt = {
         'schema_version': 2,
         'source_tree_sha256': source_sha,
