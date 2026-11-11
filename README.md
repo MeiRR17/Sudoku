@@ -52,6 +52,8 @@ Exit codes: **0** successful validation/solving/counting (including count=0), **
 
 ## Offline interactive play and saves
 
+**New read-only focus report:** Type `focus` (default 5 cells), `focus 1`, or `focus 9` to see empty cells ranked by the **fewest locally legal candidate digits**, with ties in row-major order. The optional positive limit is 1–81. A forced single is marked; if a locally valid but wrong entry leaves an empty cell with *zero* legal candidates, `focus` explicitly displays the contradiction and warns. This is constraint guidance, **not a stored-solution lookup or a guarantee a multi-candidate guess is correct**. It does not fill values, update pencil notes, clear redo, change elapsed time or save anything.
+
 **History navigation:** `undo [N]` and `redo [N]` now accept an optional positive decimal count (1–127, default 1). A multi-step request moves the history cursor atomically; requesting more steps than remain returns `no action to undo or redo` with the board, handwritten notes and redo branch unchanged. Invalid counts, negative numbers and extra arguments fail without edits. This is independent of the existing `hint apply chain [N]` grouping and does not change the save-file format or autosave.
 
 
