@@ -349,6 +349,35 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 1, redo 0') == 2 and not stderr
     checks += 1
 
+    # Apply every immediately forced hint as a single undoable action, unlike
+    # sequential setters that would consume one history entry per cell.
+    two_gaps = '0' + solution[1:80] + '0'
+    stdout, stderr = run(['--puzzle', two_gaps],
+                         'note 1 1 5\nhint all\nstatus\nhint apply all\n'
+                         'status\nundo\nstatus\nnotes 1 1\nredo\nstatus\n'
+                         'hint apply all\nhint apply all extra\nquit\n')
+    assert 'Logical hints (2):' in stdout, stdout
+    assert 'Applied 2 logical hints in one undoable move.' in stdout, stdout
+    assert stdout.count('SOLVED!') >= 1, stdout
+    assert 'undo 2, redo 0' in stdout and 'undo 1, redo 1' in stdout, stdout
+    assert 'Notes for row 1 col 1: 5' in stdout, stdout
+    assert 'Puzzle already solved; no hint needed.' in stdout, stdout
+    assert stdout.count('Error: unknown command or invalid arguments') == 1
+    assert not stderr
+    checks += 1
+
+    # Incorrect entries block group application. No partial placements, no
+    # new undo entry and no stored-solution digits are revealed.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 1\nstatus\nhint apply all\nstatus\n'
+                         'hint apply all extra\nquit\n')
+    assert 'Cannot apply hints: correct the existing mistakes first.' in stdout
+    assert 'Applied ' not in stdout
+    assert stdout.count('undo 1, redo 0') == 2
+    assert stdout.count('Error: unknown command or invalid arguments') == 1
+    assert not stderr
+    checks += 1
+
     # This 25-clue puzzle has a unique solution and no naked singles; only
     # the hidden-single column search can report the first forced step.
     hidden_single_puzzle = '500600902000105308000000500800001020000003000010920800060500004280000000305000070'
