@@ -141,25 +141,24 @@ def read_regular_source(path, maximum, kind):
                                     maximum, kind)
 
 
-def read_source_member(relative_name, remaining):
-    """Open a manifested source beneath ROOT without following parent symlinks.
+def read_tree_member(root, relative_name, remaining, kind):
+    """Open only a regular member beneath root, pinning each POSIX directory.
 
-    On POSIX hosts supporting openat/O_NOFOLLOW, each directory component is
-    opened relative to the previous pinned directory descriptor. A concurrent
-    parent symlink swap therefore cannot redirect the read outside the source
-    tree. Windows retains the prior pathname checks and regular-inode guard.
+    This protects both source manifests and staged installation payloads from
+    parent-directory symlink substitutions between listing and reading.
+    On Windows the existing pathname preflight remains necessary; native
+    Windows platform acceptance is required before claiming race safety.
     """
     if not portable_relative_name(relative_name):
-        raise ValueError('unsafe source member path')
+        raise ValueError('unsafe ' + kind + ' path')
     parts = PurePosixPath(relative_name).parts
     if (os.name != 'posix' or not hasattr(os, 'O_DIRECTORY') or
             not hasattr(os, 'O_NOFOLLOW') or
             os.open not in os.supports_dir_fd):
-        return read_regular_source(ROOT / relative_name, remaining,
-                                   'package content')
+        return read_regular_source(root / relative_name, remaining, kind)
     directory_flags = (os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW |
                        getattr(os, 'O_CLOEXEC', 0))
-    directory_fd = os.open(ROOT, directory_flags)
+    directory_fd = os.open(root, directory_flags)
     try:
         for component in parts[:-1]:
             child_fd = os.open(component, directory_flags, dir_fd=directory_fd)
@@ -169,7 +168,12 @@ def read_source_member(relative_name, remaining):
                           dir_fd=directory_fd)
     finally:
         os.close(directory_fd)
-    return _read_bounded_descriptor(file_fd, remaining, 'package content')
+    return _read_bounded_descriptor(file_fd, remaining, kind)
+
+
+def read_source_member(relative_name, remaining):
+    """Read a manifested source using pinned directory-relative traversal."""
+    return read_tree_member(ROOT, relative_name, remaining, 'package content')
 
 
 def bounded_file_bytes(path, remaining):
@@ -181,8 +185,9 @@ def source_paths():
     # A source manifest is itself part of the release trust boundary.
     if SOURCE_LIST.is_symlink():
         raise ValueError('symlinked source manifest refused')
-    manifest = read_regular_source(
-        SOURCE_LIST, MAX_SOURCE_MANIFEST_BYTES, 'source manifest')
+    manifest = read_tree_member(
+        ROOT, SOURCE_LIST.relative_to(ROOT).as_posix(),
+        MAX_SOURCE_MANIFEST_BYTES, 'source manifest')
     raw = manifest.decode('utf-8').splitlines()
     files = []
     seen = set()
@@ -245,7 +250,8 @@ def installed_paths(prefix):
             raise ValueError(f'unsafe installed path: {rel}')
         claim_portable_path(rel, seen_portable)
         mode = 0o755 if rel.startswith('bin/') else 0o644
-        payload = bounded_file_bytes(file, MAX_UNPACKED_BYTES - total)
+        payload = read_tree_member(prefix, rel, MAX_UNPACKED_BYTES - total,
+                                   'package content')
         total += len(payload)
         files.append((rel, payload, mode))
     if not any(p.startswith('bin/sudoku') for p, _, _ in files):
