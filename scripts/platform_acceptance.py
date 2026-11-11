@@ -77,6 +77,25 @@ def verify_checkout(required_sha=None):
 
 
 
+def workflow_identity_from_env(environ):
+    """Bind optional Actions receipts to a run ID and attempt (unsigned claims).
+
+    An ordinary offline run has no Actions identity. An Actions run must
+    provide both strictly formatted values, or the receipt fails closed.
+    These fields detect accidental evidence mixing, not issuer authenticity.
+    """
+    run_id = environ.get('GITHUB_RUN_ID')
+    attempt = environ.get('GITHUB_RUN_ATTEMPT')
+    if run_id is None and attempt is None:
+        return {}
+    if (not isinstance(run_id, str) or
+        not re.fullmatch(r'[1-9][0-9]{0,19}', run_id) or
+        not isinstance(attempt, str) or
+        not re.fullmatch(r'[1-9][0-9]{0,9}', attempt)):
+        raise ValueError('invalid or incomplete GitHub Actions run identity')
+    return {'github_run_id': run_id, 'github_run_attempt': int(attempt)}
+
+
 def write_receipt(output, receipt):
     """Write one private, fully flushed receipt without clobbering any file.
 
@@ -250,6 +269,7 @@ def main():
         'archive_sha256': dict(sorted(checksums.items())),
         'created_utc': datetime.now(timezone.utc).isoformat(timespec='seconds'),
     }
+    receipt.update(workflow_identity_from_env(os.environ))
     write_receipt(output, receipt)
     print('PLATFORM ACCEPTANCE RECEIPT PASS:', output, flush=True)
     print(json.dumps(receipt, sort_keys=True), flush=True)
