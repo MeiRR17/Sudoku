@@ -88,6 +88,9 @@ For a local pre-upload validation on the real runner or clean checkout, use `pyt
 
 ## Run quality checks
 
+The development quality gate must use **normal Python execution** with assertions enabled. Do not use `python -O`, `python -OO`, or `PYTHONOPTIMIZE` when running the CMake/CTest acceptance suite: six scriptable regression tests rely on required Python `assert` checks and now **fail closed** rather than silently skipping those validations. `scripts/quality_gate.py` validates this before starting the build, and each script also checks independently when launched directly from CTest. These guards do not replace actual native Windows/macOS acceptance, source/provenance signing, or licensing review.
+
+
 For the current platform (including Windows with MSVC, provided CMake/CTest/Python and a compiler are installed):
 
 ```sh
