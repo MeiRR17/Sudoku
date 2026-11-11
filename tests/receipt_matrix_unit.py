@@ -366,7 +366,9 @@ class ReceiptMatrixTests(unittest.TestCase):
                 replaced = True
                 # A different regular file at the same pathname should be
                 # rejected by the snapshot's second hash BEFORE ZIP decoding.
-                (folder / name).write_bytes(b'replaced after receipt hash\n')
+                competitor = folder / 'competitor-source.zip'
+                competitor.write_bytes(b'replaced after receipt hash\n')
+                os.replace(competitor, folder / name)
 
         with patch.object(MATRIX, 'verify_archive_hash',
                           side_effect=replace_after_checksum):
