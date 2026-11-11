@@ -57,6 +57,14 @@ SudokuGameStatus sudoku_game_auto_notes(SudokuGame *game);
 /* Remove pencil notes that conflict with the current board, but never add
  * missing marks. One undoable state change, or no history change if unchanged. */
 SudokuGameStatus sudoku_game_prune_notes(SudokuGame *game);
+/* Clear selected existing pencil-mark bits from each of 81 cells, never
+ * placing digits or changing the immutable clues. Validate every requested
+ * mask and target before changing any notes. Count removed pencil digits,
+ * not cells; one history snapshot only if at least one bit was removed.
+ * A no-op leaves both Undo and Redo history intact. The caller must derive
+ * logical eliminations; this API does not consult the solved board. */
+SudokuGameStatus sudoku_game_eliminate_notes(
+    SudokuGame *game, const uint16_t masks[SUDOKU_CELL_COUNT], unsigned *removed);
 /* Clear every pencil note as one undoable edit; empty note sets are a no-op. */
 SudokuGameStatus sudoku_game_clear_notes(SudokuGame *game);
 /* Remove all incorrect entered digits in one undoable move; never insert
