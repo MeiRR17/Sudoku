@@ -30,6 +30,12 @@ def test_command(name, build_dir=None):
                 '-DFIXTURE=' + str(SOURCE.parent.parent / 'tests' / 'fixtures'
                                   / 'valid.txt'), '-P',
                 str(SOURCE.parent.parent / 'tests' / 'run_stdin.cmake')]
+    if name in quality.CLI_TEST_ARGUMENTS:
+        args = [str(SOURCE.parent.parent / 'tests' / 'fixtures' / part)
+                if part in ('unique.txt', 'valid.txt', 'invalid_row.txt',
+                            'unsolvable.txt') else part
+                for part in quality.CLI_TEST_ARGUMENTS[name]]
+        return [binary, *args]
     return [binary]
 
 
@@ -136,6 +142,63 @@ class InventoryTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'Required CTest'):
                     quality.validate_test_manifest(
                         json.dumps({'tests': changed}), sanitizer=True, system='Linux')
+
+    def test_cli_subcommands_cannot_be_substituted(self):
+        # An installed sudoku --help or a valid Sudoku executable running the
+        # wrong subcommand must not count as the required solve/count check.
+        names = sorted(quality.BASE_TESTS)
+        original = json.loads(inventory(names))
+        for name, replacement in (
+                ('sudoku_count_unique', ['--help']),
+                ('sudoku_solve_unique', ['--version']),
+                ('sudoku_demo_smoke', ['--help']),
+                ('sudoku_validate_compact', ['validate', '--file', 'valid.txt']),
+                ('sudoku_solve_unsolvable', ['count', '--file',
+                                             str(SOURCE.parent.parent / 'tests'
+                                                 / 'fixtures' / 'unsolvable.txt'),
+                                             '--format', 'compact'])):
+            with self.subTest(name=name):
+                data = json.loads(json.dumps(original))
+                target = next(item for item in data['tests']
+                              if item['name'] == name)
+                target['command'] = target['command'][:1] + replacement
+                with self.assertRaisesRegex(ValueError, 'CLI arguments mismatch'):
+                    quality.validate_test_manifest(
+                        json.dumps(data), sanitizer=True, system='Linux')
+
+    def test_cli_fixture_swap_and_extra_argument_fail_closed(self):
+        names = sorted(quality.BASE_TESTS)
+        for name in ('sudoku_count_unique', 'sudoku_validate_file',
+                     'sudoku_invalid_row', 'sudoku_count_unsolvable'):
+            with self.subTest(name=name):
+                data = json.loads(inventory(names))
+                target = next(t for t in data['tests'] if t['name'] == name)
+                target['command'] = [
+                    'invalid_row.txt' if value.endswith('unique.txt')
+                    else 'unique.txt' if value.endswith('invalid_row.txt')
+                    else 'unique.txt' if value.endswith('valid.txt')
+                    else 'valid.txt' if value.endswith('unsolvable.txt')
+                    else value for value in target['command']]
+                with self.assertRaisesRegex(ValueError, 'CLI fixture mismatch'):
+                    quality.validate_test_manifest(
+                        json.dumps(data), sanitizer=True, system='Linux')
+
+        data = json.loads(inventory(names))
+        target = next(t for t in data['tests'] if t['name'] == 'sudoku_help')
+        target['command'].append('ignored-extra-argument')
+        with self.assertRaisesRegex(ValueError, 'CLI arguments mismatch'):
+            quality.validate_test_manifest(
+                json.dumps(data), sanitizer=True, system='Linux')
+
+    def test_all_ctest_cli_entries_have_explicit_argument_contracts(self):
+        for name, args in quality.CLI_TEST_ARGUMENTS.items():
+            command = test_command(name)
+            self.assertEqual(command[0], str(SOURCE.parent.parent / 'build'
+                                             / 'sudoku'))
+            self.assertGreater(len(command), 1)
+            self.assertIn(name, quality.BASE_TESTS)
+            # Every known CLI test is explicitly bound to its command form.
+            self.assertEqual(len(args), len(command) - 1)
 
     def test_stdin_requires_the_built_game_and_real_fixture(self):
         root = SOURCE.parent.parent
