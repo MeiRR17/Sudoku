@@ -110,6 +110,16 @@ def validate_ctest_command(name, command, build_dir=None):
                         (ROOT / 'tests' / 'run_stdin.cmake').resolve()
                         for x in command[1:] if x.endswith('.cmake'))):
             raise ValueError('Required CTest stdin driver mismatch: ' + name)
+        # The real CMake stdin driver is only useful when it invokes the
+        # built sudoku executable against the checked-in input fixture.
+        binary = next((x.split('=', 1)[1] for x in command
+                       if x.startswith('-DSUDOKU_BIN=')), None)
+        fixture = next((x.split('=', 1)[1] for x in command
+                        if x.startswith('-DFIXTURE=')), None)
+        if not binary or not fixture or pathlib.Path(fixture).resolve() != (
+                ROOT / 'tests' / 'fixtures' / 'valid.txt').resolve():
+            raise ValueError('Required CTest stdin arguments mismatch: ' + name)
+        require_build_binary(binary, 'sudoku')
     else:
         require_build_binary(command[0], 'sudoku')
 
