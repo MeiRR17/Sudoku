@@ -48,7 +48,7 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, focus [N], auto-notes, prune-notes,");
-    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|chain [N]|apply [all|pairs [N]|hidden-pairs [N]|chain [N]]], undo [N], redo [N], reset, check [details|clear],");
+    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|chain [N]|apply [all|pairs [N]|hidden-pairs [N]|locked [N]|chain [N]]], undo [N], redo [N], reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
     puts("prints entered digits too; neither is a full save or stored solution.");
@@ -61,6 +61,8 @@ static void commands(void){
     puts("'hint apply pairs [N]' removes matching pencil marks in one undo.");
     puts("'hint hidden-pairs [N]' previews pairs hidden among more candidates.");
     puts("'hint apply hidden-pairs [N]' prunes those extra notes in one undo.");
+    puts("'hint locked [N]' previews pointing/claiming candidate eliminations.");
+    puts("'hint apply locked [N]' prunes those pencil notes in one undo.");
     puts("'hint chain [N]' previews up to N successive forced singles (1..81).");
     puts("'hint apply' places one; 'hint apply all' batches current forced cells.");
     puts("'hint apply chain [N]' commits at most N singles in one undo.");
@@ -550,6 +552,129 @@ done_hidden_pairs:
             puts("No matching hidden-pair pencil notes to remove; history unchanged.");
     }
 }
+/* Locked candidates: if every occurrence of digit D in a box lies in
+ * one row/column, D can be removed from the rest of that line (pointing).
+ * Conversely, if every occurrence in a row/column lies in one box, D can
+ * be removed from the other cells in that box (claiming). This scan uses
+ * current-board legal candidates only, never the stored solved board. */
+static unsigned locked_box(unsigned cell){
+    return (cell/27u)*3u+(cell%9u)/3u;
+}
+static void locked_report(unsigned number,const char *kind,
+                          const char *origin,unsigned from,
+                          const char *destination,unsigned to,
+                          unsigned digit,const unsigned sources[9],
+                          unsigned source_count,const unsigned targets[9],
+                          unsigned target_count,int apply,
+                          uint16_t eliminations[SUDOKU_CELL_COUNT]){
+    unsigned k;
+    printf("Locked %u (%s %s %u -> %s %u, digit %u): sources",
+           number,kind,origin,from+1u,destination,to+1u,digit);
+    for(k=0u;k<source_count;++k)
+        printf(" r%uc%u",sources[k]/9u+1u,sources[k]%9u+1u);
+    fputs("; eliminate",stdout);
+    for(k=0u;k<target_count;++k){
+        unsigned i=targets[k];
+        printf(" r%uc%u",i/9u+1u,i%9u+1u);
+        if(apply)eliminations[i]=(uint16_t)(eliminations[i]|(uint16_t)(1u<<digit));
+    }
+    putchar('\n');
+}
+static void locked_candidates(SudokuGame *game,unsigned limit,int apply){
+    uint16_t masks[SUDOKU_CELL_COUNT]={0};
+    uint16_t eliminations[SUDOKU_CELL_COUNT]={0};
+    unsigned pass,unit,digit,k,n,total=0u,i;
+    if(sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot inspect locked candidates: invalid current board.");
+        return;
+    }
+    if(sudoku_game_won(game)){
+        puts("Puzzle already solved; no locked hint needed.");
+        return;
+    }
+    if(sudoku_game_mistakes(game)){
+        puts(apply?"Cannot apply locked candidates: correct the existing mistakes first.":
+                   "Cannot preview locked candidates: correct the existing mistakes first.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        masks[i]=candidate_mask(game,i);
+    /* First scan boxes (pointing); then scan rows/columns (claiming).
+     * A source digit needs two or more possible cells to distinguish this
+     * from the single-candidate/hidden-single strategies. */
+    for(pass=0u;pass<2u;++pass){
+        unsigned units=pass==0u?9u:18u;
+        for(unit=0u;unit<units;++unit){
+            for(digit=1u;digit<=9u;++digit){
+                unsigned sources[9],count=0u;
+                uint16_t bit=(uint16_t)(1u<<digit);
+                for(k=0u;k<9u;++k){
+                    i=pair_unit_cell(pass==0u?unit+18u:unit,k);
+                    if(masks[i]&bit)sources[count++]=i;
+                }
+                if(count<2u)continue;
+                if(pass==0u){
+                    unsigned row=sources[0]/9u,col=sources[0]%9u;
+                    unsigned same_row=1u,same_col=1u,axis;
+                    for(k=1u;k<count;++k){
+                        if(sources[k]/9u!=row)same_row=0u;
+                        if(sources[k]%9u!=col)same_col=0u;
+                    }
+                    for(axis=0u;axis<2u;++axis){
+                        unsigned targets[9],target_count=0u;
+                        unsigned line=axis?col:row;
+                        if((axis&&!same_col)||(!axis&&!same_row))continue;
+                        for(k=0u;k<9u;++k){
+                            i=pair_unit_cell(axis?line+9u:line,k);
+                            if(locked_box(i)!=unit&&(masks[i]&bit))
+                                targets[target_count++]=i;
+                        }
+                        if(!target_count)continue;
+                        locked_report(total+1u,"pointing","box",unit,
+                                      axis?"column":"row",line,digit,
+                                      sources,count,targets,target_count,
+                                      apply,eliminations);
+                        if(++total==limit)goto done_locked;
+                    }
+                }else{
+                    unsigned box=locked_box(sources[0]),same_box=1u;
+                    unsigned targets[9],target_count=0u;
+                    for(k=1u;k<count;++k)
+                        if(locked_box(sources[k])!=box)same_box=0u;
+                    if(!same_box)continue;
+                    for(k=0u;k<9u;++k){
+                        i=pair_unit_cell(box+18u,k);
+                        if((unit<9u?i/9u!=unit:i%9u!=unit-9u)&&
+                           (masks[i]&bit))
+                            targets[target_count++]=i;
+                    }
+                    if(!target_count)continue;
+                    locked_report(total+1u,"claiming",
+                                  unit<9u?"row":"column",unit%9u,
+                                  "box",box,digit,sources,count,
+                                  targets,target_count,apply,eliminations);
+                    if(++total==limit)goto done_locked;
+                }
+            }
+        }
+    }
+done_locked:
+    if(!total){
+        puts("No actionable locked candidates found.");
+        return;
+    }
+    if(apply){
+        unsigned removed=0u;
+        SudokuGameStatus status=sudoku_game_eliminate_notes(game,eliminations,&removed);
+        if(status!=SUDOKU_GAME_OK)
+            printf("Error: %s\n",sudoku_game_status_text(status));
+        else if(removed)
+            printf("Removed %u locked pencil candidate%s in one undoable edit.\n",
+                   removed,removed==1u?"":"s");
+        else
+            puts("No matching locked pencil notes to remove; history unchanged.");
+    }
+}
 typedef struct LogicalHint {
     unsigned index, digit, group;
     int hidden;
@@ -916,6 +1041,9 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             else if(strcmp(a,"hidden-pairs")==0&&
                     (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
                 hidden_pairs(game,(unsigned)(b?limit:5u),0);
+            else if(strcmp(a,"locked")==0&&
+                    (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
+                locked_candidates(game,(unsigned)(b?limit:5u),0);
             else if(strcmp(a,"apply")==0&&!b)print_hint(game,1);
             else if(strcmp(a,"chain")==0&&
                     (!b||(!c&&decimal(b,81u,&limit)&&limit>=1u)))
@@ -931,6 +1059,10 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                     strcmp(b,"hidden-pairs")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
                 hidden_pairs(game,(unsigned)(c?limit:5u),1);
+            else if(strcmp(a,"apply")==0&&b&&
+                    strcmp(b,"locked")==0&&
+                    (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
+                locked_candidates(game,(unsigned)(c?limit:5u),1);
             else if(strcmp(a,"apply")==0&&b&&
                     strcmp(b,"chain")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
