@@ -1,9 +1,16 @@
+#if !defined(_WIN32)
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "sudoku/game.h"
 #include "sudoku/board.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 #define CHECK(x) do { if(!(x)){ fprintf(stderr,"FAIL at %s:%d: %s\n",__FILE__,__LINE__,#x);return 1;} }while(0)
 static const char classic[]="530070000600195000098000060800060003400803001700020006060000280000419005000080079";
 static const char filled[]="534678912672195348198342567859761423426853791713924856961537284287419635345286179";
@@ -241,6 +248,26 @@ static int check_game(void){
     *game=*orig;
     memset(restored,0xA6,sizeof *restored);
     CHECK(sudoku_game_load(restored,"game-unit.save")==SUDOKU_GAME_OK);
+#if !defined(_WIN32)
+    /* A user may accidentally pass a named pipe to --resume. The loader
+     * must reject it immediately, even with no writer attached. It must
+     * never block in fopen(), change the active game, or leave a pipe. */
+    {
+        SudokuGameSnapshot before=restored->state;
+        unsigned cursor=restored->history_cursor;
+        unsigned length=restored->history_len;
+        (void)remove("game-unit.fifo");
+        CHECK(mkfifo("game-unit.fifo",0600)==0);
+        CHECK(sudoku_game_load(restored,"game-unit.fifo")==SUDOKU_GAME_IO);
+        CHECK(memcmp(restored->state.board.cells,before.board.cells,
+                     sizeof before.board.cells)==0);
+        CHECK(memcmp(restored->state.notes,before.notes,sizeof before.notes)==0);
+        CHECK(restored->history_cursor==cursor && restored->history_len==length);
+        CHECK(remove("game-unit.fifo")==0);
+        /* A character device is also rejected before reading its bytes. */
+        CHECK(sudoku_game_load(restored,"/dev/null")==SUDOKU_GAME_IO);
+    }
+#endif
     CHECK(restored->state.notes[2]==(1u<<7));
     CHECK(restored->state.board.cells[2]==0);
     CHECK(restored->history_cursor==0 && restored->history_len==1);
