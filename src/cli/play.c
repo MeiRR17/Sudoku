@@ -944,17 +944,22 @@ static void print_check_details(const SudokuGame *game){
  * 0 = EOF, 1 = valid line, 2 = rejected line, -1 = input error. */
 static int read_command_line(char line[], size_t capacity) {
     size_t used = 0u;
-    int ch, seen = 0, too_long = 0, nul = 0;
+    int ch, seen = 0, too_long = 0, nul = 0, control = 0;
     if (capacity == 0u) return -1;
     while ((ch = fgetc(stdin)) != EOF) {
         seen = 1;
         if (ch == '\n') break;
         if (ch == '\0') nul = 1;
+        if ((ch < 32 && ch != '\t' && ch != '\r') || ch == 127)
+            control = 1;
         if (used + 1u < capacity) line[used++] = (char)ch;
         else too_long = 1;
     }
     if (ferror(stdin)) return -1;
     if (!seen && ch == EOF) return 0;
+    /* Accept Windows CRLF and a trailing CR at EOF, but not a CR
+     * embedded in the command (which can rewrite terminal output). */
+    if (used && line[used - 1u] == '\r') --used;
     line[used] = '\0';
     if (too_long) {
         puts("Error: command too long");
@@ -962,6 +967,10 @@ static int read_command_line(char line[], size_t capacity) {
     }
     if (nul) {
         puts("Error: command contains a NUL byte");
+        return 2;
+    }
+    if (control || memchr(line, '\r', used) != NULL) {
+        puts("Error: command contains a control byte");
         return 2;
     }
     return 1;

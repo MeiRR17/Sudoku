@@ -84,6 +84,38 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'End of input. Progress is only persisted' in stdout
     assert 'Goodbye.' not in stdout and not stderr
     checks += 1
+    # Other ASCII control bytes must never reach command parsing, file paths
+    # or echoed terminal output. Keep the following command aligned.
+    terminal_save = folder / 'terminal-injected.save'
+    control_inputs = [
+        f'save {terminal_save}'.encode('utf-8') + b'\x1b[31m\n',
+        f'save {terminal_save}'.encode('utf-8') + b'\rmalicious\n',
+        b'set 1 1 5\x08\n',
+        b'quit\x7f\n',
+        b'show\x0c\n',
+    ]
+    for bad_line in control_inputs:
+        stdout, stderr = run_raw(
+            ['--puzzle', near_win], bad_line + b'status\nquit\n')
+        assert stdout.count('Error: command contains a control byte') == 1, stdout
+        assert stdout.count('Progress: 80/81 filled') == 1, stdout
+        assert 'SOLVED!' not in stdout and '\x1b' not in stdout
+        assert 'Goodbye.' in stdout and not stderr
+        assert not list(folder.glob('terminal-injected.save*'))
+        checks += 1
+
+    # The rejection logic must not break CRLF scripts or a trailing CR at
+    # EOF: only CR within a command is malformed.
+    stdout, stderr = run_raw(['--puzzle', near_win], b'status\r\nquit\r\n')
+    assert stdout.count('Progress: 80/81 filled') == 1
+    assert 'Goodbye.' in stdout and 'Error:' not in stdout and not stderr
+    checks += 1
+    stdout, stderr = run_raw(['--puzzle', near_win], b'status\r')
+    assert stdout.count('Progress: 80/81 filled') == 1
+    assert 'End of input. Progress is only persisted' in stdout
+    assert not stderr
+    checks += 1
+
     # Locked candidates (pointing box -> row/column and claiming line ->
     # box) use current-board legality, not the stored solution. Preview must
     # not touch the player's board or game history.

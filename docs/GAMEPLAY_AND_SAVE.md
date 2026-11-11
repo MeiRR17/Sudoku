@@ -18,11 +18,17 @@ The `--file` argument reads a puzzle file (max 1 MiB), not a saved game. On POSI
 
 Input is handled as a byte-counted line until newline or EOF. An embedded NUL
 byte causes the **entire** command to be rejected instead of silently executing
-the prefix before NUL (notably a dangerous partial `save PATH`). Commands
-longer than the fixed input buffer are likewise drained and rejected; the next
-complete command is processed normally. The last line remains valid without
-a trailing newline. Input read errors return exit code 4. This prevents
-malformed scripted input from being interpreted as different gameplay actions.
+the prefix before NUL (notably a dangerous partial `save PATH`). Other ASCII
+control bytes (such as ESC, Backspace, DEL and form feed) are rejected before
+a path can be created or echoed to the terminal. Tabs remain valid command
+separators. One terminal CR immediately preceding newline or EOF is accepted
+for Windows-style line endings; an embedded CR is rejected to prevent terminal
+line rewriting. Commands longer than the fixed input buffer are likewise
+drained and rejected; the next complete command is processed normally.
+The last line remains valid without a trailing newline. Input read errors
+return exit code 4. This prevents malformed scripted input from being
+interpreted as different gameplay actions or producing terminal control
+sequences.
 
 | Command | Behavior |
 |---|---|
