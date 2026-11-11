@@ -39,12 +39,12 @@ static int use(const char *message){
 }
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
-    puts("          notes ROW COL, candidates ROW COL, auto-notes, clear-notes,");
-    puts("          hint [apply], undo, redo, reset, check, status,");
+    puts("          notes ROW COL, candidates ROW COL, auto-notes, prune-notes,");
+    puts("          clear-notes, hint [apply], undo, redo, reset, check, status,");
     puts("          save [PATH], help, quit");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'note' toggles pencil marks; 'candidates' lists legal digits without guessing.");
-    puts("'auto-notes' fills legal candidates for every empty cell in one undoable step.");
+    puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
     puts("'hint' finds a forced single; 'hint apply' places it as an undoable move.");
     puts("No color, network or special keys required.");
 }
@@ -420,6 +420,7 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             continue;
         }
         if(strcmp(command,"auto-notes")==0&&!a)status=sudoku_game_auto_notes(game);
+        else if(strcmp(command,"prune-notes")==0&&!a)status=sudoku_game_prune_notes(game);
         else if(strcmp(command,"clear-notes")==0&&!a)status=sudoku_game_clear_notes(game);
         else if(strcmp(command,"undo")==0&&!a)status=sudoku_game_undo(game);
         else if(strcmp(command,"redo")==0&&!a)status=sudoku_game_redo(game);
