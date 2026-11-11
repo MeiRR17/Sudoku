@@ -26,7 +26,9 @@ def test_command(name, build_dir=None):
                 str(SOURCE.parent.parent / 'tests' / quality.PYTHON_TEST_SCRIPTS[name]),
                 binary]
     if name == 'sudoku_stdin':
-        return ['cmake', '-DSUDOKU_BIN=' + binary, '-P',
+        return ['cmake', '-DSUDOKU_BIN=' + binary,
+                '-DFIXTURE=' + str(SOURCE.parent.parent / 'tests' / 'fixtures'
+                                  / 'valid.txt'), '-P',
                 str(SOURCE.parent.parent / 'tests' / 'run_stdin.cmake')]
     return [binary]
 
@@ -134,6 +136,26 @@ class InventoryTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'Required CTest'):
                     quality.validate_test_manifest(
                         json.dumps({'tests': changed}), sanitizer=True, system='Linux')
+
+    def test_stdin_requires_the_built_game_and_real_fixture(self):
+        root = SOURCE.parent.parent
+        data = json.loads(inventory(sorted(quality.BASE_TESTS)))
+        entry = next(t for t in data['tests'] if t['name'] == 'sudoku_stdin')
+        correct = list(entry['command'])
+        cases = (
+            [p for p in correct if not p.startswith('-DSUDOKU_BIN=')],
+            [p for p in correct if not p.startswith('-DFIXTURE=')],
+            [p.replace('valid.txt', 'invalid_row.txt') for p in correct],
+            [p.replace('-DSUDOKU_BIN=' + str(root / 'build' / 'sudoku'),
+                       '-DSUDOKU_BIN=' + str(root / 'build' / 'echo'))
+             for p in correct],
+        )
+        for command in cases:
+            with self.subTest(command=command):
+                entry['command'] = command
+                with self.assertRaisesRegex(ValueError, 'Required CTest'):
+                    quality.validate_test_manifest(
+                        json.dumps(data), sanitizer=True, system='Linux')
 
     def test_missing_and_malformed_required_commands_fail_closed(self):
         for command in (None, [], '', [''], [4], ['sudoku', None]):
