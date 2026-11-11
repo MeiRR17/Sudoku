@@ -86,6 +86,61 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Pair 1 ' not in stdout and not stderr
     checks += 1
 
+    # Pair application is opt-in: it removes ONLY matching existing pencil
+    # notes, preserving other manual notes, filled digits and immutable givens.
+    # The first pair affects r5c2/r5c3; two pairs add r1c6/r6c6.
+    stdout, stderr = run(['--puzzle', pair_puzzle],
+                         'note 5 2 3\nnote 5 2 7\nnote 5 2 2\n'
+                         'note 5 3 3\nnote 5 3 7\nnote 1 6 3\n'
+                         'note 6 6 3\nnote 6 6 7\nstatus\n'
+                         'hint apply pairs 1\nnotes 5 2\nnotes 1 6\nstatus\n'
+                         'undo\nnotes 5 2\nstatus\n'
+                         'hint apply pairs 2\nnotes 5 2\nnotes 5 3\n'
+                         'notes 1 6\nnotes 6 6\nstatus\n'
+                         'hint apply pairs 2\nstatus\n'
+                         'undo\nnotes 6 6\nstatus\nredo\nstatus\nquit\n')
+    assert 'Removed 4 pencil candidates in one undoable edit.' in stdout
+    assert 'Removed 7 pencil candidates in one undoable edit.' in stdout
+    assert 'No matching pencil notes to remove; history unchanged.' in stdout
+    assert stdout.count('Notes for row 5 col 2: 2\n') == 2, stdout
+    assert 'Notes for row 5 col 2: 2 3 7\n' in stdout
+    assert 'Notes for row 1 col 6: 3\n' in stdout
+    assert 'Notes for row 1 col 6:\n' in stdout
+    assert 'Notes for row 5 col 3:\n' in stdout
+    assert 'Notes for row 6 col 6: 3 7\n' in stdout
+    assert 'Notes for row 6 col 6:\n' in stdout
+    assert stdout.count('undo 9, redo 0') == 4, stdout
+    assert stdout.count('undo 8, redo 1') == 2, stdout
+    assert 'Progress: 24/81 filled' in stdout and not stderr
+    checks += 1
+
+    # No matching pencil notes is a true no-op, not a phantom Undo entry.
+    stdout, stderr = run(['--puzzle', pair_puzzle],
+                         'hint apply pairs\nstatus\nundo\nquit\n')
+    assert 'No matching pencil notes to remove; history unchanged.' in stdout
+    assert 'undo 0, redo 0' in stdout
+    assert 'Error: no action to undo or redo' in stdout
+    assert not stderr
+    checks += 1
+
+    # Existing incorrect digits block automatic pencil elimination.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 9 4\nhint apply pairs\nstatus\nquit\n')
+    assert 'Cannot apply pairs: correct the existing mistakes first.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    invalid_pair_apply = ['hint apply pairs 0', 'hint apply pairs 82',
+                          'hint apply pairs -1', 'hint apply pairs nope',
+                          'hint apply pairs 2 extra', 'hint apply pairs 1.5']
+    stdout, stderr = run(['--puzzle', pair_puzzle],
+                         'status\n' + '\n'.join(invalid_pair_apply) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_pair_apply)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'Pair 1 in ' not in stdout and not stderr
+    checks += 1
+
     # Candidate-pressure explorer is read-only, deterministic, and sorted
     # first by fewest legal candidates, then by row/column reading order.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],
