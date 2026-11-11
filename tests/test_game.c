@@ -78,6 +78,30 @@ static int check_game(void){
     CHECK(sudoku_game_candidates(game,1,3)==((1u<<1)|(1u<<2)|(1u<<4)));
     CHECK(sudoku_game_candidates(game,1,1)==0u);
     CHECK(sudoku_game_candidates(game,0,3)==0u);
+    /* Bulk pencil operations must never silently wipe notes when a user of
+     * the public C API corrupts the board. All checks are transactional,
+     * including retained redo history and preexisting handwritten notes. */
+    {
+        SudokuGameSnapshot original_state = game->state;
+        unsigned original_cursor = game->history_cursor;
+        unsigned original_len = game->history_len;
+        game->state.notes[2] = (uint16_t)((1u << 4) | (1u << 8));
+        game->state.board.cells[2] = 5u; /* Duplicate given in row 1. */
+        CHECK(sudoku_game_auto_notes(game) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_prune_notes(game) == SUDOKU_GAME_INVALID);
+        CHECK(game->state.notes[2] == ((1u << 4) | (1u << 8)));
+        CHECK(game->state.board.cells[2] == 5u);
+        CHECK(game->history_cursor == original_cursor &&
+              game->history_len == original_len);
+        game->state.board.cells[2] = 10u; /* Out-of-range public byte. */
+        CHECK(sudoku_game_auto_notes(game) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_prune_notes(game) == SUDOKU_GAME_INVALID);
+        CHECK(game->state.notes[2] == ((1u << 4) | (1u << 8)));
+        CHECK(game->state.board.cells[2] == 10u);
+        CHECK(game->history_cursor == original_cursor &&
+              game->history_len == original_len);
+        game->state = original_state;
+    }
     /* Compare every cell against independent old nine-trial behavior on
      * several valid partially filled boards, not only one hand-picked cell.
      * The candidate API must also fail closed for public-struct corruption. */
