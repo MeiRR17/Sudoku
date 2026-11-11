@@ -20,6 +20,15 @@ The evaluator repeatedly applies *naked singles* first, then *hidden singles* in
 | `medium` | Entire puzzle solvable using naked and hidden singles, **at least one** hidden single required in the deterministic technique order | Other human solving orders may differ |
 | `hard` | The naked/hidden singles strategy **stalls** with remaining empties; nevertheless exact backtracking proves there is exactly one valid solution | Does **not** certify a particular advanced human technique or human difficulty |
 
+The public difficulty evaluator now rejects an immediately impossible row,
+column or box: when a digit is absent from a unit but no empty cell in that
+unit can contain it, the result is `SUDOKU_DIFFICULTY_INVALID`, not
+`SUDOKU_DIFFICULTY_HARD`. Such an impossibility is not detected by
+duplicate-given validation alone. This is a bounded logical contradiction
+check, **not** a complete solvability proof; use the exact solver to classify
+unsolvable or multiple-solution inputs. The generator already requires an
+independent exact uniqueness proof before accepting a candidate.
+
 To avoid trivial puzzles, generation also requires at most **40, 36, or 32 clues** for easy, medium and hard, respectively. This *presentation constraint* is separate from the actual difficulty category. A human rating study and broader strategy model are not yet included; these classifications should be labeled as *algorithmic proxy difficulty*.
 
 ## CLI

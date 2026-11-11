@@ -128,6 +128,10 @@ SudokuDifficulty sudoku_rate_difficulty(const SudokuBoard *board,
                     if (count > 1u) break;
                 }
             }
+            /* No candidate for a missing digit in a row, column or box
+             * is a logical contradiction, not a "hard" puzzle. This can
+             * happen even when every existing given passes validation. */
+            if (count == 0u) return SUDOKU_DIFFICULTY_INVALID;
             if (count == 1u) {
                 work.cells[slot] = (uint8_t)d;
                 ++hidden_count;
