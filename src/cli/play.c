@@ -40,12 +40,13 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, auto-notes, prune-notes,");
-    puts("          clear-notes, hint [apply], undo, redo, reset, check, status,");
-    puts("          save [PATH], help, quit");
+    puts("          clear-notes, hint [apply], undo, redo, reset, check [details],");
+    puts("          status, save [PATH], help, quit");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'note' toggles pencil marks; 'candidates' lists legal digits without guessing.");
     puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
     puts("'hint' finds a forced single; 'hint apply' places it as an undoable move.");
+    puts("'check details' locates wrong entries without revealing their solutions.");
     puts("No color, network or special keys required.");
 }
 static void display(const SudokuGame *game) {
@@ -283,8 +284,11 @@ static void print_hint(SudokuGame *game,int apply){
         puts("Puzzle already solved; no hint needed.");
         return;
     }
-    if(apply&&sudoku_game_mistakes(game)){
-        puts("Cannot apply hint: correct the existing mistakes first.");
+    if(sudoku_game_mistakes(game)){
+        if(apply)
+            puts("Cannot apply hint: correct the existing mistakes first.");
+        else
+            puts("Cannot preview hint: correct the existing mistakes first. Use 'check details'.");
         return;
     }
     if(!find_hint(game,&hint)){
@@ -309,6 +313,22 @@ static void print_hint(SudokuGame *game,int apply){
                hint.index/9u+1u,hint.index%9u+1u,hint.digit);
     }
     if(apply&&sudoku_game_won(game))puts("SOLVED! All cells are correct.");
+}
+/* Identify mistakes against the verified solution without disclosing any
+ * answer digit. Read-only: no note, timer, save or undo/redo side effects. */
+static void print_check_details(const SudokuGame *game){
+    unsigned i,count=0u;
+    printf("Check: %u empty, %u incorrect.\n",
+           sudoku_game_empty(game),sudoku_game_mistakes(game));
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+        unsigned placed=game->state.board.cells[i];
+        if(placed!=0u && placed!=game->solution.cells[i]){
+            printf("Incorrect entry: row %u col %u contains %u.\n",
+                   i/9u+1u,i%9u+1u,placed);
+            ++count;
+        }
+    }
+    if(count==0u)puts("No incorrect entries.");
 }
 static int event_loop(SudokuGame *game,PlayOptions *opt){
     char line[4096 + 32];
@@ -425,9 +445,12 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         else if(strcmp(command,"undo")==0&&!a)status=sudoku_game_undo(game);
         else if(strcmp(command,"redo")==0&&!a)status=sudoku_game_redo(game);
         else if(strcmp(command,"reset")==0&&!a)status=sudoku_game_reset(game);
-        else if(strcmp(command,"check")==0&&!a){
-            if(sudoku_game_won(game))puts("SOLVED! All cells are correct.");
-            else printf("Check: %u empty, %u incorrect.\n",sudoku_game_empty(game),sudoku_game_mistakes(game));
+        else if(strcmp(command,"check")==0&&
+                (!a||(strcmp(a,"details")==0&&!b))){
+            if(a)print_check_details(game);
+            else if(sudoku_game_won(game))puts("SOLVED! All cells are correct.");
+            else printf("Check: %u empty, %u incorrect.\n",
+                        sudoku_game_empty(game),sudoku_game_mistakes(game));
             continue;
         }
         else if(strcmp(command,"notes")==0&&position(a,b,&r,&d)&&!c){print_notes(game,r,d);continue;}
