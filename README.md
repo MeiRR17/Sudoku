@@ -4,6 +4,8 @@ A fully offline Sudoku engine with deterministic exact solving, solution classif
 
 ## Build and use
 
+**Source identity for acceptance receipts:** The native platform receipt and full cross-platform receipt-matrix verifier now derive their source-content digests and compare ZIP/TAR contents using a private, bounded snapshot of the *same* archive bytes validated against the declared SHA-256. Changing an archive pathname between a preliminary hash and parsing cannot substitute another source tree as valid evidence. `SHA256SUMS` and the local receipt remain unsigned and cannot establish authentic provenance; native Windows/macOS acceptance and licensing are still pending.
+
 The three v0.8.4 development verification stages—package verification, per-host acceptance receipt generation, and cross-host receipt-matrix comparison—now agree on canonical `SHA256SUMS` formatting. A checksum file with reordered entries, CRLF/CR endings or a missing final newline is not acceptable receipt evidence. The receipt metadata remains unsigned, and the required clean Windows/macOS runs have not been completed.
 
 Development packages are restricted to the roadmap's native Linux x86_64, Windows x86_64 and macOS arm64 targets. The checksum manifest must contain exactly four SHA-256 records sorted by archive **filename**, ASCII text with LF line endings and a terminating newline. The packager refuses to label unsupported host/CPU combinations as supported releases. This is a format/portability gate, not proof that native Windows or macOS tests have passed.
