@@ -71,6 +71,46 @@ SudokuGameStatus sudoku_game_set(SudokuGame *game, unsigned row, unsigned col, u
     remember(game);
     return SUDOKU_GAME_OK;
 }
+/* Verify the entire proposed batch before committing a single history edit.
+ * A batch is a placement operation, not a way to replace existing entries.
+ * Sudoku clues and the solution cache are never used to select new values. */
+SudokuGameStatus sudoku_game_set_many(SudokuGame *game,
+                                      const SudokuGameMove *moves,
+                                      unsigned count, unsigned *applied) {
+    SudokuGameSnapshot proposed;
+    unsigned char seen[SUDOKU_CELL_COUNT] = {0};
+    unsigned i;
+    if (applied) *applied = 0u;
+    if (!valid_game(game) || count > SUDOKU_CELL_COUNT ||
+        (count != 0u && moves == NULL))
+        return SUDOKU_GAME_INVALID;
+    if (sudoku_board_validate(&game->state.board, NULL) != SUDOKU_OK ||
+        sudoku_board_validate(&game->givens, NULL) != SUDOKU_OK)
+        return SUDOKU_GAME_INVALID;
+    for (i = 0u; i < SUDOKU_CELL_COUNT; ++i)
+        if (game->givens.cells[i] &&
+            game->state.board.cells[i] != game->givens.cells[i])
+            return SUDOKU_GAME_INVALID;
+    if (count == 0u) return SUDOKU_GAME_OK;
+    proposed = game->state;
+    for (i = 0u; i < count; ++i) {
+        int index = cell_index(moves[i].row, moves[i].col);
+        if (index < 0 || moves[i].digit < 1u || moves[i].digit > 9u)
+            return SUDOKU_GAME_RANGE;
+        if (seen[index]) return SUDOKU_GAME_INVALID;
+        seen[index] = 1u;
+        if (game->givens.cells[index]) return SUDOKU_GAME_GIVEN;
+        if (game->state.board.cells[index]) return SUDOKU_GAME_NOT_EMPTY;
+        proposed.board.cells[index] = (uint8_t)moves[i].digit;
+        proposed.notes[index] = 0u;
+    }
+    if (sudoku_board_validate(&proposed.board, NULL) != SUDOKU_OK)
+        return SUDOKU_GAME_CONFLICT;
+    game->state = proposed;
+    remember(game);
+    if (applied) *applied = count;
+    return SUDOKU_GAME_OK;
+}
 SudokuGameStatus sudoku_game_erase(SudokuGame *game, unsigned row, unsigned col) {
     int idx = cell_index(row, col);
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
