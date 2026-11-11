@@ -365,7 +365,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert lines and len(lines) % 2 == 0, stdout
     midpoint = len(lines) // 2
     assert lines[:midpoint] == lines[midpoint:], stdout
-    places = [tuple(map(int, re.search(r'row (\\d+) col (\\d+) ->', line).groups()))
+    places = [tuple(map(int, re.search(r'row (\d+) col (\d+) ->', line).groups()))
               for line in lines[:midpoint]]
     assert len(places) == len(set(places)), stdout
     assert lines[0] == 'Hint (only place in column 8): row 7 col 8 -> 8.', stdout
