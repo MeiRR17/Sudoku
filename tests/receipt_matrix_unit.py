@@ -601,6 +601,22 @@ class ReceiptMatrixTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'required checks missing'):
             self.check()
 
+    def test_packaged_save_resume_is_a_required_native_receipt_check(self):
+        # Every accepted host must attest that its extracted binary and
+        # shipped-source rebuild survived save/resume/corruption smoke.
+        for label in MATRIX.PLATFORMS:
+            self.assertIn('packaged_game_save_resume', self.receipts[label]['checks'])
+            self.receipts[label]['checks'].remove('packaged_game_save_resume')
+            self.write(label)
+            with self.subTest(runner=label):
+                with self.assertRaisesRegex(ValueError, 'required checks missing'):
+                    MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                         metadata_only=True)
+            self.receipts[label]['checks'].append('packaged_game_save_resume')
+            self.write(label)
+        self.assertEqual(len(MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                                 metadata_only=True)), 3)
+
     def test_naive_timestamp_rejected(self):
         self.receipts['ubuntu-latest']['created_utc'] = '2026-11-10T11:00:00'
         self.write('ubuntu-latest')
