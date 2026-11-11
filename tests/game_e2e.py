@@ -266,6 +266,42 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Puzzle already solved; no hint needed.' in stdout and not stderr
     checks += 1
 
+    # Applying a logical single is explicitly opt-in and undoable;
+    # previewing hints must remain observational. A solved board cannot
+    # receive a second automatic move.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'hint\nstatus\nhint apply\nstatus\nundo\nstatus\n'
+                         'redo\nstatus\nhint apply\nquit\n')
+    assert 'Hint (only candidate): row 1 col 1 -> 5.' in stdout
+    assert 'Applied hint (only candidate): row 1 col 1 -> 5.' in stdout
+    assert 'SOLVED! All cells are correct.' in stdout
+    assert 'Puzzle already solved; no hint needed.' in stdout
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # Hidden singles take the same normal setter/undo route as manually
+    # entered numbers, without choosing from the stored solution.
+    stdout, stderr = run(['--puzzle', hidden_single_puzzle],
+                         'hint apply\nstatus\nundo\nstatus\nquit\n')
+    assert 'Applied hint (only place in column 8): row 7 col 8 -> 8.' in stdout
+    assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # If the board already contains a rule-legal but incorrect entry, a
+    # hint may no longer be sound. Refuse automatic placement without
+    # changing any additional cell or recording an undo step.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 1\nstatus\nhint apply\nstatus\n'
+                         'hint apply extra\nhint preview\nquit\n')
+    assert stdout.count('Cannot apply hint: correct the existing mistakes first.') == 1
+    assert stdout.count('undo 1, redo 0') == 2
+    assert stdout.count('Error: unknown command or invalid arguments') == 2
+    assert not stderr
+    checks += 1
+
     # A reset on an untouched board must not create phantom undo history.
     stdout, stderr = run(['--puzzle', near_win], 'reset\nstatus\nundo\nquit\n')
     assert 'undo 0, redo 0' in stdout and 'no action to undo or redo' in stdout
