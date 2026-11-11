@@ -193,6 +193,41 @@ SudokuGameStatus sudoku_game_clear_notes(SudokuGame *game) {
     remember(game);
     return SUDOKU_GAME_OK;
 }
+/* Discard wrong player-entered digits without exposing or inserting any
+ * solution digit. Commit the whole cleanup as one undoable change. Public
+ * game structs may be mutated externally, so refuse an inconsistent puzzle,
+ * current board or cached solved grid before changing any state. */
+SudokuGameStatus sudoku_game_clear_mistakes(SudokuGame *game) {
+    SudokuGameSnapshot proposed;
+    unsigned index;
+    int changed = 0;
+    if (!valid_game(game) ||
+        sudoku_board_validate(&game->givens, NULL) != SUDOKU_OK ||
+        sudoku_board_validate(&game->state.board, NULL) != SUDOKU_OK ||
+        sudoku_board_validate(&game->solution, NULL) != SUDOKU_OK)
+        return SUDOKU_GAME_INVALID;
+    for (index = 0u; index < SUDOKU_CELL_COUNT; ++index) {
+        if (game->solution.cells[index] < 1u ||
+            game->solution.cells[index] > 9u ||
+            (game->givens.cells[index] &&
+             (game->solution.cells[index] != game->givens.cells[index] ||
+              game->state.board.cells[index] != game->givens.cells[index])))
+            return SUDOKU_GAME_INVALID;
+    }
+    proposed = game->state;
+    for (index = 0u; index < SUDOKU_CELL_COUNT; ++index) {
+        if (proposed.board.cells[index] != 0u &&
+            proposed.board.cells[index] != game->solution.cells[index]) {
+            proposed.board.cells[index] = 0u;
+            proposed.notes[index] = 0u;
+            changed = 1;
+        }
+    }
+    if (!changed) return SUDOKU_GAME_OK;
+    game->state = proposed;
+    remember(game);
+    return SUDOKU_GAME_OK;
+}
 SudokuGameStatus sudoku_game_undo(SudokuGame *game) {
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
     if (game->history_cursor == 0u) return SUDOKU_GAME_NO_HISTORY;
