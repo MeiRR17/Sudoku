@@ -40,13 +40,13 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, auto-notes, prune-notes,");
-    puts("          clear-notes, hint [apply], undo, redo, reset, check [details],");
+    puts("          clear-notes, hint [apply], undo, redo, reset, check [details|clear],");
     puts("          status, save [PATH], help, quit");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'note' toggles pencil marks; 'candidates' lists legal digits without guessing.");
     puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
     puts("'hint' finds a forced single; 'hint apply' places it as an undoable move.");
-    puts("'check details' locates wrong entries without revealing their solutions.");
+    puts("'check details' locates wrong entries; 'check clear' erases them (undoable).");
     puts("No color, network or special keys required.");
 }
 static void display(const SudokuGame *game) {
@@ -445,6 +445,9 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         else if(strcmp(command,"undo")==0&&!a)status=sudoku_game_undo(game);
         else if(strcmp(command,"redo")==0&&!a)status=sudoku_game_redo(game);
         else if(strcmp(command,"reset")==0&&!a)status=sudoku_game_reset(game);
+        else if(strcmp(command,"check")==0&&a&&
+                strcmp(a,"clear")==0&&!b)
+            status=sudoku_game_clear_mistakes(game);
         else if(strcmp(command,"check")==0&&
                 (!a||(strcmp(a,"details")==0&&!b))){
             if(a)print_check_details(game);
