@@ -3,7 +3,10 @@
 Uses real temporary files; no CMake toolchain or network required.
 """
 import importlib.util
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -120,6 +123,56 @@ class SourceManifestSafetyTests(unittest.TestCase):
     def test_empty_manifest_rejected(self):
         self.lines('# comment only')
         with self.assertRaisesRegex(ValueError, 'empty source manifest'):
+            package.source_paths()
+
+    def test_bounded_regular_source_reads_actual_open_inode(self):
+        regular = self.root / 'src' / 'board.c'
+        self.assertEqual(package.bounded_file_bytes(regular, 14), b'board-source\\n')
+        with self.assertRaisesRegex(ValueError, 'package content exceeds size budget'):
+            package.bounded_file_bytes(regular, 12)
+        self.assertEqual(package.read_regular_source(
+            regular, 14, 'source manifest'), b'board-source\\n')
+
+    def test_symlinked_leaf_is_refused_by_opened_descriptor(self):
+        if not hasattr(os, 'O_NOFOLLOW'):
+            self.skipTest('O_NOFOLLOW unavailable on this host')
+        linked = self.root / 'src' / 'alias-source.c'
+        try:
+            linked.symlink_to(self.root / 'src' / 'board.c')
+        except (OSError, NotImplementedError):
+            self.skipTest('symlink creation unavailable')
+        with self.assertRaises(OSError):
+            package.bounded_file_bytes(linked, 64)
+
+    @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'mkfifo'),
+                         'POSIX FIFO required')
+    def test_writerless_fifo_never_blocks_manifest_or_source_read(self):
+        fifo = self.root / 'scripts' / 'writerless-manifest.fifo'
+        os.mkfifo(fifo)
+        # A subprocess timeout is deliberate: a regression to fopen() must
+        # fail the test promptly instead of hanging the entire test suite.
+        script = (
+            'import importlib.util, pathlib, sys; '
+            'spec=importlib.util.spec_from_file_location("packager",sys.argv[1]); '
+            'mod=importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); '
+            'mod.read_regular_source(pathlib.Path(sys.argv[2]),128,sys.argv[3])'
+        )
+        for kind in ('source manifest', 'package content'):
+            with self.subTest(kind=kind):
+                result = subprocess.run(
+                    [sys.executable, '-B', '-c', script, str(SOURCE),
+                     str(fifo), kind],
+                    capture_output=True, text=True, timeout=3)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(kind + ' must be a regular file', result.stderr)
+
+    def test_manifest_file_must_be_regular_and_bounded(self):
+        self.lines('src/board.c')
+        self.assertEqual(len(package.source_paths()), 1)
+        # The manifest itself is bounded before decoding or parsing.
+        self.manifest.write_bytes(b'#' + b'a' *
+                                  package.MAX_SOURCE_MANIFEST_BYTES)
+        with self.assertRaisesRegex(ValueError, 'source manifest exceeds size budget'):
             package.source_paths()
 
 
