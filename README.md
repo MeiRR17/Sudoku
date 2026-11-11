@@ -4,6 +4,8 @@ A fully offline Sudoku engine with deterministic exact solving, solution classif
 
 ## Build and use
 
+Development packages are restricted to the roadmap's native Linux x86_64, Windows x86_64 and macOS arm64 targets. The checksum manifest must contain exactly four SHA-256 records sorted by archive **filename**, ASCII text with LF line endings and a terminating newline. The packager refuses to label unsupported host/CPU combinations as supported releases. This is a format/portability gate, not proof that native Windows or macOS tests have passed.
+
 Development package creation now writes and validates the **entire five-file set** (platform ZIP/TAR.GZ, source ZIP/TAR.GZ, SHA256SUMS) in a private staging directory before publication. It refuses to replace existing artifacts and rolls back its own newly linked files on publication errors. Re-running into the same output folder requires a fresh destination: prior verified files are never silently overwritten. This protects previous results during normal failures; it does **not** provide crash-atomic publication of all five files or release signing.
 
 The v0.8.4 development package verifier now validates each original archive once into a bounded private snapshot, then computes its checksum and decodes ZIP/TAR from **the same stored bytes**. This eliminates archive-path replacement between hashing and parsing on supported systems. Temporary copies are cleaned up; the checksum list remains unsigned, and this is not a signed or approved production release.
