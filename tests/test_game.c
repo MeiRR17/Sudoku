@@ -373,10 +373,73 @@ static int check_mistake_clear(void) {
     free(game);
     return 0;
 }
+static int check_batch_set(void) {
+    SudokuBoard board;
+    SudokuGame *game = malloc(sizeof *game);
+    char two_blanks[sizeof filled];
+    SudokuGameMove both[2] = {{1u,1u,5u},{9u,9u,9u}};
+    SudokuGameMove bad_duplicate[2] = {{1u,1u,5u},{1u,1u,5u}};
+    SudokuGameMove bad_conflict[2] = {{1u,1u,5u},{9u,9u,5u}};
+    SudokuGameMove bad_given[2] = {{1u,1u,5u},{1u,2u,3u}};
+    SudokuGameMove bad_range[2] = {{1u,1u,5u},{10u,9u,9u}};
+    unsigned applied=123u, cursor, length;
+    CHECK(game != NULL);
+    memcpy(two_blanks,filled,sizeof two_blanks);
+    two_blanks[0]='0';
+    two_blanks[80]='0';
+    CHECK(sudoku_board_parse(&board,(const unsigned char *)two_blanks,
+                             81u,NULL)==SUDOKU_OK);
+    CHECK(sudoku_game_start(game,&board)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_note(game,1u,1u,5u)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_note(game,9u,9u,9u)==SUDOKU_GAME_OK);
+    cursor=game->history_cursor;
+    CHECK(sudoku_game_set_many(game,both,2u,&applied)==SUDOKU_GAME_OK);
+    CHECK(applied==2u && game->history_cursor==cursor+1u);
+    CHECK(game->state.board.cells[0]==5u && game->state.board.cells[80]==9u);
+    CHECK(game->state.notes[0]==0u && game->state.notes[80]==0u);
+    CHECK(sudoku_game_won(game));
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(game->state.board.cells[0]==0u && game->state.board.cells[80]==0u);
+    CHECK(game->state.notes[0]==(1u<<5) &&
+          game->state.notes[80]==(1u<<9));
+    cursor=game->history_cursor;
+    length=game->history_len;
+    applied=9u;
+    CHECK(sudoku_game_set_many(game,NULL,0u,&applied)==SUDOKU_GAME_OK);
+    CHECK(applied==0u && game->history_cursor==cursor &&
+          game->history_len==length);
+    CHECK(sudoku_game_set_many(game,bad_duplicate,2u,&applied)==SUDOKU_GAME_INVALID);
+    CHECK(sudoku_game_set_many(game,bad_given,2u,&applied)==SUDOKU_GAME_GIVEN);
+    CHECK(sudoku_game_set_many(game,bad_range,2u,&applied)==SUDOKU_GAME_RANGE);
+    CHECK(sudoku_game_set_many(game,bad_conflict,2u,&applied)==SUDOKU_GAME_CONFLICT);
+    CHECK(sudoku_game_set_many(game,NULL,1u,&applied)==SUDOKU_GAME_INVALID);
+    CHECK(sudoku_game_set_many(game,both,82u,&applied)==SUDOKU_GAME_INVALID);
+    CHECK(applied==0u && game->history_cursor==cursor &&
+          game->history_len==length);
+    CHECK(game->state.board.cells[0]==0u && game->state.board.cells[80]==0u);
+    CHECK(game->state.notes[0]==(1u<<5) &&
+          game->state.notes[80]==(1u<<9));
+    /* The rejected batches leave a valid redo branch intact. */
+    CHECK(sudoku_game_redo(game)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_won(game));
+    CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_set_many(game,both,2u,&applied)==SUDOKU_GAME_OK);
+    CHECK(applied==2u);
+    /* Malformed public game data must fail without mutating history. */
+    cursor=game->history_cursor;
+    game->state.board.cells[1]=10u;
+    CHECK(sudoku_game_set_many(game,both,2u,&applied)==SUDOKU_GAME_INVALID);
+    CHECK(applied==0u && game->history_cursor==cursor);
+    game->state.board.cells[1]=3u;
+    free(game);
+    return 0;
+}
 int main(void){
     int result=check_game();
     if(result)return result;
     result=check_mistake_clear();
-    if(!result)puts("GAME ENGINE PASS: unique, givens, notes, history, reset, save/load/corruption, win, check-clear");
+    if(result)return result;
+    result=check_batch_set();
+    if(!result)puts("GAME ENGINE PASS: unique, givens, notes, history, reset, save/load/corruption, win, check-clear, batch-set");
     return result;
 }
