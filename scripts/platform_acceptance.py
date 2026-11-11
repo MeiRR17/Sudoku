@@ -16,6 +16,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_ARCHIVE_BYTES = 80 * 1024 * 1024  # Same ZIP/TAR compressed cap as package_release.
@@ -79,16 +80,22 @@ def verify_checkout(required_sha=None):
 def write_receipt(output, receipt):
     """Write one private, fully flushed receipt without clobbering any file.
 
-    The exclusive temporary file prevents symlink following; linking the
-    completed inode to a not-yet-existing destination is atomic and refuses
+    The unpredictable, exclusive temporary file prevents symlink following
+    and avoids collisions with stale stages left by a previous crash. Linking
+    the completed inode to a not-yet-existing destination is atomic and refuses
     to replace a receipt created concurrently. Both paths share a directory.
     Unsupported hardlinks fail closed; no release evidence is fabricated.
     """
     output.parent.mkdir(parents=True, exist_ok=True)
-    stage = output.with_name(output.name + '.tmp')
-    fd = os.open(stage, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    fd, name = tempfile.mkstemp(prefix=output.name + '.tmp.', dir=output.parent)
+    stage = Path(name)
     try:
-        with os.fdopen(fd, 'w', encoding='utf-8', newline='\n') as file:
+        try:
+            file = os.fdopen(fd, 'w', encoding='utf-8', newline='\n')
+        except BaseException:
+            os.close(fd)
+            raise
+        with file:
             json.dump(receipt, file, indent=2, sort_keys=True)
             file.write('\n')
             file.flush()
