@@ -38,6 +38,10 @@ A CPack TGZ/ZIP definition is also available via `cpack --config build/CPackConf
 
 The v0.8.4 verifier accepts only four lowercase-SHA256 checksum records in **filename** order, using strict ASCII text and exactly one trailing LF for each record. Alternate CRLF/CR endings, missing final newline, reordered records, duplicate archive names and invalid digest syntax are rejected before archive validation. Only `linux-x86_64`, `windows-x86_64` and `macos-arm64` are recognized binary release labels. `target_platform()` refuses unsupported architecture combinations rather than producing a misleading platform label. This is a metadata safeguard, **not** a claim that any unexecuted target build passes.
 
+### Cross-checking canonical checksums across all acceptance stages (v0.8.4)
+
+`scripts/verify_receipt_matrix.py` now imports and calls the development packager's exact `canonical_checksum_records` validation routine when reading a platform's unsigned SHA256SUMS evidence. `scripts/platform_acceptance.py` now independently refuses CRLF, CR, nonterminated checksum lines and trailing blank lines before issuing a platform receipt. All three paths require the canonical four-file filename order and lowercase SHA-256. No native platform evidence is inferred from parser success; unsigned metadata is still not a release signature.
+
 ## Required but missing native acceptance gates
 
 Before checking off issue #10 and publishing any release:
