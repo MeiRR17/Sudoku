@@ -3,6 +3,13 @@
 Intentionally rewrites test archives and their SHA256SUMS to verify that the
 format parity/regular-file/path controls cannot be bypassed by a new checksum.
 """
+# These executable E2E scripts intentionally use Python 'assert' for
+# required release checks. -O/-OO and PYTHONOPTIMIZE remove all assertions;
+# refusing optimization prevents a silent false-positive acceptance.
+if not __debug__:
+    raise SystemExit('SUDOKU TEST FAIL: Python optimization disables required assertions')
+
+
 import hashlib
 import importlib.util
 from pathlib import Path
