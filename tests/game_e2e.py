@@ -273,6 +273,8 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('Incorrect entry: row 1 col 3 contains 1.') == 2, stdout
     assert stdout.count('Incorrect entry: row 1 col 4 contains 2.') == 2, stdout
     assert stdout.count('No incorrect entries.') == 2, stdout
+    assert 'Cleared 2 incorrect entries (undoable).' in stdout
+    assert 'No incorrect entries to clear.' in stdout
     assert 'Notes for row 2 col 2: 5' in stdout
     assert stdout.count('undo 4, redo 0') == 2, stdout
     assert not stderr
@@ -285,6 +287,7 @@ with tempfile.TemporaryDirectory() as directory:
                          'status\nredo\ncheck details\n'
                          'check clear extra\ncheck clear wrong\nquit\n')
     assert 'undo 0, redo 1' in stdout
+    assert 'No incorrect entries to clear.' in stdout
     assert 'Incorrect entry: row 1 col 3 contains 1.' in stdout
     assert stdout.count('Error: unknown command or invalid arguments') == 2
     assert not stderr
