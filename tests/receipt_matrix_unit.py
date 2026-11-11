@@ -519,7 +519,7 @@ class ReceiptMatrixTests(unittest.TestCase):
         rows = file.read_text().splitlines()
         rows[-1] = rows[0]
         file.write_text('\n'.join(rows) + '\n')
-        with self.assertRaisesRegex(ValueError, 'duplicate SHA256SUMS filename'):
+        with self.assertRaisesRegex(ValueError, 'expected four distinct archive checksums'):
             self.check()
 
     def test_unsorted_manifest_rejected(self):
@@ -527,8 +527,32 @@ class ReceiptMatrixTests(unittest.TestCase):
         rows = file.read_text().splitlines()
         rows.reverse()
         file.write_text('\n'.join(rows) + '\n')
-        with self.assertRaisesRegex(ValueError, 'must be sorted'):
+        with self.assertRaisesRegex(ValueError, 'non-canonical SHA256SUMS filename ordering'):
             self.check()
+
+    def test_metadata_only_rejects_noncanonical_checksum_line_endings(self):
+        label = 'ubuntu-latest'
+        manifest = self.folders[label] / 'SHA256SUMS'
+        canonical = manifest.read_bytes()
+        for blob in (canonical[:-1], canonical.replace(b'\n', b'\r\n'),
+                     canonical.replace(b'\n', b'\r')):
+            with self.subTest(ending=repr(blob[-5:])):
+                manifest.write_bytes(blob)
+                with self.assertRaisesRegex(
+                        ValueError, 'non-canonical SHA256SUMS line endings'):
+                    MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                         metadata_only=True)
+        manifest.write_bytes(canonical)
+        self.assertEqual(len(MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                                 metadata_only=True)), 3)
+
+    def test_local_and_metadata_readers_share_canonical_parser(self):
+        label = 'ubuntu-latest'
+        manifest = self.folders[label] / 'SHA256SUMS'
+        expected = self.receipts[label]['archive_sha256']
+        self.assertEqual(MATRIX.read_manifest(manifest), expected)
+        parsed = MATRIX.PACKAGE.canonical_checksum_records(manifest.read_bytes())
+        self.assertEqual({name: digest for digest, name in parsed}, expected)
 
     def test_missing_required_checks_rejected(self):
         self.receipts['ubuntu-latest']['checks'] = ['quality_gate']
