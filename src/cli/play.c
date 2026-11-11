@@ -40,10 +40,11 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, clear-notes,");
-    puts("          undo, redo, reset, check, status,");
+    puts("          hint, undo, redo, reset, check, status,");
     puts("          save [PATH], help, quit");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'note' toggles pencil marks; 'candidates' lists legal digits without guessing.");
+    puts("'hint' finds a forced single without showing the stored solution.");
     puts("No color, network or special keys required.");
 }
 static void display(const SudokuGame *game) {
@@ -191,22 +192,90 @@ static void print_notes(const SudokuGame *game,unsigned r,unsigned c){
     for(d=1u;d<=9u;++d)if(game->state.notes[i]&(1u<<d))printf(" %u",d);
     putchar('\n');
 }
-/* List rule-legal digits for an empty cell without using the stored unique
- * solution (which would disclose an answer). Purely observational: no notes,
- * placed values, elapsed timer base or undo/redo history are changed. */
-static void print_candidates(const SudokuGame *game,unsigned r,unsigned c){
-    unsigned i=(r-1u)*9u+c-1u,d;
-    SudokuBoard trial=game->state.board;
-    if(trial.cells[i]){
-        printf("Cell row %u col %u already contains %u.\n",r,c,(unsigned)trial.cells[i]);
-        return;
-    }
-    printf("Candidates for row %u col %u:",r,c);
+/* Calculate only locally legal digits from the *current* board; the
+ * stored unique solution is deliberately never consulted. */
+static uint16_t candidate_mask(const SudokuBoard *board,unsigned i){
+    SudokuBoard trial=*board;
+    uint16_t mask=0u;
+    unsigned d;
+    if(trial.cells[i])return 0u;
     for(d=1u;d<=9u;++d){
         trial.cells[i]=(uint8_t)d;
-        if(sudoku_board_validate(&trial,NULL)==SUDOKU_OK)printf(" %u",d);
+        if(sudoku_board_validate(&trial,NULL)==SUDOKU_OK)
+            mask=(uint16_t)(mask | (uint16_t)(1u<<d));
     }
+    return mask;
+}
+/* Return a digit only when the cell has exactly one legal candidate. */
+static unsigned single_candidate(uint16_t mask){
+    unsigned d,found=0u;
+    for(d=1u;d<=9u;++d){
+        if((mask&(uint16_t)(1u<<d))!=0u){
+            if(found)return 0u;
+            found=d;
+        }
+    }
+    return found;
+}
+/* Both candidate lookup and hints are read-only, leaving the complete
+ * game state (notes, history, timer base and board) unchanged. */
+static void print_candidates(const SudokuGame *game,unsigned r,unsigned c){
+    unsigned i=(r-1u)*9u+c-1u,d;
+    uint16_t mask;
+    if(game->state.board.cells[i]){
+        printf("Cell row %u col %u already contains %u.\n",r,c,
+               (unsigned)game->state.board.cells[i]);
+        return;
+    }
+    mask=candidate_mask(&game->state.board,i);
+    printf("Candidates for row %u col %u:",r,c);
+    for(d=1u;d<=9u;++d)
+        if((mask&(uint16_t)(1u<<d))!=0u)printf(" %u",d);
     putchar('\n');
+}
+/* Naked singles first; if none exist, scan for a hidden single in a
+ * row, column or 3x3 box. This is logic, not an answer lookup or move. */
+static void print_hint(const SudokuGame *game){
+    uint16_t masks[SUDOKU_CELL_COUNT]={0};
+    unsigned i,d,group,slot,count,chosen;
+    if(sudoku_game_won(game)){
+        puts("Puzzle already solved; no hint needed.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+        masks[i]=candidate_mask(&game->state.board,i);
+        d=single_candidate(masks[i]);
+        if(d){
+            printf("Hint (only candidate): row %u col %u -> %u.\n",
+                   i/9u+1u,i%9u+1u,d);
+            return;
+        }
+    }
+    for(group=0u;group<27u;++group){
+        for(d=1u;d<=9u;++d){
+            count=0u;
+            chosen=0u;
+            for(slot=0u;slot<9u;++slot){
+                if(group<9u)i=group*9u+slot;
+                else if(group<18u)i=slot*9u+(group-9u);
+                else{
+                    unsigned box=group-18u;
+                    i=((box/3u)*3u+slot/3u)*9u+(box%3u)*3u+slot%3u;
+                }
+                if((masks[i]&(uint16_t)(1u<<d))!=0u){
+                    ++count;
+                    chosen=i;
+                }
+            }
+            if(count==1u){
+                const char *unit=group<9u?"row":group<18u?"column":"box";
+                printf("Hint (only place in %s %u): row %u col %u -> %u.\n",
+                       unit,group%9u+1u,chosen/9u+1u,chosen%9u+1u,d);
+                return;
+            }
+        }
+    }
+    puts("No simple hint found. Try candidates ROW COL.");
 }
 static int event_loop(SudokuGame *game,PlayOptions *opt){
     char line[4096 + 32];
@@ -304,6 +373,7 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             continue;
         }
         if(strcmp(command,"help")==0&&!a){commands();continue;}
+        if(strcmp(command,"hint")==0&&!a){print_hint(game);continue;}
         if(strcmp(command,"show")==0&&!a){display(game);continue;}
         if(strcmp(command,"status")==0&&!a){
             printf("Progress: %u/81 filled, %u mistakes, elapsed %" PRIu64 "s, undo %u, redo %u\n",
