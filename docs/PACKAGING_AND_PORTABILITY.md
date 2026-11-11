@@ -129,6 +129,12 @@ The matrix requires `status=passed`, receipt schema v2, one exact Git SHA and pr
 
 #### Source-content identity independent of archive compression (v0.8.4)
 
+### Exact-hash source-content snapshots for acceptance receipts (v0.8.4)
+
+The native acceptance runner and offline full receipt-matrix verifier now bind source-content checks to the **same bounded private archive snapshot** that is SHA-256-checked against the corresponding `SHA256SUMS` claim. They no longer hash an archive pathname and separately reopen that pathname later to decode it. Both source ZIP and TAR.GZ are verified by the shared safe snapshot parser before comparing their extracted members; the canonical source tree hash remains independent of ZIP/GZip compression differences across OSes.
+
+This closes a time-of-check/time-of-use **pathname substitution** window, rather than providing an immutable filesystem or signed evidence. No origin authenticity is implied by unsigned checksums or receipts. Native Windows x64/MSVC, macOS arm64, licensing, provenance and rollback acceptance remain mandatory before publishing a release. Focused local checks passed for the changed functions; the new tracked tests and complete CTest/native platform gates have not been run here.
+
 Platform receipts now use **schema version 2**, with a required `source_tree_sha256`. After the existing package verifier checks regular-file entries, safe paths, size/count limits, SHA-256 manifests and **ZIP/TAR content parity on that host**, `platform_acceptance.py` extracts the verified source ZIP's member map and hashes it canonically: SHA-256 over the domain separator `Sudoku-source-content-v1\\0` followed by sorted, UTF-8 pathname lengths (4-byte big endian), pathnames, payload lengths (8-byte big endian) and raw payload bytes. `verify_receipt_matrix.py` requires this content hash to match across Linux, Windows and macOS. Differences in GZip/DEFLATE compressed bytes across zlib/toolchain versions no longer falsely block matching source trees. The four compressed archive digests **still must match each corresponding host's manifest**; differing *contents* still fail. Legacy schema-v1 receipts are deliberately rejected rather than silently accepted. The digests and receipts are **unsigned and not an attestation**. No live native receipt or platform acceptance has been collected for the new schema yet.
 
 
