@@ -97,6 +97,35 @@ def write_receipt(output, receipt):
     finally:
         stage.unlink()
 
+def open_regular_input(path, kind):
+    """Open untrusted evidence without following a final POSIX symlink.
+
+    A path.is_file()/is_symlink() preflight alone races with replacement by a
+    named pipe or symlink. O_NONBLOCK prevents waiting for a FIFO writer and
+    fstat checks the *opened descriptor*. O_NOFOLLOW prevents final-component
+    symlink swaps where supported; Windows retains the preflight check.
+    The caller owns and closes the returned binary stream.
+    """
+    if path.is_symlink():
+        raise ValueError('missing or unsafe ' + kind)
+    flags = (os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0) |
+             getattr(os, 'O_NOFOLLOW', 0) |
+             getattr(os, 'O_CLOEXEC', 0) |
+             getattr(os, 'O_NOINHERIT', 0) |
+             getattr(os, 'O_BINARY', 0))
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError('missing or unsafe ' + kind) from exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError('missing or unsafe ' + kind)
+        return os.fdopen(fd, 'rb')
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def verified_archive_hashes(dist, version, expected):
     """Recheck exact on-disk development artifacts without unbounded reads.
 
@@ -111,9 +140,7 @@ def verified_archive_hashes(dist, version, expected):
              for kind in ('source', RUNNER_ARCHIVE_SUFFIX[expected])
              for ext in ('.zip', '.tar.gz')}
     manifest = dist / 'SHA256SUMS'
-    if manifest.is_symlink() or not manifest.is_file():
-        raise ValueError('missing or unsafe SHA256SUMS')
-    with manifest.open('rb') as stream:
+    with open_regular_input(manifest, 'SHA256SUMS') as stream:
         raw = stream.read(MAX_CHECKSUM_BYTES + 1)
     if len(raw) > MAX_CHECKSUM_BYTES:
         raise ValueError('SHA256SUMS exceeds size budget')
@@ -130,15 +157,13 @@ def verified_archive_hashes(dist, version, expected):
         raise ValueError('wrong or unsorted four-archive manifest')
     for name, expected_digest in parsed.items():
         archive = dist / name
-        if archive.is_symlink() or not archive.is_file():
-            raise ValueError('missing or unsafe archive: ' + name)
         digest = hashlib.sha256()
         total = 0
-        with archive.open('rb') as stream:
-            # fstat verifies the opened file, not a potentially stale path.
+        with open_regular_input(archive, 'archive: ' + name) as stream:
+            # Enforce the bound on the actual opened inode, not a stale path.
             metadata = os.fstat(stream.fileno())
-            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_ARCHIVE_BYTES:
-                raise ValueError('archive exceeds size budget or is not regular: ' + name)
+            if metadata.st_size > MAX_ARCHIVE_BYTES:
+                raise ValueError('archive exceeds size budget: ' + name)
             while True:
                 chunk = stream.read(65536)
                 if not chunk:
