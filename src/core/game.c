@@ -127,6 +127,30 @@ SudokuGameStatus sudoku_game_auto_notes(SudokuGame *game) {
     remember(game);
     return SUDOKU_GAME_OK;
 }
+/* Remove only stale pencil candidates while preserving the player's legal
+ * manual notes. No marks are added. Commit one undoable history snapshot if
+ * and only if an actual change occurred, preserving redo after no-op calls. */
+SudokuGameStatus sudoku_game_prune_notes(SudokuGame *game) {
+    SudokuGameSnapshot proposed;
+    unsigned index;
+    int changed = 0;
+    if (!valid_game(game)) return SUDOKU_GAME_INVALID;
+    proposed = game->state;
+    for (index = 0u; index < SUDOKU_CELL_COUNT; ++index) {
+        uint16_t allowed, retained;
+        if (!proposed.notes[index]) continue;
+        allowed = sudoku_game_candidates(game, index / 9u + 1u, index % 9u + 1u);
+        retained = (uint16_t)(proposed.notes[index] & allowed);
+        if (retained != proposed.notes[index]) {
+            proposed.notes[index] = retained;
+            changed = 1;
+        }
+    }
+    if (!changed) return SUDOKU_GAME_OK;
+    game->state = proposed;
+    remember(game);
+    return SUDOKU_GAME_OK;
+}
 SudokuGameStatus sudoku_game_note(SudokuGame *game, unsigned row, unsigned col, unsigned digit) {
     int idx = cell_index(row, col);
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
