@@ -268,17 +268,30 @@ SudokuGameStatus sudoku_game_clear_mistakes(SudokuGame *game) {
     remember(game);
     return SUDOKU_GAME_OK;
 }
-SudokuGameStatus sudoku_game_undo(SudokuGame *game) {
+/* Bounds are checked before changing the history cursor or live board:
+ * an excessive undo/redo request cannot partially apply the history. */
+SudokuGameStatus sudoku_game_undo_steps(SudokuGame *game, unsigned steps) {
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
-    if (game->history_cursor == 0u) return SUDOKU_GAME_NO_HISTORY;
-    game->state = game->history[--game->history_cursor];
+    if (steps == 0u || steps >= SUDOKU_GAME_HISTORY) return SUDOKU_GAME_RANGE;
+    if (steps > game->history_cursor) return SUDOKU_GAME_NO_HISTORY;
+    game->history_cursor -= steps;
+    game->state = game->history[game->history_cursor];
     return SUDOKU_GAME_OK;
 }
-SudokuGameStatus sudoku_game_redo(SudokuGame *game) {
+SudokuGameStatus sudoku_game_redo_steps(SudokuGame *game, unsigned steps) {
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
-    if (game->history_cursor + 1u == game->history_len) return SUDOKU_GAME_NO_HISTORY;
-    game->state = game->history[++game->history_cursor];
+    if (steps == 0u || steps >= SUDOKU_GAME_HISTORY) return SUDOKU_GAME_RANGE;
+    if (steps > game->history_len - 1u - game->history_cursor)
+        return SUDOKU_GAME_NO_HISTORY;
+    game->history_cursor += steps;
+    game->state = game->history[game->history_cursor];
     return SUDOKU_GAME_OK;
+}
+SudokuGameStatus sudoku_game_undo(SudokuGame *game) {
+    return sudoku_game_undo_steps(game, 1u);
+}
+SudokuGameStatus sudoku_game_redo(SudokuGame *game) {
+    return sudoku_game_redo_steps(game, 1u);
 }
 SudokuGameStatus sudoku_game_reset(SudokuGame *game) {
     SudokuGameSnapshot cleared = {0};
