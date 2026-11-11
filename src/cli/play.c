@@ -446,8 +446,16 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         else if(strcmp(command,"redo")==0&&!a)status=sudoku_game_redo(game);
         else if(strcmp(command,"reset")==0&&!a)status=sudoku_game_reset(game);
         else if(strcmp(command,"check")==0&&a&&
-                strcmp(a,"clear")==0&&!b)
+                strcmp(a,"clear")==0&&!b){
+            unsigned incorrect=sudoku_game_mistakes(game);
             status=sudoku_game_clear_mistakes(game);
+            if(status==SUDOKU_GAME_OK){
+                if(incorrect)
+                    printf("Cleared %u incorrect entries (undoable).\n",incorrect);
+                else
+                    puts("No incorrect entries to clear.");
+            }
+        }
         else if(strcmp(command,"check")==0&&
                 (!a||(strcmp(a,"details")==0&&!b))){
             if(a)print_check_details(game);
