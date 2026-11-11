@@ -101,6 +101,8 @@ For a local pre-upload validation on the real runner or clean checkout, use `pyt
 
 ## Run quality checks
 
+**CTest command identity preflight (v0.8.4):** The local `scripts/quality_gate.py` does not accept test names alone: before running CTest, it reads the actual JSON test inventory and verifies that each mandatory test executes the correct Sudoku executable **from the configured build directory**, a known C unit-test binary, or the **exact checked-in Python test script**. The CMake-based stdin test must use the real `run_stdin.cmake`, the built `sudoku` executable, and the intended `tests/fixtures/valid.txt`. A renamed `echo PASS`, unrelated script or stale system-installed executable causes a fail-closed preflight. This is registration integrity, **not proof the tests passed**; a clean native build and CTest execution are still mandatory.
+
 The development quality gate must use **normal Python execution** with assertions enabled. Do not use `python -O`, `python -OO`, or `PYTHONOPTIMIZE` when running the CMake/CTest acceptance suite: six scriptable regression tests rely on required Python `assert` checks and now **fail closed** rather than silently skipping those validations. `scripts/quality_gate.py` validates this before starting the build, and each script also checks independently when launched directly from CTest. These guards do not replace actual native Windows/macOS acceptance, source/provenance signing, or licensing review.
 
 
