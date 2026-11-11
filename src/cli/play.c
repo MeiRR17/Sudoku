@@ -334,8 +334,8 @@ static void print_focus(const SudokuGame *game,unsigned limit){
             ++shown;
         }
     }
-    if(dead)printf("Warning: %u empty cell%s have no legal digits; inspect entries.\n",
-                   dead,dead==1u?"":"s");
+    if(dead)printf("Warning: %u empty cell%s %s no legal digits; inspect entries.\n",
+                   dead,dead==1u?"":"s",dead==1u?"has":"have");
 }
 typedef struct LogicalHint {
     unsigned index, digit, group;
