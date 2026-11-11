@@ -51,6 +51,34 @@ static int check_game(void){
     CHECK(sudoku_game_set(game,0,1,4)==SUDOKU_GAME_RANGE);
     CHECK(sudoku_game_set(game,1,3,0)==SUDOKU_GAME_RANGE);
     CHECK(sudoku_game_set(game,1,3,5)==SUDOKU_GAME_CONFLICT);
+    /* Reset must fail closed if a C caller alters the public game into
+     * a conflicting/out-of-range board or erases an immutable clue.
+     * Neither the snapshot nor the undo/redo cursor may change. */
+    {
+        SudokuGameSnapshot snapshot = game->state;
+        SudokuBoard original_givens = game->givens;
+        unsigned cursor = game->history_cursor, length = game->history_len;
+        game->state.board.cells[0] = 0u; /* Given silently erased. */
+        CHECK(sudoku_game_reset(game) == SUDOKU_GAME_INVALID);
+        CHECK(game->state.board.cells[0] == 0u);
+        game->state = snapshot;
+        game->state.board.cells[2] = 5u; /* Duplicate in first row. */
+        CHECK(sudoku_game_reset(game) == SUDOKU_GAME_INVALID);
+        CHECK(game->state.board.cells[2] == 5u);
+        game->state = snapshot;
+        game->state.board.cells[2] = 10u; /* Out-of-range digit. */
+        CHECK(sudoku_game_reset(game) == SUDOKU_GAME_INVALID);
+        CHECK(game->state.board.cells[2] == 10u);
+        game->state = snapshot;
+        game->givens.cells[2] = 5u; /* Duplicate original clue. */
+        CHECK(sudoku_game_reset(game) == SUDOKU_GAME_INVALID);
+        CHECK(game->givens.cells[2] == 5u);
+        game->givens = original_givens;
+        game->state = snapshot;
+        CHECK(game->history_cursor == cursor && game->history_len == length);
+        CHECK(memcmp(game->state.board.cells, snapshot.board.cells,
+                     sizeof snapshot.board.cells) == 0);
+    }
     /* Erase must clear pencil marks even when no digit is placed, while
      * preserving undo/redo history and avoiding phantom no-op edits. */
     CHECK(sudoku_game_note(game,1,3,4)==SUDOKU_GAME_OK);

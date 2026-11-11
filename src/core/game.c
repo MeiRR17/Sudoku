@@ -334,6 +334,16 @@ SudokuGameStatus sudoku_game_reset(SudokuGame *game) {
     SudokuGameSnapshot cleared = {0};
     unsigned i;
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
+    /* Reset must not replace a live snapshot with invalid public givens,
+     * or conceal an edited/erased original clue. Reject before touching
+     * the board or its undo/redo history. */
+    if (sudoku_board_validate(&game->givens, NULL) != SUDOKU_OK ||
+        sudoku_board_validate(&game->state.board, NULL) != SUDOKU_OK)
+        return SUDOKU_GAME_INVALID;
+    for (i = 0u; i < SUDOKU_CELL_COUNT; ++i)
+        if (game->givens.cells[i] &&
+            game->state.board.cells[i] != game->givens.cells[i])
+            return SUDOKU_GAME_INVALID;
     cleared.board = game->givens;
     /* Compare meaningful state rather than struct bytes: the snapshot
      * contains ABI padding between the 81-byte board and uint16_t notes.

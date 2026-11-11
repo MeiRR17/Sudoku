@@ -78,6 +78,9 @@ SudokuGameStatus sudoku_game_undo_steps(SudokuGame *game, unsigned steps);
 SudokuGameStatus sudoku_game_redo_steps(SudokuGame *game, unsigned steps);
 SudokuGameStatus sudoku_game_undo(SudokuGame *game);
 SudokuGameStatus sudoku_game_redo(SudokuGame *game);
+/* Restore immutable clues and clear editable digits/notes in one Undo step.
+ * No-op when already reset. Reject invalid public givens/current boards or
+ * altered clue cells without mutating state or history. */
 SudokuGameStatus sudoku_game_reset(SudokuGame *game);
 unsigned sudoku_game_empty(const SudokuGame *game);
 unsigned sudoku_game_mistakes(const SudokuGame *game);
