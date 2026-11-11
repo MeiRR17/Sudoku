@@ -103,6 +103,75 @@ class ReceiptMatrixTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'missing or unsafe archive'):
             MATRIX.verify_archive_hash(path, '0' * 64)
 
+    def test_metadata_matrix_requires_exact_run_id_and_attempt(self):
+        for label in self.receipts:
+            self.receipts[label]['github_run_id'] = '123456789012'
+            self.receipts[label]['github_run_attempt'] = 2
+            self.write(label)
+        self.assertEqual(
+            len(MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                     metadata_only=True,
+                                     require_run_id='123456789012',
+                                     require_run_attempt=2)), 3)
+
+    def test_metadata_matrix_rejects_mixed_run_attempts(self):
+        for label in self.receipts:
+            self.receipts[label]['github_run_id'] = '123456789012'
+            self.receipts[label]['github_run_attempt'] = 2
+            self.write(label)
+        self.receipts['macos-latest']['github_run_attempt'] = 3
+        self.write('macos-latest')
+        with self.assertRaisesRegex(ValueError, 'run ID or attempt mismatch'):
+            MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                 metadata_only=True,
+                                 require_run_id='123456789012',
+                                 require_run_attempt=2)
+
+    def test_metadata_matrix_rejects_mixed_run_ids(self):
+        for label in self.receipts:
+            self.receipts[label]['github_run_id'] = '123456789012'
+            self.receipts[label]['github_run_attempt'] = 2
+            self.write(label)
+        self.receipts['windows-latest']['github_run_id'] = '123456789013'
+        self.write('windows-latest')
+        with self.assertRaisesRegex(ValueError, 'run ID or attempt mismatch'):
+            MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                 metadata_only=True,
+                                 require_run_id='123456789012',
+                                 require_run_attempt=2)
+
+    def test_metadata_matrix_rejects_missing_run_identity(self):
+        with self.assertRaisesRegex(ValueError, 'run ID or attempt mismatch'):
+            MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                 metadata_only=True,
+                                 require_run_id='123456789012',
+                                 require_run_attempt=2)
+
+    def test_incomplete_receipt_run_identity_is_rejected(self):
+        self.receipts['ubuntu-latest']['github_run_id'] = '123456789012'
+        self.write('ubuntu-latest')
+        with self.assertRaisesRegex(ValueError, 'invalid Actions run identity'):
+            MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                 metadata_only=True)
+
+    def test_boolean_attempt_cannot_masquerade_as_integer(self):
+        self.receipts['ubuntu-latest'].update(
+            github_run_id='123456789012', github_run_attempt=True)
+        self.write('ubuntu-latest')
+        with self.assertRaisesRegex(ValueError, 'invalid Actions run identity'):
+            MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                 metadata_only=True)
+
+    def test_required_run_identity_must_be_valid_pair(self):
+        for run_id, attempt in (('123456789012', None), (None, 2),
+                                ('00012', 2), ('12345', 0)):
+            with self.subTest(run_id=run_id, attempt=attempt):
+                with self.assertRaisesRegex(ValueError, 'valid paired Actions'):
+                    MATRIX.verify_matrix(self.folders, SHA, VERSION,
+                                         metadata_only=True,
+                                         require_run_id=run_id,
+                                         require_run_attempt=attempt)
+
     def test_metadata_only_accepts_exact_three_unsigned_receipt_bundles(self):
         # Actions uploads only receipt JSON + SHA256SUMS, not unlicensed
         # binaries. This mode compares claims, NOT downloaded file bytes.
