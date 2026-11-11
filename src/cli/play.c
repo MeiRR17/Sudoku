@@ -49,7 +49,9 @@ static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, auto-notes, prune-notes,");
     puts("          clear-notes, hint [all|chain [N]|apply [all|chain [N]]], undo, redo, reset, check [details|clear],");
-    puts("          status, save [PATH], help, quit");
+    puts("          export [givens|current|both], status, save [PATH], help, quit");
+    puts("'export' prints copyable 81-digit original clues; 'export current'");
+    puts("prints entered digits too; neither is a full save or stored solution.");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'note' toggles pencil marks; 'candidates' lists legal digits without guessing.");
     puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
@@ -59,6 +61,21 @@ static void commands(void){
     puts("'hint apply chain [N]' commits at most N singles in one undo.");
     puts("'check details' locates wrong entries; 'check clear' erases them (undoable).");
     puts("No color, network or special keys required.");
+}
+/* Share a portable 81-digit puzzle string with a new --puzzle session.
+ * This is a read-only view of public givens or the player's current entries,
+ * never the cached solved board. Notes, timer, history and saves are omitted. */
+static void export_board(const SudokuGame *game,int current){
+    const SudokuBoard *board=current?&game->state.board:&game->givens;
+    char compact[82];
+    /* A public library caller may have corrupted a game structure; do not
+     * publish '?'-containing malformed compact data as a usable puzzle. */
+    if(sudoku_board_validate(board,NULL)!=SUDOKU_OK){
+        puts("Error: cannot export an invalid board.");
+        return;
+    }
+    sudoku_board_compact(board,compact);
+    printf("%s: %s\n",current?"Current board":"Puzzle givens",compact);
 }
 static void display(const SudokuGame *game) {
     unsigned r,c;
@@ -643,6 +660,14 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
                 hint_chain(game,1,(unsigned)limit);
             else puts("Error: unknown command or invalid arguments. Type 'help'.");
+            continue;
+        }
+        if(strcmp(command,"export")==0&&
+           (!a||((strcmp(a,"givens")==0||strcmp(a,"current")==0||
+                   strcmp(a,"both")==0)&&!b))){
+            if(!a||strcmp(a,"givens")==0)export_board(game,0);
+            else if(strcmp(a,"current")==0)export_board(game,1);
+            else{export_board(game,0);export_board(game,1);}
             continue;
         }
         if(strcmp(command,"show")==0&&!a){display(game);continue;}
