@@ -4,6 +4,9 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-11 canonical checksum manifest and supported-host labels:** Development release verification now requires exactly four ASCII/LF-terminated SHA256SUMS entries sorted by **filename**, not by digest, and rejects CRLF, missing final newline, duplicates, malformed hexadecimal or reordered entries before opening any archives. Only the roadmap's initial supported labels are accepted: Linux x86_64, Windows x86_64 and macOS arm64; packaging itself also rejects otherwise recognized but unapproved OS/CPU pairs. Added six manifest/platform regression methods and preserved the adversarial forged-name test's intended coverage by sorting its modified manifest. A focused copy of the exact GitHub parser block (1,505 chars, FNV-1a32 `ccd4e4c0`) passed 19/19 Linux checks; complete checked-in tests and native platform acceptance remain pending.
+
+
 - **2026-11-11 no-clobber development package publication:** Stage all four ZIP/TAR archives and the checksum manifest inside a private temporary directory on the destination filesystem, verify the entire set there before publication, then publish only through exclusive same-filesystem hard links. Existing package files and symlinks are preserved; expected link errors roll back only links that still belong to the newly staged files. A sudden process termination can still interrupt this five-file publication, so this is **not an atomic multi-file transaction or an approved release**. Six checked-in publication regressions added; a source-fingerprint-matched Linux helper passed 8/8 real-filesystem focused tests. Full CMake/CTest, native Windows/macOS, provenance and licensing gates remain HOLD.
 
 
