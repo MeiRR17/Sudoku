@@ -7,6 +7,23 @@
 #define CHECK(x) do { if(!(x)){ fprintf(stderr,"FAIL at %s:%d: %s\n",__FILE__,__LINE__,#x);return 1;} }while(0)
 static const char classic[]="530070000600195000098000060800060003400803001700020006060000280000419005000080079";
 static const char filled[]="534678912672195348198342567859761423426853791713924856961537284287419635345286179";
+/* Independent reference: reproduce the legacy nine-trial candidate
+ * algorithm, so the optimized one-pass implementation has an oracle. */
+static uint16_t reference_candidates(const SudokuBoard *board,
+                                     unsigned row, unsigned col) {
+    SudokuBoard trial = *board;
+    unsigned index, digit;
+    uint16_t allowed = 0u;
+    if (row < 1u || row > 9u || col < 1u || col > 9u) return 0u;
+    index = (row - 1u) * 9u + col - 1u;
+    if (board->cells[index]) return 0u;
+    for (digit = 1u; digit <= 9u; ++digit) {
+        trial.cells[index] = (uint8_t)digit;
+        if (sudoku_board_validate(&trial, NULL) == SUDOKU_OK)
+            allowed = (uint16_t)(allowed | (uint16_t)(1u << digit));
+    }
+    return allowed;
+}
 static int check_game(void){
     SudokuBoard board;
     SudokuGame *game=malloc(sizeof(SudokuGame));
@@ -61,6 +78,35 @@ static int check_game(void){
     CHECK(sudoku_game_candidates(game,1,3)==((1u<<1)|(1u<<2)|(1u<<4)));
     CHECK(sudoku_game_candidates(game,1,1)==0u);
     CHECK(sudoku_game_candidates(game,0,3)==0u);
+    /* Compare every cell against independent old nine-trial behavior on
+     * several valid partially filled boards, not only one hand-picked cell.
+     * The candidate API must also fail closed for public-struct corruption. */
+    {
+        SudokuBoard current = game->state.board, sample_board;
+        unsigned sample, index;
+        CHECK(sudoku_board_parse(&sample_board,
+              (const unsigned char *)filled, 81u, NULL) == SUDOKU_OK);
+        for (sample = 0u; sample < 23u; ++sample) {
+            CHECK(sudoku_board_parse(&sample_board,
+                  (const unsigned char *)filled, 81u, NULL) == SUDOKU_OK);
+            for (index = 0u; index < 81u; ++index) {
+                if (((index * 37u + sample * 19u) % 11u) < 7u)
+                    sample_board.cells[index] = 0u;
+            }
+            game->state.board = sample_board;
+            for (index = 0u; index < 81u; ++index) {
+                unsigned row = index / 9u + 1u, col = index % 9u + 1u;
+                CHECK(sudoku_game_candidates(game, row, col) ==
+                      reference_candidates(&sample_board, row, col));
+            }
+        }
+        game->state.board = current;
+        game->state.board.cells[2] = 5u; /* Duplicate digit in row 1. */
+        CHECK(sudoku_game_candidates(game, 4u, 4u) == 0u);
+        game->state.board.cells[2] = 10u; /* Out-of-range public byte. */
+        CHECK(sudoku_game_candidates(game, 4u, 4u) == 0u);
+        game->state.board = current;
+    }
     CHECK(sudoku_game_auto_notes(game)==SUDOKU_GAME_OK);
     CHECK(game->state.notes[2]==((1u<<1)|(1u<<2)|(1u<<4)));
     CHECK(game->state.notes[0]==0u && game->state.board.cells[2]==0u);
