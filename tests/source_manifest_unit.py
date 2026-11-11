@@ -199,6 +199,21 @@ class SourceManifestSafetyTests(unittest.TestCase):
         with self.assertRaises(OSError):
             package.read_source_member('src/swapped.c', 128)
 
+    @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'O_NOFOLLOW') and
+                         hasattr(os, 'O_DIRECTORY') and os.open in os.supports_dir_fd,
+                         'POSIX openat/O_NOFOLLOW required')
+    def test_manifest_parent_symlink_swap_rejected(self):
+        alternate = Path(self.tmp.name) / 'external-scripts'
+        alternate.mkdir()
+        (alternate / 'release_files.txt').write_text('src/board.c\\n',
+                                                     encoding='utf-8')
+        (self.root / 'scripts').rename(self.root / 'original-scripts')
+        (self.root / 'scripts').symlink_to(alternate, target_is_directory=True)
+        # Simulate a parent swap occurring after a path-only preflight.
+        with patch.object(Path, 'is_symlink', return_value=False):
+            with self.assertRaises(OSError):
+                package.source_paths()
+
     def test_source_member_rejects_parent_escape(self):
         for unsafe in ('../secrets.c', '/etc/passwd', 'src/../secret.c'):
             with self.subTest(name=unsafe):
