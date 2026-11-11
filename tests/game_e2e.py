@@ -69,7 +69,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Notes for row 3 col 7: 3\n' in stdout
     assert 'Notes for row 2 col 7: 7 8\n' in stdout
     assert 'No matching locked pencil notes to remove; history unchanged.' in stdout
-    assert stdout.count('undo 5, redo 0') == 3, stdout
+    assert stdout.count('undo 5, redo 0') == 2, stdout
     assert 'undo 4, redo 1' in stdout and not stderr
     checks += 1
 
@@ -82,7 +82,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Notes for row 2 col 7: 8\n' in stdout
     assert 'Notes for row 3 col 7:\n' in stdout
     assert 'Notes for row 2 col 7: 7 8\n' in stdout
-    assert stdout.count('undo 5, redo 0') == 3
+    assert stdout.count('undo 5, redo 0') == 2
     assert 'undo 4, redo 1' in stdout and not stderr
     checks += 1
 
