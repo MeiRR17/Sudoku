@@ -136,6 +136,37 @@ class PackageBudgetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'symlink in installation tree'):
             packager.installed_paths(stage)
 
+    @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'O_NOFOLLOW') and
+                         hasattr(os, 'O_DIRECTORY') and os.open in os.supports_dir_fd,
+                         'POSIX openat/O_NOFOLLOW required')
+    def test_installed_parent_symlink_swap_rejected(self):
+        stage = self.install()
+        outside = Path(self.temp.name) / 'outside'
+        outside.mkdir()
+        (outside / 'secret.bin').write_bytes(b'external-content')
+        (stage / 'replaced').symlink_to(outside, target_is_directory=True)
+        # rglob() found a path before a concurrent directory swap; make
+        # path-only is_symlink checks blind to that substitution.
+        with patch.object(Path, 'rglob',
+                          return_value=iter((stage / 'replaced' / 'secret.bin',))):
+            with patch.object(Path, 'is_symlink', return_value=False):
+                with self.assertRaises(OSError):
+                    packager.installed_paths(stage)
+
+    @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'O_NOFOLLOW') and
+                         hasattr(os, 'O_DIRECTORY') and os.open in os.supports_dir_fd,
+                         'POSIX openat/O_NOFOLLOW required')
+    def test_installed_leaf_symlink_swap_rejected(self):
+        stage = self.install()
+        external = Path(self.temp.name) / 'outside-binary'
+        external.write_bytes(b'externally changed payload')
+        swapped = stage / 'bin' / 'sudoku'
+        swapped.unlink()
+        swapped.symlink_to(external)
+        with patch.object(Path, 'is_symlink', return_value=False):
+            with self.assertRaises(OSError):
+                packager.installed_paths(stage)
+
     def test_windows_device_path_in_staged_install_rejected(self):
         if os.name == 'nt':
             self.skipTest('Windows cannot create a reserved DOS device filename')
