@@ -4,6 +4,8 @@ A fully offline Sudoku engine with deterministic exact solving, solution classif
 
 ## Build and use
 
+For POSIX hosts, puzzle `--file` input must be a regular file (a symlink to a regular file is permitted); FIFOs and devices are rejected without blocking. Use `--stdin` or `--file -` to stream solver input instead. This behavior has not yet been verified on native Windows/macOS release targets.
+
 Requires CMake 3.16+, a C11 compiler and (optionally) Python 3 for golden CLI tests.
 
 ```sh
