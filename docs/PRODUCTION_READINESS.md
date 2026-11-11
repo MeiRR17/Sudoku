@@ -55,6 +55,7 @@
 - [ ] Windows x64 archive smoke-tested on clean supported environment.
 - [ ] macOS arm64 archive smoke-tested on clean supported environment.
 - [ ] Version, architecture and help output from binaries match release metadata.
+- [ ] On every supported native OS, the executable extracted from the binary archive **and** the one rebuilt from the shipped source ZIP pass actual `play` save/resume with persisted notes, checksum corruption rejection and no implicit save on quit. The required `sudoku_package_e2e` CTest covers these behaviors; record exact SHA and observed on-host results. An unsigned receipt check string alone is not proof.
 - [ ] Archives have verified SHA-256 sums and provenance to exact Git commit.
 - [ ] README, CHANGELOG, SECURITY, CONTRIBUTING, license, FAQ and install/uninstall instructions accurate.
 - [ ] Release artifacts downloaded from GitHub and tested rather than relying only on build-directory output.
