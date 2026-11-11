@@ -48,13 +48,13 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, auto-notes, prune-notes,");
-    puts("          clear-notes, hint [apply|all], undo, redo, reset, check [details|clear],");
+    puts("          clear-notes, hint [apply [all]|all], undo, redo, reset, check [details|clear],");
     puts("          status, save [PATH], help, quit");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'note' toggles pencil marks; 'candidates' lists legal digits without guessing.");
     puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
     puts("'hint' shows one forced single; 'hint all' lists each distinct forced cell.");
-    puts("'hint apply' places one logical deduction as an undoable move.");
+    puts("'hint apply' places one deduction; 'hint apply all' groups them in one undo.");
     puts("'check details' locates wrong entries; 'check clear' erases them (undoable).");
     puts("No color, network or special keys required.");
 }
@@ -398,6 +398,40 @@ static void print_hint_all(const SudokuGame *game){
         }
     }
 }
+/* Apply the current forced deductions as exactly one history operation.
+ * Refuse incorrect entries (including legal-but-wrong values) before using
+ * current-board candidates; the cached answer never supplies a hint digit. */
+static void apply_all_hints(SudokuGame *game){
+    LogicalHint hints[SUDOKU_CELL_COUNT];
+    SudokuGameMove moves[SUDOKU_CELL_COUNT];
+    unsigned count,i,applied=0u;
+    SudokuGameStatus result;
+    if(sudoku_game_won(game)){
+        puts("Puzzle already solved; no hint needed.");
+        return;
+    }
+    if(sudoku_game_mistakes(game)){
+        puts("Cannot apply hints: correct the existing mistakes first.");
+        return;
+    }
+    count=collect_hints(game,hints,SUDOKU_CELL_COUNT);
+    if(!count){
+        puts("No simple hint found. Try candidates ROW COL.");
+        return;
+    }
+    for(i=0u;i<count;++i){
+        moves[i].row=hints[i].index/9u+1u;
+        moves[i].col=hints[i].index%9u+1u;
+        moves[i].digit=hints[i].digit;
+    }
+    result=sudoku_game_set_many(game,moves,count,&applied);
+    if(result!=SUDOKU_GAME_OK){
+        printf("Error: %s\n",sudoku_game_status_text(result));
+        return;
+    }
+    printf("Applied %u logical hints in one undoable move.\n",applied);
+    if(sudoku_game_won(game))puts("SOLVED! All cells are correct.");
+}
 /* Identify mistakes against the verified solution without disclosing any
  * answer digit. Read-only: no note, timer, save or undo/redo side effects. */
 static void print_check_details(const SudokuGame *game){
@@ -511,8 +545,10 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         }
         if(strcmp(command,"help")==0&&!a){commands();continue;}
         if(strcmp(command,"hint")==0&&
-           (!a||((strcmp(a,"apply")==0||strcmp(a,"all")==0)&&!b))){
+           (!a||((strcmp(a,"apply")==0||strcmp(a,"all")==0)&&!b)||
+            (strcmp(a,"apply")==0&&b&&strcmp(b,"all")==0&&!c))){
             if(a&&strcmp(a,"all")==0)print_hint_all(game);
+            else if(a&&b)apply_all_hints(game);
             else print_hint(game,a!=NULL);
             continue;
         }
