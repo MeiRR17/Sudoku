@@ -3,8 +3,10 @@
 Real canonical ZIP/TAR.GZ four-archive smoke fixture; malformed inputs must
 fail before expensive checksums, member allocation or streamed extraction.
 """
+import hashlib
 import importlib.util
 import io
+import os
 from pathlib import Path
 import tarfile
 import tempfile
@@ -30,6 +32,85 @@ class ContainerBudgetTests(unittest.TestCase):
         with patch.object(package, 'file_hash', side_effect=AssertionError('hash must not run')):
             with self.assertRaisesRegex(ValueError, 'SHA256SUMS exceeds size budget'):
                 package.verify_packages(self.root)
+
+    def test_file_hash_matches_sha256_for_regular_zip_bytes(self):
+        archive = self.root / 'normal.zip'
+        payload = b'canonical archive test' * 9
+        archive.write_bytes(payload)
+        self.assertEqual(package.file_hash(archive), hashlib.sha256(payload).hexdigest())
+
+    def test_file_hash_oversized_sparse_archive_rejected(self):
+        archive = self.root / 'oversized.zip'
+        with archive.open('wb') as stream:
+            stream.truncate(package.MAX_ZIP_ARCHIVE_BYTES + 1)
+        with self.assertRaisesRegex(ValueError, 'archive exceeds compressed size budget'):
+            package.file_hash(archive)
+
+    def test_file_hash_rejects_nonregular_device(self):
+        if os.name != 'posix' or not Path('/dev/null').exists():
+            self.skipTest('POSIX character device unavailable')
+        with self.assertRaisesRegex(ValueError, 'release archive must be a regular file'):
+            package.file_hash(Path('/dev/null'))
+
+    @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'mkfifo'),
+                         'POSIX FIFO support required')
+    def test_replaced_checksum_manifest_fifo_never_blocks(self):
+        import subprocess
+        import sys
+        pipe = self.root / 'SHA256SUMS'
+        os.mkfifo(pipe)
+        # Simulate a positive path preflight before replacement by a pipe.
+        # Timeouts prevent a regression to blocking open() from hanging CTest.
+        code = (
+            'import importlib.util, pathlib, unittest.mock, sys; '
+            'spec=importlib.util.spec_from_file_location("pack",sys.argv[1]); '
+            'pkg=importlib.util.module_from_spec(spec); spec.loader.exec_module(pkg); '
+            'p=pathlib.Path(sys.argv[2]); '
+            'mock=unittest.mock; '
+            'ctx=mock.patch.object(pathlib.Path,"is_file",return_value=True); '
+            'ctx2=mock.patch.object(pathlib.Path,"is_symlink",return_value=False); '
+            'ctx.__enter__(); ctx2.__enter__(); '
+            'pkg.verify_packages(p)'
+        )
+        process = subprocess.run(
+            [sys.executable, '-B', '-c', code, str(ROOT / 'scripts' / 'package_release.py'),
+             str(self.root)],
+            capture_output=True, text=True, timeout=3)
+        self.assertNotEqual(process.returncode, 0)
+        self.assertIn('SHA256SUMS must be a regular file', process.stderr)
+
+    @unittest.skipUnless(os.name == 'posix' and hasattr(os, 'mkfifo'),
+                         'POSIX FIFO support required')
+    def test_swapped_archive_fifo_rejected_before_hash_or_parser(self):
+        import subprocess
+        import sys
+        pipe = self.root / 'replaced.zip'
+        os.mkfifo(pipe)
+        code = (
+            'import importlib.util, pathlib, sys; '
+            'spec=importlib.util.spec_from_file_location("pack",sys.argv[1]); '
+            'pkg=importlib.util.module_from_spec(spec); spec.loader.exec_module(pkg); '
+            'pkg.file_hash(pathlib.Path(sys.argv[2]))'
+        )
+        process = subprocess.run(
+            [sys.executable, '-B', '-c', code, str(ROOT / 'scripts' / 'package_release.py'),
+             str(pipe)],
+            capture_output=True, text=True, timeout=3)
+        self.assertNotEqual(process.returncode, 0)
+        self.assertIn('release archive must be a regular file', process.stderr)
+
+    def test_final_archive_symlink_rejected_during_hash(self):
+        if not hasattr(os, 'O_NOFOLLOW'):
+            self.skipTest('O_NOFOLLOW unavailable')
+        ordinary = self.root / 'real.zip'
+        ordinary.write_bytes(b'ordinary')
+        link = self.root / 'link.zip'
+        try:
+            link.symlink_to(ordinary)
+        except (OSError, NotImplementedError):
+            self.skipTest('symlink creation unavailable')
+        with self.assertRaises(OSError):
+            package.file_hash(link)
 
     def test_nonascii_checksum_manifest_rejected(self):
         (self.root / 'SHA256SUMS').write_bytes(b'\xff\n')
