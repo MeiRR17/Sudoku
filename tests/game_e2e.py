@@ -233,6 +233,34 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'undo 0, redo 0' in stdout and not stderr
     checks += 1
 
+    # Incorrect digits are reported by their *locations* only, never the
+    # solution values. Both hint preview and apply fail closed when the
+    # current board contains a rule-legal but incorrect user entry.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 1\nset 1 4 6\ncheck\ncheck details\n'
+                         'hint\nhint apply\nstatus\ncheck details extra\n'
+                         'check verbose\nstatus\nerase 1 3\ncheck details\n'
+                         'status\nquit\n')
+    assert 'Incorrect entry: row 1 col 3 contains 1.' in stdout, stdout
+    assert stdout.count('Incorrect entry:') == 1, stdout
+    assert 'Cannot preview hint: correct the existing mistakes first.' in stdout
+    assert 'Cannot apply hint: correct the existing mistakes first.' in stdout
+    assert 'No incorrect entries.' in stdout
+    assert stdout.count('undo 2, redo 0') == 2
+    assert 'undo 3, redo 0' in stdout
+    assert stdout.count('Error: unknown command or invalid arguments') == 2
+    assert not stderr
+    checks += 1
+
+    # A partially solved valid puzzle is not mislabeled as incorrect, and
+    # check details must remain read-only with no automated placements.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'check details\nstatus\nquit\n')
+    assert 'Check: 1 empty, 0 incorrect.' in stdout
+    assert 'No incorrect entries.' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
     # A logical hint uses current board candidates only, with no move,
     # note edits, history change or accidental undo/redo branch reset.
     stdout, stderr = run(['--puzzle', near_win],
