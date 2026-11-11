@@ -46,8 +46,8 @@ with tempfile.TemporaryDirectory() as directory:
     assert len(pair_puzzle) == 81
     stdout, stderr = run(['--puzzle', pair_puzzle],
                          'hint pairs\nstatus\nnote 1 1 2\n'
-                         'hint pairs 1\nstatus\nundo\n'
-                         'hint pairs 2\nstatus\nquit\n')
+                         'hint pairs 1\nnotes 1 1\nstatus\nundo\n'
+                         'hint pairs 2\nnotes 1 1\nstatus\nquit\n')
     first_pair = ('Pair 1 in row 5: r5c6 + r5c7 reserve 3,7; '
                   'eliminate from r5c2(3,7) r5c3(3,7)')
     second_pair = ('Pair 2 in column 6: r5c6 + r7c6 reserve 3,7; '
@@ -56,6 +56,8 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count(second_pair) == 2, stdout
     assert 'Progress: 24/81 filled' in stdout
     assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
+    assert 'Notes for row 1 col 1: 2' in stdout
+    assert 'Notes for row 1 col 1:\n' in stdout
     assert not stderr
     checks += 1
 
@@ -66,6 +68,11 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'No actionable naked pairs found.' in stdout
     assert 'Cannot preview pairs: correct the existing mistakes first.' in stdout
     assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--puzzle', solution], 'hint pairs\nstatus\nquit\n')
+    assert 'Puzzle already solved; no pair hint needed.' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
     checks += 1
 
     invalid_pairs = ['hint pairs 0', 'hint pairs 82', 'hint pairs -1',
