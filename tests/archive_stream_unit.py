@@ -2,7 +2,6 @@
 import importlib.util
 import gzip
 from unittest.mock import patch
-import gzip
 import io
 from pathlib import Path
 import tarfile
