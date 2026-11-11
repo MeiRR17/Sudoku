@@ -532,6 +532,7 @@ static int check_note_elimination(void){
     CHECK(sudoku_game_eliminate_notes(game,masks,&removed)==SUDOKU_GAME_RANGE);
     CHECK(removed==0u && game->history_cursor==cursor);
     masks[2]=0u;
+    masks[3]=0u;
     CHECK(sudoku_game_eliminate_notes(game,NULL,&removed)==SUDOKU_GAME_INVALID);
     CHECK(removed==0u);
     CHECK(sudoku_game_eliminate_notes(game,masks,&removed)==SUDOKU_GAME_OK);
