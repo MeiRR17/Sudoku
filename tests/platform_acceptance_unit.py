@@ -92,7 +92,7 @@ class ReceiptWriteTests(unittest.TestCase):
             receipt = {'status': 'passed', 'git_commit_sha': SHA}
             acceptance.write_receipt(dest, receipt)
             self.assertEqual(json.loads(dest.read_text()), receipt)
-            self.assertFalse(dest.with_name(dest.name + '.tmp').exists())
+            self.assertFalse(list(dest.parent.glob(dest.name + '.tmp.*')))
             if os.name == 'posix':
                 self.assertEqual(stat.S_IMODE(dest.stat().st_mode), 0o600)
 
@@ -103,24 +103,47 @@ class ReceiptWriteTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 acceptance.write_receipt(dest, {'status': 'passed'})
             self.assertEqual(dest.read_text(), 'previous')
-            self.assertFalse(dest.with_name(dest.name + '.tmp').exists())
+            self.assertFalse(list(dest.parent.glob(dest.name + '.tmp.*')))
 
-    def test_existing_temporary_symlink_cannot_be_followed(self):
+    def test_existing_temporary_symlink_is_ignored_without_following(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             victim = root / 'victim.txt'
             victim.write_text('unchanged')
             dest = root / 'evidence.json'
-            stage = root / 'evidence.json.tmp'
+            stale = root / 'evidence.json.tmp'
             try:
-                stage.symlink_to(victim)
+                stale.symlink_to(victim)
             except (OSError, NotImplementedError):
                 self.skipTest('host cannot create a symlink')
-            with self.assertRaises(FileExistsError):
-                acceptance.write_receipt(dest, {'status': 'passed'})
+            acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertEqual(json.loads(dest.read_text()), {'status': 'passed'})
             self.assertEqual(victim.read_text(), 'unchanged')
-            self.assertTrue(stage.is_symlink())
-            self.assertFalse(dest.exists())
+            self.assertTrue(stale.is_symlink())
+            self.assertFalse(list(root.glob(dest.name + '.tmp.*')))
+
+    def test_stale_stage_from_crash_does_not_block_new_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'evidence.json'
+            orphan = root / 'evidence.json.tmp.previous-crash'
+            orphan.write_text('incomplete')
+            acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertEqual(json.loads(dest.read_text()), {'status': 'passed'})
+            self.assertEqual(orphan.read_text(), 'incomplete')
+            self.assertEqual(list(root.glob('evidence.json.tmp.*')), [orphan])
+
+    def test_concurrent_existing_target_stays_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory) / 'evidence.json'
+            def publish_concurrent(*args, **kwargs):
+                dest.write_text('another process won')
+                raise FileExistsError('existing receipt')
+            with patch.object(acceptance.os, 'link', side_effect=publish_concurrent):
+                with self.assertRaises(FileExistsError):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertEqual(dest.read_text(), 'another process won')
+            self.assertFalse(list(dest.parent.glob('evidence.json.tmp.*')))
 
     def test_unsupported_hardlink_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -129,7 +152,7 @@ class ReceiptWriteTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     acceptance.write_receipt(dest, {'status': 'passed'})
             self.assertFalse(dest.exists())
-            self.assertFalse(dest.with_name(dest.name + '.tmp').exists())
+            self.assertFalse(list(dest.parent.glob(dest.name + '.tmp.*')))
 
     def test_serialization_failure_cleans_up_stage(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -137,7 +160,7 @@ class ReceiptWriteTests(unittest.TestCase):
             with self.assertRaises(TypeError):
                 acceptance.write_receipt(dest, {'value': object()})
             self.assertFalse(dest.exists())
-            self.assertFalse(dest.with_name(dest.name + '.tmp').exists())
+            self.assertFalse(list(dest.parent.glob(dest.name + '.tmp.*')))
 
 class ArchiveReceiptHashTests(unittest.TestCase):
     def setUp(self):
