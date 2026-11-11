@@ -19,6 +19,9 @@ The `--file` argument reads a puzzle file (max 1 MiB), not a saved game. On POSI
 | Command | Behavior |
 |---|---|
 | `show` | Print the complete board and progress. Zero cells appear as `.`. |
+| `export` / `export givens` | Print the original **81-digit** puzzle as `Puzzle givens: DIGITS`, suitable for a new `sudoku play --puzzle DIGITS` session. Read-only and independent of the player's edits. |
+| `export current` | Print the current player's board as `Current board: DIGITS`. This can include wrong user-entered digits and may therefore fail to import as a solvable puzzle. Does not expose unentered correct answers. |
+| `export both` | Print the original clues and current board on two separate lines without touching saves or history. |
 | `set ROW COL DIGIT` | Fill an editable cell, coordinates and digit 1–9. Sudoku rule conflicts are rejected. |
 | `erase ROW COL` | Clear the placed digit **and all pencil notes** from an editable cell. Erasing a blank cell with notes is undoable; repeating erase on a blank note-free cell is a no-op. |
 | `note ROW COL DIGIT` | Toggle a pencil note 1–9 on an empty editable cell. |
