@@ -488,38 +488,38 @@ def _ensure_safe_archive(path, expected_prefix):
     else:
         preflight_zip_directory(path)
         with open_checked_binary(path, 'ZIP archive') as encoded:
-          with zipfile.ZipFile(encoded) as archive:
-              infos = archive.infolist()
-              if not 1 <= len(infos) <= MAX_ARCHIVE_FILES:
-                  raise ValueError('invalid number of ZIP members')
-              for item in infos:
-                  # The canonical packager sets Unix regular-file attributes on
-                  # every host. Reject symlinks, device files, and missing types.
-                  mode = item.external_attr >> 16
-                  if item.is_dir() or item.create_system != 3 or not stat.S_ISREG(mode):
-                      raise ValueError('non-regular ZIP member')
-                  # Forged metadata can request encryption or compressors our
-                  # development writer never emits. Reject before ZipExtFile
-                  # raises RuntimeError or NotImplementedError on open().
-                  if item.flag_bits & 0x41:
-                      raise ValueError('encrypted ZIP member is not supported')
-                  if item.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
-                      raise ValueError('unsupported ZIP compression method')
-                  rel = _safe_member_name(item.filename, expected_prefix)
-                  if mode != (stat.S_IFREG | canonical_archive_mode(rel, expected_prefix)):
-                      raise ValueError('non-canonical ZIP file mode')
-                  if rel in members:
-                      raise ValueError('archive entries empty, duplicated or not sorted')
-                  claim_portable_path(rel, seen_portable)
-                  unpacked += item.file_size
-                  if unpacked > MAX_UNPACKED_BYTES:
-                      raise ValueError('ZIP unpacked content exceeds size budget')
-                  with archive.open(item, 'r') as stream:
-                      payload = stream.read(item.file_size + 1)
-                  if len(payload) != item.file_size:
-                      raise ValueError('ZIP member length mismatch')
-                  members[rel] = payload
-                  names.append(item.filename)
+        with zipfile.ZipFile(encoded) as archive:
+            infos = archive.infolist()
+            if not 1 <= len(infos) <= MAX_ARCHIVE_FILES:
+                raise ValueError('invalid number of ZIP members')
+            for item in infos:
+                # The canonical packager sets Unix regular-file attributes on
+                # every host. Reject symlinks, device files, and missing types.
+                mode = item.external_attr >> 16
+                if item.is_dir() or item.create_system != 3 or not stat.S_ISREG(mode):
+                    raise ValueError('non-regular ZIP member')
+                # Forged metadata can request encryption or compressors our
+                # development writer never emits. Reject before ZipExtFile
+                # raises RuntimeError or NotImplementedError on open().
+                if item.flag_bits & 0x41:
+                    raise ValueError('encrypted ZIP member is not supported')
+                if item.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                    raise ValueError('unsupported ZIP compression method')
+                rel = _safe_member_name(item.filename, expected_prefix)
+                if mode != (stat.S_IFREG | canonical_archive_mode(rel, expected_prefix)):
+                    raise ValueError('non-canonical ZIP file mode')
+                if rel in members:
+                    raise ValueError('archive entries empty, duplicated or not sorted')
+                claim_portable_path(rel, seen_portable)
+                unpacked += item.file_size
+                if unpacked > MAX_UNPACKED_BYTES:
+                    raise ValueError('ZIP unpacked content exceeds size budget')
+                with archive.open(item, 'r') as stream:
+                    payload = stream.read(item.file_size + 1)
+                if len(payload) != item.file_size:
+                    raise ValueError('ZIP member length mismatch')
+                members[rel] = payload
+                names.append(item.filename)
     if names != sorted(set(names)) or len(names) != len(members):
         raise ValueError('archive entries empty, duplicated or not sorted')
     return members
