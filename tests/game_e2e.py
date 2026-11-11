@@ -79,6 +79,38 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Current board:' not in stdout and not stderr
     checks += 1
 
+    # Navigate multiple undo states atomically: excessive requests must
+    # leave notes, cursor and redo history untouched.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'note 1 1 1\nnote 1 1 2\nnote 1 1 3\n'
+                         'status\nundo 2\nnotes 1 1\nstatus\nredo 2\n'
+                         'notes 1 1\nstatus\nundo 4\nstatus\nredo 1\n'
+                         'status\nundo 3\nnotes 1 1\nstatus\nredo 4\n'
+                         'status\nredo 3\nstatus\nquit\n')
+    assert 'Notes for row 1 col 1: 1\n' in stdout
+    assert 'Notes for row 1 col 1: 1 2 3\n' in stdout
+    assert 'Notes for row 1 col 1:\n' in stdout
+    assert stdout.count('undo 3, redo 0') >= 3, stdout
+    assert stdout.count('undo 1, redo 2') >= 1, stdout
+    assert stdout.count('undo 0, redo 3') >= 2, stdout
+    assert stdout.count('Error: no action to undo or redo') == 3, stdout
+    assert not stderr
+    checks += 1
+
+    # Invalid counts and extra tokens are rejected before history mutation.
+    invalid_history = ['undo 0', 'redo 0', 'undo 128', 'redo 128',
+                       'undo -1', 'redo nope', 'undo 2 extra',
+                       'redo 1 extra', 'undo 3.5']
+    stdout, stderr = run(['--puzzle', near_win],
+                         'note 1 1 4\nstatus\n' +
+                         '\n'.join(invalid_history) +
+                         '\nstatus\nundo\nstatus\nredo\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_history)
+    assert stdout.count('undo 1, redo 0') == 3, stdout
+    assert 'undo 0, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
     saved = folder / 'game with spaces.save'
     stdout, stderr = run(['--puzzle', near_win, '--save', saved], '\n'.join([
         'notes 1 1', 'note 1 1 5', 'notes 1 1', 'set 1 1 5', 'check',
