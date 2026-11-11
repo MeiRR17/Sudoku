@@ -127,11 +127,11 @@ class SourceManifestSafetyTests(unittest.TestCase):
 
     def test_bounded_regular_source_reads_actual_open_inode(self):
         regular = self.root / 'src' / 'board.c'
-        self.assertEqual(package.bounded_file_bytes(regular, 14), b'board-source\\n')
+        self.assertEqual(package.bounded_file_bytes(regular, 14), b'board-source\n')
         with self.assertRaisesRegex(ValueError, 'package content exceeds size budget'):
             package.bounded_file_bytes(regular, 12)
         self.assertEqual(package.read_regular_source(
-            regular, 14, 'source manifest'), b'board-source\\n')
+            regular, 14, 'source manifest'), b'board-source\n')
 
     def test_symlinked_leaf_is_refused_by_opened_descriptor(self):
         if not hasattr(os, 'O_NOFOLLOW'):
