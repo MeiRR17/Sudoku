@@ -300,6 +300,7 @@ class _BoundedTarGzipReader:
     def __init__(self, stream):
         self.stream = stream
         self.total = 0
+        self.crc = 0
 
     def read(self, size=-1):
         # Streaming TAR normally requests fixed-size blocks. Never permit an
@@ -311,6 +312,7 @@ class _BoundedTarGzipReader:
         self.total += len(chunk)
         if self.total > MAX_TAR_DECODED_BYTES:
             raise ValueError('TAR decoded stream exceeds size budget')
+        self.crc = zlib.crc32(chunk, self.crc)
         return chunk
 
 
@@ -373,12 +375,29 @@ def _ensure_safe_archive(path, expected_prefix):
                         names.append(item.name)
                     if not names:
                         raise ValueError('invalid number of TAR members')
+                    # The writer uses standard 10 KiB TAR records. Reject
+                    # extra zero-only records hidden after the end marker.
+                    canonical_size = (
+                        (archive.offset + 2 * tarfile.BLOCKSIZE +
+                         tarfile.RECORDSIZE - 1) // tarfile.RECORDSIZE
+                    ) * tarfile.RECORDSIZE
                 while True:
                     padding = bounded.read(65536)
                     if not padding:
                         break
                     if any(padding):
                         raise ValueError('non-zero trailing TAR data')
+                if bounded.total != canonical_size:
+                    raise ValueError('non-canonical TAR padding length')
+                # gzip transparently accepts concatenated members and raw
+                # zero bytes after the footer. Our package writer emits one
+                # gzip member only: its final CRC32/ISIZE must describe the
+                # entire decoded TAR stream, not a later appended member.
+                with path.open('rb') as encoded:
+                    encoded.seek(-8, 2)
+                    crc, isize = struct.unpack('<II', encoded.read(8))
+                if crc != bounded.crc or isize != (bounded.total & 0xffffffff):
+                    raise ValueError('non-canonical GZIP trailer or extra member')
     else:
         preflight_zip_directory(path)
         with zipfile.ZipFile(path) as archive:
