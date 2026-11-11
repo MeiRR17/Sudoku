@@ -48,7 +48,7 @@ The v0.8.1 input-stream repair resolves the three previously reported Clang `uni
 
 The manual workflow checks the actual OS/architecture against the selected runner. A macOS runner that reports Intel/x86-64 **fails** the arm64 gate instead of being counted as Apple Silicon evidence. An appropriately labeled workflow is **not** a substitute for a completed run.
 
-The existing GitHub workflow `.github/workflows/manual-quality.yml` is **manual-only**, deliberately without push/PR/cron triggers to conserve Actions quota. To obtain native evidence, run it **separately** on Windows and Apple Silicon runners after confirming their actual platform. Merely adding a workflow is not evidence that tests ran.
+The existing GitHub workflow `.github/workflows/manual-quality.yml` is **manual-only**, deliberately without push/PR/cron triggers to conserve Actions quota. By default it runs just the selected host; choose `runner_os: all` only when ready to spend minutes on Linux x64, Windows x64/MSVC and Apple Silicon macOS arm64 together. The three native jobs enforce the platform guard and full local package validation independently. A fourth Linux review job executes only after all three succeed and compares the three unsigned receipt/manifest claims from that same workflow run. Merely adding this workflow is not evidence that any test ran.
 
 ## Security boundaries
 
@@ -104,7 +104,7 @@ TAR verification now uses streaming `r|gz` iteration rather than `getmembers()`.
 
 ### v0.8.4 — retain manual-run acceptance evidence and verify a three-host matrix
 
-The manual-only GitHub Actions workflow uploads **only** `dist/platform-receipt.json` and `dist/SHA256SUMS` after a successful `platform_acceptance.py --require-sha <40-hex SHA>` run. The upload action is pinned to its full commit SHA; `if-no-files-found: error` prevents a false-success missing artifact. Its name records the platform, exact commit and run attempt. Retention is seven days to minimize storage. **No ZIP/TAR binaries, GitHub Release, tag, automatic CI or licensing decision are produced.** All three platform runs must be triggered manually and the real native toolchains/architectures checked by the acceptance script. A workflow run has **not** been started on this commit.
+The manual-only GitHub Actions workflow uploads **only** `dist/platform-receipt.json` and `dist/SHA256SUMS` after a successful `platform_acceptance.py --require-sha <40-hex SHA>` run. The upload action is pinned to its full commit SHA; `if-no-files-found: error` prevents a false-success missing artifact. Its name records the platform, exact commit and run attempt. Retention is seven days to minimize storage. **No ZIP/TAR binaries, GitHub Release, tag, automatic CI or licensing decision are produced.** The owner may trigger each host separately, or select the new `all` input to request all three hosts in a **single manual dispatch**. Each native job checks its actual platform and toolchain through the acceptance script; the all-host review downloads only its own run/attempt's unsigned text artifacts and invokes `verify_receipt_matrix.py --metadata-only`. A workflow run has **not** been started on this commit.
 
 After manually collecting each run's evidence artifact into three separate folders with its original two filenames, check the consistency matrix:
 
@@ -293,3 +293,21 @@ python scripts/verify_receipt_matrix.py \
 Replace the example SHA with the **actual exact 40-character commit SHA** tested by each host. The command rejects any missing/mismatched platform, architecture, compiler identity, required checks, timestamps lacking timezones, altered or duplicated JSON keys, missing checksum manifest, wrong archive filename set, changed manifest digests and conflicting source-tree claims. It does **not** inspect or prove the existence of any ZIP/TAR.GZ bytes, the actual source content, authenticity of a host or signer, native application execution, rollback or license compliance. A malicious party can forge self-consistent unsigned claims. Output is conspicuously labeled `UNSIGNED METADATA MATRIX CONSISTENT` and `NOT ARTIFACT VERIFICATION OR RELEASE ACCEPTANCE`.
 
 The **default** three-platform mode and single-host `--local --expected` mode have not been weakened: they still require actual physical archives and perform streaming SHA-256, ZIP/TAR file type/mode/content checks, source membership and binary/source parity. Combining `--metadata-only` with `--local` is rejected as a command-line usage error. The new mode is an intermediate administrative aid while issue #10 and native release approval remain HOLD, not an alternative exit criterion.
+
+### One manual dispatch for three native acceptance receipts — 2026-11-11
+
+The existing `.github/workflows/manual-quality.yml` has one additional `runner_os` choice, `all`. It uses a **dynamic GitHub Actions matrix**, expanding to one runner by default (Ubuntu, Windows or macOS) or exactly the three target native runner labels when `all` is explicitly selected. The 20-minute per-runner timeout, platform architecture guard, Python acceptance tests, CMake/CTest and complete **local** package/receipt verification remain in every native job. `fail-fast: false` ensures the other native environments continue collecting diagnostic results if one fails; it is not a pass waiver.
+
+In all-host mode, a follow-up Ubuntu job runs **only after all three native jobs succeed**. Using the built-in `gh run download`, a read-only `GH_TOKEN`, the exact `GITHUB_RUN_ID`, commit SHA and `github.run_attempt`, it fetches the three existing signed-*neither* receipt metadata artifacts into separate directories. It then runs:
+
+```sh
+python scripts/verify_receipt_matrix.py --metadata-only \
+  --require-sha "$COMMIT_SHA" \
+  --linux evidence/ubuntu-latest \
+  --windows evidence/windows-latest \
+  --macos evidence/macos-latest
+```
+
+This **does not re-verify unavailable archive bytes** and is not release certification; it checks only the internally consistent claims in unsigned JSON and SHA256SUMS. Development ZIP/TAR.GZ archives remain on their originating runners and are not uploaded; the native runner's separate `--local` check already validates them before metadata publication. The review job does not issue a license, tag, release or merge. A default one-host run skips the review job and incurs no extra Linux aggregator charge. The workflow is still manual-only and currently has **no observed run evidence for this commit**.
+
+The workflow input can be selected in GitHub Actions once the updated file is available on the selected ref. On GitHub CLI, an owner can request `gh workflow run manual-quality.yml --ref fix/v0.8.4-save-path-resilience-20261110 -f runner_os=all -f full_linux_gate=false` (subject to GitHub's workflow dispatch and repository permission requirements). Choose `runner_os=ubuntu-latest` to minimize quota. On any failure, keep issue #10 and the release HOLD.
