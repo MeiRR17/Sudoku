@@ -108,18 +108,8 @@ def target_platform():
     return f'{system}-{arch}'
 
 
-def read_regular_source(path, maximum, kind):
-    """Bound bytes on the opened regular-file inode, not a pathname precheck.
-
-    O_NONBLOCK prevents a swapped-in FIFO from hanging during open, while
-    O_NOFOLLOW rejects leaf symlinks on POSIX. Earlier path-component checks
-    remain necessary for source containment. Windows uses available flags.
-    """
-    flags = (os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0) |
-             getattr(os, 'O_NOFOLLOW', 0) |
-             getattr(os, 'O_CLOEXEC', 0) |
-             getattr(os, 'O_BINARY', 0))
-    fd = os.open(path, flags)
+def _read_bounded_descriptor(fd, maximum, kind):
+    """Own the descriptor and verify size/type on the inode actually opened."""
     try:
         metadata = os.fstat(fd)
         if not stat.S_ISREG(metadata.st_mode):
@@ -138,8 +128,52 @@ def read_regular_source(path, maximum, kind):
             os.close(fd)
 
 
+def _source_file_flags():
+    return (os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0) |
+            getattr(os, 'O_NOFOLLOW', 0) |
+            getattr(os, 'O_CLOEXEC', 0) |
+            getattr(os, 'O_BINARY', 0))
+
+
+def read_regular_source(path, maximum, kind):
+    """Reject nonregular, oversized, changed or swapped-in file inputs."""
+    return _read_bounded_descriptor(os.open(path, _source_file_flags()),
+                                    maximum, kind)
+
+
+def read_source_member(relative_name, remaining):
+    """Open a manifested source beneath ROOT without following parent symlinks.
+
+    On POSIX hosts supporting openat/O_NOFOLLOW, each directory component is
+    opened relative to the previous pinned directory descriptor. A concurrent
+    parent symlink swap therefore cannot redirect the read outside the source
+    tree. Windows retains the prior pathname checks and regular-inode guard.
+    """
+    if not portable_relative_name(relative_name):
+        raise ValueError('unsafe source member path')
+    parts = PurePosixPath(relative_name).parts
+    if (os.name != 'posix' or not hasattr(os, 'O_DIRECTORY') or
+            not hasattr(os, 'O_NOFOLLOW') or
+            os.open not in os.supports_dir_fd):
+        return read_regular_source(ROOT / relative_name, remaining,
+                                   'package content')
+    directory_flags = (os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW |
+                       getattr(os, 'O_CLOEXEC', 0))
+    directory_fd = os.open(ROOT, directory_flags)
+    try:
+        for component in parts[:-1]:
+            child_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = child_fd
+        file_fd = os.open(parts[-1], _source_file_flags(),
+                          dir_fd=directory_fd)
+    finally:
+        os.close(directory_fd)
+    return _read_bounded_descriptor(file_fd, remaining, 'package content')
+
+
 def bounded_file_bytes(path, remaining):
-    """Reject nonregular or concurrently growing source files before packing."""
+    """Read a verified regular file within the remaining archive byte budget."""
     return read_regular_source(path, remaining, 'package content')
 
 
@@ -181,7 +215,7 @@ def source_paths():
                 raise ValueError(f'symlink in source manifest path: {line}')
         if not path.is_file():
             raise ValueError(f'not a regular source file: {line}')
-        payload = bounded_file_bytes(path, MAX_UNPACKED_BYTES - total)
+        payload = read_source_member(line, MAX_UNPACKED_BYTES - total)
         total += len(payload)
         files.append((str(name), payload, 0o644))
     if not files:
