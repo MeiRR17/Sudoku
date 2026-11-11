@@ -4,6 +4,8 @@ A fully offline Sudoku engine with deterministic exact solving, solution classif
 
 ## Build and use
 
+Development package creation now writes and validates the **entire five-file set** (platform ZIP/TAR.GZ, source ZIP/TAR.GZ, SHA256SUMS) in a private staging directory before publication. It refuses to replace existing artifacts and rolls back its own newly linked files on publication errors. Re-running into the same output folder requires a fresh destination: prior verified files are never silently overwritten. This protects previous results during normal failures; it does **not** provide crash-atomic publication of all five files or release signing.
+
 The v0.8.4 development package verifier now validates each original archive once into a bounded private snapshot, then computes its checksum and decodes ZIP/TAR from **the same stored bytes**. This eliminates archive-path replacement between hashing and parsing on supported systems. Temporary copies are cleaned up; the checksum list remains unsigned, and this is not a signed or approved production release.
 
 Development package verification checks `SHA256SUMS` and each ZIP/TAR archive on the **opened regular-file descriptor** before reading, rather than trusting a path-only preflight. POSIX FIFO, device and final-component symlink substitutions are rejected without a blocking open, and archive hashing enforces size and concurrent-content-length limits. This is local integrity hardening, not cryptographic signing or release approval.
