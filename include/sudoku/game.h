@@ -63,6 +63,11 @@ SudokuGameStatus sudoku_game_clear_notes(SudokuGame *game);
  * solution digits or modify immutable clues. No-op if there are no mistakes.
  * Returns INVALID without mutation for inconsistent public game structs. */
 SudokuGameStatus sudoku_game_clear_mistakes(SudokuGame *game);
+/* Move 1..127 existing history steps atomically. If fewer steps are
+ * available, return NO_HISTORY without modifying board, notes or cursor.
+ * No new history entries are created; zero/out-of-range counts are RANGE. */
+SudokuGameStatus sudoku_game_undo_steps(SudokuGame *game, unsigned steps);
+SudokuGameStatus sudoku_game_redo_steps(SudokuGame *game, unsigned steps);
 SudokuGameStatus sudoku_game_undo(SudokuGame *game);
 SudokuGameStatus sudoku_game_redo(SudokuGame *game);
 SudokuGameStatus sudoku_game_reset(SudokuGame *game);
