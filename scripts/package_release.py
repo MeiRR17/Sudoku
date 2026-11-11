@@ -589,6 +589,42 @@ def verify_source_membership(entries):
         raise ValueError(f'source archive manifest mismatch: missing={missing!r} extra={extra!r}')
 
 
+def canonical_checksum_records(raw):
+    """Validate the exact four-record format emitted by this packager.
+
+    Only ASCII LF endings with a final newline and filename-order sorting
+    are canonical. Checking before archive IO prevents malformed manifests
+    from triggering avoidable hashing or decompression work.
+    """
+    if len(raw) > MAX_CHECKSUM_MANIFEST_BYTES:
+        raise ValueError('SHA256SUMS exceeds size budget')
+    try:
+        lines = raw.decode('ascii').splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValueError('SHA256SUMS must be ASCII') from exc
+    if len(lines) != 4 or len(lines) != len(set(lines)):
+        raise ValueError('expected four distinct archive checksums')
+    if raw != ('\n'.join(lines) + '\n').encode('ascii'):
+        raise ValueError('non-canonical SHA256SUMS line endings')
+    records = []
+    for line in lines:
+        if not re.fullmatch(r'[0-9a-f]{64}  [a-zA-Z0-9._-]+', line):
+            raise ValueError('invalid SHA256SUMS record')
+        records.append(line.split('  ', 1))
+    names = [name for _, name in records]
+    if names != sorted(set(names)):
+        raise ValueError('non-canonical SHA256SUMS filename ordering')
+    return records
+
+
+def valid_release_prefix(prefix):
+    """Release verification admits only the roadmap's three native targets."""
+    name = f'sudoku-v{VERSION}-'
+    return prefix == name + 'source' or (
+        prefix.startswith(name) and
+        prefix[len(name):] in SUPPORTED_ARCHIVE_PLATFORMS)
+
+
 def verified_archive_members(path, expected_sha, expected_prefix):
     """Hash and parse the *same* private archive snapshot, never reopen its source.
 
@@ -629,26 +665,8 @@ def verify_packages(dest):
     # Open once and validate the descriptor before reading the manifest.
     # A swapped-in FIFO must fail rather than hang indefinitely at open().
     raw = read_regular_source(manifest, MAX_CHECKSUM_MANIFEST_BYTES, 'SHA256SUMS')
-    try:
-        lines = raw.decode('ascii').splitlines()
-    except UnicodeDecodeError as exc:
-        raise ValueError('SHA256SUMS must be ASCII') from exc
-    if len(lines) != 4 or len(lines) != len(set(lines)):
-        raise ValueError('expected four distinct archive checksums')
-    # The writer emits four ASCII LF-terminated records sorted by filename.
-    # Reject CRLF, absent final newlines and reordered records before IO.
-    if raw != ('\n'.join(lines) + '\n').encode('ascii'):
-        raise ValueError('non-canonical SHA256SUMS line endings')
-    entries = []
-    for line in lines:
-        if not re.fullmatch(r'[0-9a-f]{64}  [a-zA-Z0-9._-]+', line):
-            raise ValueError('invalid SHA256SUMS record')
-        entries.append(line.split('  ', 1))
-    names = [name for _, name in entries]
-    if names != sorted(set(names)):
-        raise ValueError('non-canonical SHA256SUMS filename ordering')
     parsed = {}
-    for digest, name in entries:
+    for digest, name in canonical_checksum_records(raw):
         file = dest / name
         if not file.is_file() or file.is_symlink():
             raise ValueError(f'checksum mismatch: {name}')
@@ -658,10 +676,7 @@ def verify_packages(dest):
         if not ext:
             raise ValueError(f'unexpected release extension: {name}')
         prefix = name[:-len(ext)]
-        allowed = {f'sudoku-v{VERSION}-source'}
-        allowed.update(f'sudoku-v{VERSION}-{host}' for host in
-                       SUPPORTED_ARCHIVE_PLATFORMS)
-        if prefix not in allowed:
+        if not valid_release_prefix(prefix):
             raise ValueError(f'unexpected release filename: {name}')
         if (prefix, ext) in parsed:
             raise ValueError(f'duplicate release variant: {name}')
