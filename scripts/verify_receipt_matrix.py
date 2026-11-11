@@ -53,9 +53,7 @@ def unique_dict(items):
 
 def bounded_text(path, maximum, encoding):
     """Refuse symlinked or overlong evidence input before decoding."""
-    if path.is_symlink() or not path.is_file():
-        raise ValueError(f'missing or unsafe evidence file: {path.name}')
-    with path.open('rb') as stream:
+    with ACCEPTANCE.open_regular_input(path, 'evidence file: ' + path.name) as stream:
         raw = stream.read(maximum + 1)
     if len(raw) > maximum:
         raise ValueError(f'evidence file exceeds size budget: {path.name}')
@@ -64,13 +62,13 @@ def bounded_text(path, maximum, encoding):
 
 def verify_archive_hash(path, expected):
     """Compare a *real* local archive against its declared SHA-256 digest."""
-    if path.is_symlink() or not path.is_file():
-        raise ValueError(f'missing or unsafe archive: {path.name}')
-    if path.stat().st_size > MAX_ARCHIVE_BYTES:
-        raise ValueError(f'archive exceeds size budget: {path.name}')
     digest = hashlib.sha256()
     total = 0
-    with path.open('rb') as stream:
+    with ACCEPTANCE.open_regular_input(path, 'archive: ' + path.name) as stream:
+        # Ensure a path swap cannot defeat the archive size preflight.
+        if stream.seekable() and stream.fileno() >= 0:
+            if ACCEPTANCE.os.fstat(stream.fileno()).st_size > MAX_ARCHIVE_BYTES:
+                raise ValueError(f'archive exceeds size budget: {path.name}')
         while True:
             chunk = stream.read(65536)
             if not chunk:
