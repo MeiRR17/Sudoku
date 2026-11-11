@@ -90,12 +90,42 @@ def claim_portable_path(name, known):
             known[key] = (prefix, is_file)
 
 
+def open_checked_binary(path, kind):
+    """Refuse FIFO, device and final symlink replacements at actual open time.
+
+    Callers must close the returned stream. An earlier path.is_file() check
+    does not make a later open safe if another process swaps its target.
+    """
+    fd = os.open(path, _source_file_flags())
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError(kind + ' must be a regular file')
+        stream = os.fdopen(fd, 'rb')
+        fd = -1
+        return stream
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
 def file_hash(path):
-    h = hashlib.sha256()
-    with path.open('rb') as src:
-        for chunk in iter(lambda: src.read(65536), b''):
-            h.update(chunk)
-    return h.hexdigest()
+    """Hash a bounded, opened regular archive; never block on a swapped FIFO."""
+    limit = MAX_TAR_ARCHIVE_BYTES if path.name.endswith('.tar.gz') else MAX_ZIP_ARCHIVE_BYTES
+    digest = hashlib.sha256()
+    with open_checked_binary(path, 'release archive') as stream:
+        size = os.fstat(stream.fileno()).st_size
+        if size < 0 or size > limit:
+            raise ValueError('archive exceeds compressed size budget: ' + path.name)
+        remaining = size
+        while remaining:
+            chunk = stream.read(min(65536, remaining + 1))
+            if not chunk or len(chunk) > remaining:
+                raise ValueError('release archive changed during hashing')
+            digest.update(chunk)
+            remaining -= len(chunk)
+        if stream.read(1):
+            raise ValueError('release archive changed during hashing')
+    return digest.hexdigest()
 
 
 def target_platform():
@@ -310,7 +340,7 @@ def preflight_zip_directory(path):
     length = path.stat().st_size
     if length < 22 or length > MAX_ZIP_ARCHIVE_BYTES:
         raise ValueError('ZIP container exceeds size budget or is truncated')
-    with path.open('rb') as source:
+    with open_checked_binary(path, 'ZIP archive') as source:
         source.seek(-22, 2)
         tail = source.read(22)
     if len(tail) != 22:
@@ -329,7 +359,7 @@ def preflight_zip_directory(path):
     # EOCD counts are attacker-controlled too. Walk the actual central
     # records without decoding names or instantiating ZipInfo objects.
     # Require exactly 'entries' records occupying exactly 'cd_size' bytes.
-    with path.open('rb') as source:
+    with open_checked_binary(path, 'ZIP archive') as source:
         source.seek(cd_start)
         end = cd_start + cd_size
         for _ in range(entries):
@@ -403,7 +433,7 @@ def _ensure_safe_archive(path, expected_prefix):
         # The tarfile iterator stops at the TAR end marker without necessarily
         # reading the GZIP trailer. Drain the decompressor so CRC32 and ISIZE
         # are checked even when all file members looked valid.
-        with path.open('rb') as compressed:
+        with open_checked_binary(path, 'TAR archive') as compressed:
             with gzip.GzipFile(fileobj=compressed, mode='rb') as decoder:
                 bounded = _BoundedTarGzipReader(decoder)
                 with tarfile.open(fileobj=bounded, mode='r|') as archive:
@@ -450,45 +480,46 @@ def _ensure_safe_archive(path, expected_prefix):
                 # zero bytes after the footer. Our package writer emits one
                 # gzip member only: its final CRC32/ISIZE must describe the
                 # entire decoded TAR stream, not a later appended member.
-                with path.open('rb') as encoded:
+                with open_checked_binary(path, 'TAR archive') as encoded:
                     encoded.seek(-8, 2)
                     crc, isize = struct.unpack('<II', encoded.read(8))
                 if crc != bounded.crc or isize != (bounded.total & 0xffffffff):
                     raise ValueError('non-canonical GZIP trailer or extra member')
     else:
         preflight_zip_directory(path)
-        with zipfile.ZipFile(path) as archive:
-            infos = archive.infolist()
-            if not 1 <= len(infos) <= MAX_ARCHIVE_FILES:
-                raise ValueError('invalid number of ZIP members')
-            for item in infos:
-                # The canonical packager sets Unix regular-file attributes on
-                # every host. Reject symlinks, device files, and missing types.
-                mode = item.external_attr >> 16
-                if item.is_dir() or item.create_system != 3 or not stat.S_ISREG(mode):
-                    raise ValueError('non-regular ZIP member')
-                # Forged metadata can request encryption or compressors our
-                # development writer never emits. Reject before ZipExtFile
-                # raises RuntimeError or NotImplementedError on open().
-                if item.flag_bits & 0x41:
-                    raise ValueError('encrypted ZIP member is not supported')
-                if item.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
-                    raise ValueError('unsupported ZIP compression method')
-                rel = _safe_member_name(item.filename, expected_prefix)
-                if mode != (stat.S_IFREG | canonical_archive_mode(rel, expected_prefix)):
-                    raise ValueError('non-canonical ZIP file mode')
-                if rel in members:
-                    raise ValueError('archive entries empty, duplicated or not sorted')
-                claim_portable_path(rel, seen_portable)
-                unpacked += item.file_size
-                if unpacked > MAX_UNPACKED_BYTES:
-                    raise ValueError('ZIP unpacked content exceeds size budget')
-                with archive.open(item, 'r') as stream:
-                    payload = stream.read(item.file_size + 1)
-                if len(payload) != item.file_size:
-                    raise ValueError('ZIP member length mismatch')
-                members[rel] = payload
-                names.append(item.filename)
+        with open_checked_binary(path, 'ZIP archive') as encoded:
+          with zipfile.ZipFile(encoded) as archive:
+              infos = archive.infolist()
+              if not 1 <= len(infos) <= MAX_ARCHIVE_FILES:
+                  raise ValueError('invalid number of ZIP members')
+              for item in infos:
+                  # The canonical packager sets Unix regular-file attributes on
+                  # every host. Reject symlinks, device files, and missing types.
+                  mode = item.external_attr >> 16
+                  if item.is_dir() or item.create_system != 3 or not stat.S_ISREG(mode):
+                      raise ValueError('non-regular ZIP member')
+                  # Forged metadata can request encryption or compressors our
+                  # development writer never emits. Reject before ZipExtFile
+                  # raises RuntimeError or NotImplementedError on open().
+                  if item.flag_bits & 0x41:
+                      raise ValueError('encrypted ZIP member is not supported')
+                  if item.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                      raise ValueError('unsupported ZIP compression method')
+                  rel = _safe_member_name(item.filename, expected_prefix)
+                  if mode != (stat.S_IFREG | canonical_archive_mode(rel, expected_prefix)):
+                      raise ValueError('non-canonical ZIP file mode')
+                  if rel in members:
+                      raise ValueError('archive entries empty, duplicated or not sorted')
+                  claim_portable_path(rel, seen_portable)
+                  unpacked += item.file_size
+                  if unpacked > MAX_UNPACKED_BYTES:
+                      raise ValueError('ZIP unpacked content exceeds size budget')
+                  with archive.open(item, 'r') as stream:
+                      payload = stream.read(item.file_size + 1)
+                  if len(payload) != item.file_size:
+                      raise ValueError('ZIP member length mismatch')
+                  members[rel] = payload
+                  names.append(item.filename)
     if names != sorted(set(names)) or len(names) != len(members):
         raise ValueError('archive entries empty, duplicated or not sorted')
     return members
@@ -558,12 +589,9 @@ def verify_packages(dest):
     manifest = dest / 'SHA256SUMS'
     if not manifest.is_file() or manifest.is_symlink():
         raise ValueError('missing or unsafe SHA256SUMS')
-    # Never decode an untrusted checksum manifest without a byte ceiling.
-    # Four canonical records are far below 4 KiB on supported platforms.
-    with manifest.open('rb') as stream:
-        raw = stream.read(MAX_CHECKSUM_MANIFEST_BYTES + 1)
-    if len(raw) > MAX_CHECKSUM_MANIFEST_BYTES:
-        raise ValueError('SHA256SUMS exceeds size budget')
+    # Open once and validate the descriptor before reading the manifest.
+    # A swapped-in FIFO must fail rather than hang indefinitely at open().
+    raw = read_regular_source(manifest, MAX_CHECKSUM_MANIFEST_BYTES, 'SHA256SUMS')
     try:
         lines = raw.decode('ascii').splitlines()
     except UnicodeDecodeError as exc:
