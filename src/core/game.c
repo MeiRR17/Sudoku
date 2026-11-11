@@ -507,8 +507,29 @@ SudokuGameStatus sudoku_game_load(SudokuGame *game, const char *path) {
     FILE *file;
     SudokuGame *candidate;
     if(!game||!path||!*path)return SUDOKU_GAME_INVALID;
+#if defined(_WIN32)
     file=fopen(path,"rb");
     if(!file)return SUDOKU_GAME_IO;
+#else
+    /* fopen(path, "rb") can block indefinitely before returning when path
+     * refers to a FIFO with no writer. Open nonblocking and reject nonregular
+     * file descriptors *before* any read; ordinary save files are unaffected.
+     * A symlink to an ordinary regular save is still supported. */
+    {
+        int fd=open(path,O_RDONLY|O_NONBLOCK);
+        struct stat metadata;
+        if(fd<0)return SUDOKU_GAME_IO;
+        if(fstat(fd,&metadata)!=0 || !S_ISREG(metadata.st_mode)){
+            (void)close(fd);
+            return SUDOKU_GAME_IO;
+        }
+        file=fdopen(fd,"rb");
+        if(!file){
+            (void)close(fd);
+            return SUDOKU_GAME_IO;
+        }
+    }
+#endif
     n=fread(bytes,1u,sizeof bytes,file);
     if(ferror(file)){fclose(file);return SUDOKU_GAME_IO;}
     if(fclose(file)!=0)return SUDOKU_GAME_IO;
