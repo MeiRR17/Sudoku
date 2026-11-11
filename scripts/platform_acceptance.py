@@ -285,7 +285,8 @@ def main():
         'observed_arch': platform.machine(),
         'c_compiler_id': compiler,
         'quality_gate_mode': args.mode,
-        'checks': ['quality_gate', 'package_release', 'package_verify'],
+        'checks': ['quality_gate', 'package_release', 'package_verify',
+                   'packaged_game_save_resume'],
         'archive_sha256': dict(sorted(checksums.items())),
         'created_utc': datetime.now(timezone.utc).isoformat(timespec='seconds'),
     }
