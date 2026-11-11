@@ -311,6 +311,30 @@ with tempfile.TemporaryDirectory() as directory:
     assert not stderr
     checks += 1
 
+    # 'hint all' enumerates distinct forced cells without placing digits,
+    # modifying notes, revealing the solved grid or touching history.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'hint all\nstatus\nhint all\nstatus\n'
+                         'hint all unexpected\nstatus\nquit\n')
+    assert stdout.count('Logical hints (1):') == 2, stdout
+    assert stdout.count('Hint (only candidate): row 1 col 1 -> 5.') == 2
+    assert stdout.count('undo 0, redo 0') == 3
+    assert stdout.count('Error: unknown command or invalid arguments') == 1
+    assert 'Applied hint' not in stdout and not stderr
+    checks += 1
+
+    # A solved board has no hints; wrong moves block listing just as they
+    # block preview/apply, without clearing or undoing the player's entries.
+    stdout, stderr = run(['--puzzle', solution], 'hint all\nquit\n')
+    assert 'Puzzle already solved; no hint needed.' in stdout and not stderr
+    checks += 1
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 1\nstatus\nhint all\nstatus\nquit\n')
+    assert 'Cannot list hints: correct the existing mistakes first.' in stdout
+    assert 'Logical hints (' not in stdout
+    assert stdout.count('undo 1, redo 0') == 2 and not stderr
+    checks += 1
+
     # This 25-clue puzzle has a unique solution and no naked singles; only
     # the hidden-single column search can report the first forced step.
     hidden_single_puzzle = '500600902000105308000000500800001020000003000010920800060500004280000000305000070'
