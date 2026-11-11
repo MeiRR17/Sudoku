@@ -4,6 +4,7 @@ Portable stdlib, no tty/color dependency. The child receives commands on stdin.
 """
 import os
 import pathlib
+import re
 import stat
 import subprocess
 import sys
@@ -364,6 +365,9 @@ with tempfile.TemporaryDirectory() as directory:
     assert lines and len(lines) % 2 == 0, stdout
     midpoint = len(lines) // 2
     assert lines[:midpoint] == lines[midpoint:], stdout
+    places = [tuple(map(int, re.search(r'row (\\d+) col (\\d+) ->', line).groups()))
+              for line in lines[:midpoint]]
+    assert len(places) == len(set(places)), stdout
     assert lines[0] == 'Hint (only place in column 8): row 7 col 8 -> 8.', stdout
     assert 'Logical hints (' in stdout and stdout.count('undo 0, redo 0') == 2
     assert all('only place' in line or 'only candidate' in line for line in lines)
