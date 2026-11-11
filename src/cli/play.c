@@ -48,7 +48,7 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, auto-notes, prune-notes,");
-    puts("          clear-notes, hint [all|chain [N]|apply [all|chain [N]]], undo, redo, reset, check [details|clear],");
+    puts("          clear-notes, hint [all|chain [N]|apply [all|chain [N]]], undo [N], redo [N], reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
     puts("prints entered digits too; neither is a full save or stored solution.");
@@ -59,6 +59,7 @@ static void commands(void){
     puts("'hint chain [N]' previews up to N successive forced singles (1..81).");
     puts("'hint apply' places one; 'hint apply all' batches current forced cells.");
     puts("'hint apply chain [N]' commits at most N singles in one undo.");
+    puts("'undo [N]' and 'redo [N]' move 1..127 history steps, all or nothing.");
     puts("'check details' locates wrong entries; 'check clear' erases them (undoable).");
     puts("No color, network or special keys required.");
 }
@@ -682,8 +683,12 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         if(strcmp(command,"auto-notes")==0&&!a)status=sudoku_game_auto_notes(game);
         else if(strcmp(command,"prune-notes")==0&&!a)status=sudoku_game_prune_notes(game);
         else if(strcmp(command,"clear-notes")==0&&!a)status=sudoku_game_clear_notes(game);
-        else if(strcmp(command,"undo")==0&&!a)status=sudoku_game_undo(game);
-        else if(strcmp(command,"redo")==0&&!a)status=sudoku_game_redo(game);
+        else if(strcmp(command,"undo")==0&&
+                (!a||(!b&&decimal(a,SUDOKU_GAME_HISTORY-1u,&digit)&&digit>=1u)))
+            status=sudoku_game_undo_steps(game,a?(unsigned)digit:1u);
+        else if(strcmp(command,"redo")==0&&
+                (!a||(!b&&decimal(a,SUDOKU_GAME_HISTORY-1u,&digit)&&digit>=1u)))
+            status=sudoku_game_redo_steps(game,a?(unsigned)digit:1u);
         else if(strcmp(command,"reset")==0&&!a)status=sudoku_game_reset(game);
         else if(strcmp(command,"check")==0&&a&&
                 strcmp(a,"clear")==0&&!b){
