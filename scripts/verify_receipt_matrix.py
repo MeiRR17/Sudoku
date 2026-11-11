@@ -118,7 +118,7 @@ def verify_metadata_one(folder, platform_name, sha, version):
         raise ValueError(f'{platform_name}: unsupported quality gate mode')
     checks = receipt.get('checks')
     if not isinstance(checks, list) or not {'quality_gate', 'package_release',
-                                           'package_verify'}.issubset(checks):
+                                           'package_verify', 'packaged_game_save_resume'}.issubset(checks):
         raise ValueError(f'{platform_name}: required checks missing')
     if not isinstance(receipt.get('scope'), str) or 'unsigned' not in receipt['scope']:
         raise ValueError(f'{platform_name}: unsigned scope marker missing')
