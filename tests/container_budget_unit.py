@@ -112,6 +112,58 @@ class ContainerBudgetTests(unittest.TestCase):
         with self.assertRaises(OSError):
             package.file_hash(link)
 
+    def test_snapshot_archive_zip_parses_same_bytes_as_hash(self):
+        prefix = 'sudoku-v' + package.VERSION + '-source'
+        original = self.root / (prefix + '.zip')
+        expected_members = {'README.md': b'verified snapshot contents'}
+        package.create_zip(original, prefix, [('README.md', expected_members['README.md'], 0o644)])
+        checksum = package.file_hash(original)
+        actual_hash = package.file_hash
+        snapshots = []
+
+        def swap_source_after_snapshot(snapshot):
+            # The attacker mutates the public path at the hash/parse boundary.
+            # Both phases must continue using the private snapshot.
+            self.assertNotEqual(original, snapshot)
+            snapshots.append(snapshot)
+            original.unlink()
+            original.write_bytes(b'attacker replacement')
+            return actual_hash(snapshot)
+
+        with patch.object(package, 'file_hash', side_effect=swap_source_after_snapshot):
+            result = package.verified_archive_members(original, checksum, prefix)
+        self.assertEqual(result, expected_members)
+        self.assertEqual(original.read_bytes(), b'attacker replacement')
+        self.assertEqual(len(snapshots), 1)
+        self.assertFalse(snapshots[0].exists())  # Temporary copy was removed.
+
+    def test_snapshot_tar_roundtrip_from_single_input_descriptor(self):
+        prefix = 'sudoku-v' + package.VERSION + '-source'
+        original = self.root / (prefix + '.tar.gz')
+        expected = {'README.md': b'tar content'}
+        package.create_tar(original, prefix, [('README.md', expected['README.md'], 0o644)])
+        checksum = package.file_hash(original)
+        self.assertEqual(package.verified_archive_members(original, checksum, prefix), expected)
+
+    def test_snapshot_mismatch_rejected_before_archive_parser(self):
+        prefix = 'sudoku-v' + package.VERSION + '-source'
+        original = self.root / (prefix + '.zip')
+        package.create_zip(original, prefix, [('README.md', b'good', 0o644)])
+        with patch.object(package, 'check_archive',
+                          side_effect=AssertionError('parser must not run')):
+            with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                package.verified_archive_members(original, '0' * 64, prefix)
+
+    def test_snapshot_sparse_source_rejected_before_copy_or_hash(self):
+        prefix = 'sudoku-v' + package.VERSION + '-source'
+        original = self.root / (prefix + '.zip')
+        with original.open('wb') as stream:
+            stream.truncate(package.MAX_ZIP_ARCHIVE_BYTES + 1)
+        with patch.object(package, 'file_hash',
+                          side_effect=AssertionError('hash must not run')):
+            with self.assertRaisesRegex(ValueError, 'archive exceeds compressed size budget'):
+                package.verified_archive_members(original, '0' * 64, prefix)
+
     def test_nonascii_checksum_manifest_rejected(self):
         (self.root / 'SHA256SUMS').write_bytes(b'\xff\n')
         with self.assertRaisesRegex(ValueError, 'SHA256SUMS must be ASCII'):
