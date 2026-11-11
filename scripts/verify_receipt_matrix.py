@@ -166,12 +166,16 @@ def verify_one(folder, platform_name, sha, version):
     # remain present and unchanged. Stream and hash each claimed local file.
     for name, digest in sorted(digests.items()):
         verify_archive_hash(folder / name, digest)
-    # The receipt and SHA256SUMS are both unsigned and controlled by whoever
-    # supplied the bundle. Also verify actual source archive *contents* and
-    # bind the receipt's canonical source digest to those bytes.
+    # The receipt and SHA256SUMS are unsigned and controlled by whoever
+    # supplied the bundle. Snapshot each source archive from a single checked
+    # inode; hash and parse that SAME private copy before comparing its
+    # canonical contents. Reopening an attacker-replaceable path after hashing
+    # could otherwise bind the receipt to a different source tree.
     prefix = f'sudoku-v{version}-source'
-    source_zip = PACKAGE.ensure_safe_archive(folder / (prefix + '.zip'), prefix)
-    source_tar = PACKAGE.ensure_safe_archive(folder / (prefix + '.tar.gz'), prefix)
+    source_zip = PACKAGE.verified_archive_members(
+        folder / (prefix + '.zip'), digests[prefix + '.zip'], prefix)
+    source_tar = PACKAGE.verified_archive_members(
+        folder / (prefix + '.tar.gz'), digests[prefix + '.tar.gz'], prefix)
     if source_zip != source_tar:
         raise ValueError(f'{platform_name}: source ZIP and TAR.GZ contents differ')
     PACKAGE.verify_source_membership(source_zip)
