@@ -86,6 +86,47 @@ SudokuGameStatus sudoku_game_erase(SudokuGame *game, unsigned row, unsigned col)
     remember(game);
     return SUDOKU_GAME_OK;
 }
+/* Current-board row/column/box candidates. Never consult game->solution.
+ * Returns 0 for a filled cell, invalid coordinates or an invalid game. */
+uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned col) {
+    int idx = cell_index(row, col);
+    SudokuBoard trial;
+    uint16_t mask = 0u;
+    unsigned digit;
+    if (!valid_game(game) || idx < 0 || game->state.board.cells[idx])
+        return 0u;
+    trial = game->state.board;
+    for (digit = 1u; digit <= 9u; ++digit) {
+        trial.cells[idx] = (uint8_t)digit;
+        if (sudoku_board_validate(&trial, NULL) == SUDOKU_OK)
+            mask = (uint16_t)(mask | (uint16_t)(1u << digit));
+    }
+    return mask;
+}
+/* Recompute all pencil marks for editable empty cells as a single undoable
+ * snapshot. The user's deliberate notes are replaced only on this command;
+ * repeat without board changes is history-neutral. Filled/given cells remain
+ * unchanged, and no solution digit is disclosed or inserted. */
+SudokuGameStatus sudoku_game_auto_notes(SudokuGame *game) {
+    SudokuGameSnapshot proposed;
+    unsigned index;
+    int changed = 0;
+    if (!valid_game(game)) return SUDOKU_GAME_INVALID;
+    proposed = game->state;
+    for (index = 0u; index < SUDOKU_CELL_COUNT; ++index) {
+        uint16_t mask;
+        if (game->state.board.cells[index]) continue;
+        mask = sudoku_game_candidates(game, index / 9u + 1u, index % 9u + 1u);
+        if (proposed.notes[index] != mask) {
+            proposed.notes[index] = mask;
+            changed = 1;
+        }
+    }
+    if (!changed) return SUDOKU_GAME_OK;
+    game->state = proposed;
+    remember(game);
+    return SUDOKU_GAME_OK;
+}
 SudokuGameStatus sudoku_game_note(SudokuGame *game, unsigned row, unsigned col, unsigned digit) {
     int idx = cell_index(row, col);
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
