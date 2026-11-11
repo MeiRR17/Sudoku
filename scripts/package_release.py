@@ -674,6 +674,41 @@ def verify_packages(dest):
     print('SHA256 AND CROSS-FORMAT PASS: 4 archives, matched files byte-for-byte')
 
 
+def publish_checked_package_set(staged, destination, names):
+    """Publish preverified development files without replacing existing paths.
+
+    All five artifacts must be complete before the first hard link. Links are
+    exclusive on the same filesystem; on a publication error, remove only
+    links that still refer to our own staged inodes. A process crash during
+    this multi-file operation can still leave a partial set; no signed or
+    power-loss-atomic release publication is claimed.
+    """
+    if (len(names) != 5 or len(set(names)) != 5 or
+            'SHA256SUMS' not in names or
+            any(not portable_relative_name(name) or '/' in name for name in names)):
+        raise ValueError('invalid development package publication set')
+    for name in names:
+        source, target = staged / name, destination / name
+        if source.is_symlink() or not source.is_file():
+            raise ValueError('missing staged package artifact: ' + name)
+        if target.exists() or target.is_symlink():
+            raise ValueError('refusing to overwrite package artifact: ' + name)
+    published = []
+    try:
+        for name in names:
+            source, target = staged / name, destination / name
+            os.link(source, target)
+            published.append((source, target))
+    except BaseException:
+        for source, target in reversed(published):
+            try:
+                if target.samefile(source):
+                    target.unlink()
+            except OSError:
+                pass
+        raise
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--build', type=Path)
@@ -702,14 +737,24 @@ def main():
         out.mkdir(parents=True, exist_ok=True)
         prefixes = [(f'sudoku-v{VERSION}-{target}', files),
                     (f'sudoku-v{VERSION}-source', source_paths())]
-        records = []
-        for prefix, entries in prefixes:
-            for ext, fn in [('.tar.gz', create_tar), ('.zip', create_zip)]:
-                archive = out / (prefix + ext)
-                fn(archive, prefix, entries)
-                check_archive(archive, prefix)
-                records.append((archive.name, file_hash(archive)))
-        (out / 'SHA256SUMS').write_text(''.join(f'{digest}  {name}\n' for name, digest in sorted(records)), encoding='ascii')
+        # Build and verify the complete set in a private directory on the
+        # destination filesystem before exposing any archive or checksum.
+        # Repeated runs may not silently overwrite a previous verified set.
+        with tempfile.TemporaryDirectory(prefix='.sudoku-package-', dir=out) as scratch:
+            staged = Path(scratch)
+            records = []
+            for prefix, entries in prefixes:
+                for ext, fn in [('.tar.gz', create_tar), ('.zip', create_zip)]:
+                    archive = staged / (prefix + ext)
+                    fn(archive, prefix, entries)
+                    check_archive(archive, prefix)
+                    records.append((archive.name, file_hash(archive)))
+            (staged / 'SHA256SUMS').write_text(
+                ''.join(f'{digest}  {name}\n' for name, digest in sorted(records)),
+                encoding='ascii')
+            verify_packages(staged)
+            publish_checked_package_set(
+                staged, out, sorted(name for name, _ in records) + ['SHA256SUMS'])
     verify_packages(out)
     print('DEVELOPMENT PACKAGE PASS — no official GitHub release or license approved')
 
