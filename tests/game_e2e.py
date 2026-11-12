@@ -1027,6 +1027,79 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'undo 1, redo 0' in stdout and not stderr
     checks += 1
 
+    # Dedicated pencil grid: 3x3 mini-cells show manually selected notes,
+    # while candidates mode reflects only legal digits in the live board.
+    # Neither read-only view can mutate notes, placed digits or history.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'notes set 1 1 19\nshow notes\nshow candidates\n'
+                         'notes 1 1\nstatus\nquit\n')
+    handwritten = stdout.split(
+        "Handwritten notes grid ('.' = absent; [d] = filled):", 1)[1].split(
+        "Live candidates grid ('.' = absent; [d] = filled):", 1)[0]
+    legal_grid = stdout.split(
+        "Live candidates grid ('.' = absent; [d] = filled):", 1)[1].split(
+        'Notes for row 1 col 1:', 1)[0]
+    assert '|1..        |' in handwritten and '|..9        |' in handwritten
+    assert ' 1 |... [3] [4]|' in handwritten
+    assert ' 1 |.5. [3] [4]|' in legal_grid
+    assert '|1..        |' not in legal_grid
+    assert 'Notes for row 1 col 1: 1 9\n' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Classic puzzle: r1c3 currently permits 1,2,4; show notes stays
+    # empty but legal-grid candidates appear in the correct mini-cell.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'show notes\nshow candidates\nstatus\nquit\n')
+    handwritten = stdout.split(
+        "Handwritten notes grid ('.' = absent; [d] = filled):", 1)[1].split(
+        "Live candidates grid ('.' = absent; [d] = filled):", 1)[0]
+    legal_grid = stdout.split(
+        "Live candidates grid ('.' = absent; [d] = filled):", 1)[1].split(
+        'Progress:', 1)[0]
+    assert ' 1 |[5] [3] ...|' in handwritten
+    assert ' 1 |[5] [3] 4..|' in legal_grid
+    assert '|        12.|' in legal_grid
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Viewing grids across Undo/Redo adds no phantom history entries.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'notes set 1 1 5\nshow notes\nundo\nshow notes\n'
+                         'redo\nshow candidates\nstatus\nquit\n')
+    assert stdout.count("Handwritten notes grid ('.' = absent; [d] = filled):") == 2
+    assert stdout.count("Live candidates grid ('.' = absent; [d] = filled):") == 1
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Invalid modifiers and surplus tokens must not be treated as 'show'.
+    invalid_shows = [
+        'show note', 'show all', 'show notes extra',
+        'show candidates extra', 'show 1', 'show candidates 3',
+        'show notes x y', 'show pencil', 'show 0'
+    ]
+    stdout, stderr = run(['--puzzle', near_win],
+                         'status\n' + '\n'.join(invalid_shows) +
+                         '\nstatus\nshow notes\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_shows)
+    assert stdout.count("Handwritten notes grid ('.' = absent; [d] = filled):") == 1
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
+    # Pencil display survives existing save/resume and still distinguishes
+    # player notes from legal candidates after loading a session.
+    pencil_view_save = folder / 'pencil view.save'
+    stdout, stderr = run(['--puzzle', near_win, '--save', pencil_view_save],
+                         'notes set 1 1 19\nsave\nquit\n')
+    assert 'Saved to ' in stdout and pencil_view_save.exists() and not stderr
+    stdout, stderr = run(['--resume', pencil_view_save],
+                         'show notes\nshow candidates\nnotes 1 1\n'
+                         'status\nquit\n')
+    assert '|1..        |' in stdout and '|..9        |' in stdout
+    assert ' 1 |.5. [3] [4]|' in stdout
+    assert 'Notes for row 1 col 1: 1 9\n' in stdout and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],

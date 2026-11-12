@@ -46,7 +46,8 @@ static int use(const char *message){
     return 2;
 }
 static void commands(void){
-    puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
+    puts("Commands: show [notes|candidates], set ROW COL DIGIT, erase ROW COL,");
+    puts("          note ROW COL DIGIT,");
     puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
     puts("          notes clear ROW COL, notes fill|prune ROW COL,");
     puts("          notes fill|prune row|column|box N (unit 1..9),");
@@ -58,6 +59,8 @@ static void commands(void){
     puts("'export' prints copyable 81-digit original clues; 'export current'");
     puts("prints entered digits too; neither is a full save or stored solution.");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
+    puts("'show notes' renders pencil marks in a 9x9 mini-grid; '.' is absent.");
+    puts("'show candidates' shows live Sudoku candidates, not the solved grid.");
     puts("'note' toggles a mark; 'notes set ROW COL 135' replaces the full set.");
     puts("'notes set ROW COL -' or 'notes clear ROW COL' clears only that cell.");
     puts("'notes add ROW COL 135' adds marks; 'notes remove ROW COL 135' erases.");
@@ -125,6 +128,56 @@ static void display(const SudokuGame *game) {
     printf("Empty: %u | Mistakes: %u | Time: %" PRIu64 "s\n",
            sudoku_game_empty(game), sudoku_game_mistakes(game), sudoku_game_elapsed(game));
     if(sudoku_game_won(game))puts("SOLVED! Congratulations: all 81 cells match the unique solution.");
+}
+/* Display a full 9x9 pencil grid without changing the board, notes, or
+ * history. A mini-cell holds digits 1-9 in their conventional 3x3 spots;
+ * dots are absent marks and [d] is an already-filled Sudoku square.
+ * 'show notes' uses handwritten marks, even when they are not locally
+ * legal; 'show candidates' computes legal digits from the live board only.
+ * No solved-grid lookup, save, timer reset or history edit is performed. */
+static void display_note_grid(const SudokuGame *game,int legal){
+    unsigned row,col,band,slot;
+    if(legal &&
+       sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot show candidates: invalid current board.");
+        return;
+    }
+    puts(legal ? "Live candidates grid ('.' = absent; [d] = filled):" :
+                 "Handwritten notes grid ('.' = absent; [d] = filled):");
+    puts("     1   2   3   4   5   6   7   8   9");
+    puts("   +-----------+-----------+-----------+");
+    for(row=0u;row<9u;++row){
+        uint16_t marks[9]={0};
+        for(col=0u;col<9u;++col){
+            unsigned index=row*9u+col;
+            if(!game->state.board.cells[index]){
+                marks[col]=legal ?
+                    sudoku_game_candidates(game,row+1u,col+1u) :
+                    game->state.notes[index];
+            }
+        }
+        for(band=0u;band<3u;++band){
+            printf(" %c ",band==1u?(int)('1'+row):' ');
+            for(col=0u;col<9u;++col){
+                unsigned index=row*9u+col;
+                if(col%3u==0u)putchar('|');
+                if(game->state.board.cells[index]){
+                    if(band==1u)
+                        printf("[%u]",(unsigned)game->state.board.cells[index]);
+                    else fputs("   ",stdout);
+                }else{
+                    for(slot=0u;slot<3u;++slot){
+                        unsigned digit=band*3u+slot+1u;
+                        putchar((marks[col]&(uint16_t)(1u<<digit)) ?
+                                (int)('0'+digit) : '.');
+                    }
+                }
+                if(col%3u!=2u)putchar(' ');
+            }
+            puts("|");
+        }
+        if(row%3u==2u)puts("   +-----------+-----------+-----------+");
+    }
 }
 /* POSIX --file is a regular on-disk puzzle, not an interactive pipe.
  * O_NONBLOCK prevents a writer-less FIFO from trapping the CLI at open;
@@ -1651,7 +1704,13 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             else puts("Error: unknown command or invalid arguments. Type 'help'.");
             continue;
         }
-        if(strcmp(command,"show")==0&&!a){display(game);continue;}
+        if(strcmp(command,"show")==0){
+            if(!a)display(game);
+            else if(!b&&strcmp(a,"notes")==0)display_note_grid(game,0);
+            else if(!b&&strcmp(a,"candidates")==0)display_note_grid(game,1);
+            else puts("Error: unknown command or invalid arguments. Type 'help'.");
+            continue;
+        }
         if(strcmp(command,"status")==0&&!a){
             printf("Progress: %u/81 filled, %u mistakes, elapsed %" PRIu64 "s, undo %u, redo %u\n",
                    81u-sudoku_game_empty(game),sudoku_game_mistakes(game),
