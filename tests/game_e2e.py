@@ -1176,6 +1176,71 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'undo 0, redo 0' in stdout and not stderr
     checks += 1
 
+    # Candidate analysis is independent of the solved grid, pencil marks,
+    # and Undo history. The standard classic puzzle has 51 blanks and a
+    # known candidate-count histogram, but no immediate contradictions.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'analyze 2\nstatus\nquit\n')
+    assert 'Candidate analysis (51 empty, detail limit 2):' in stdout
+    assert ('Candidates per empty cell: 0:0 1:4 2:13 3:17 '
+            '4:14 5:2 6:1 7:0 8:0 9:0') in stdout
+    assert ('Candidate analysis summary: 0 zero-candidate cells; '
+            '0 missing-digit dead ends; 0 contradictions.') in stdout
+    assert 'No immediate candidate contradictions found;' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A locally valid but wrong move may leave an empty cell with no
+    # candidates; report it without inserting any solution digits.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 9 4\nanalyze 1\nstatus\n'
+                         'undo\nanalyze 1\nstatus\nquit\n')
+    assert 'Contradiction: row 7 col 9 has no legal candidates.' in stdout
+    assert 'Candidate analysis summary: 1 zero-candidate cells;' in stdout
+    assert 'undo 1, redo 0' in stdout
+    assert 'undo 0, redo 1' in stdout and not stderr
+    checks += 1
+
+    # A different locally valid wrong move leaves no zero-candidate
+    # cells, but makes a required digit impossible in column 8.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 1\nanalyze 3\nstatus\nquit\n')
+    assert 'Contradiction: digit 1 has no legal position in column 8.' in stdout
+    assert 'Candidate analysis summary: 0 zero-candidate cells; ' in stdout
+    assert '1 missing-digit dead ends; 1 contradictions.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Never truncate aggregate counts even when only one contradiction
+    # can be shown. A legal wrong move creates multiple dead-end units.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 7 8\nanalyze 1\nstatus\nquit\n')
+    assert 'Candidate analysis (50 empty, detail limit 1):' in stdout
+    assert 'additional contradictions not listed (raise limit)' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Solved boards have no open candidate slots or impossible digits.
+    stdout, stderr = run(['--puzzle', solution],
+                         'analyze\nstatus\nquit\n')
+    assert 'Candidate analysis (0 empty, detail limit 10):' in stdout
+    assert ('Candidate analysis summary: 0 zero-candidate cells; '
+            '0 missing-digit dead ends; 0 contradictions.') in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Reject invalid limits, extra arguments and misleading aliases.
+    bad_analyze = ['analyze 0', 'analyze 82', 'analyze -1',
+                   'analyze nope', 'analyze 2 extra',
+                   'analyze 1 2', 'analyze all']
+    stdout, stderr = run(['--puzzle', near_win],
+                         'status\n'+'\n'.join(bad_analyze)+
+                         '\nstatus\nanalyze 1\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(bad_analyze)
+    assert stdout.count('Candidate analysis (') == 1
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],

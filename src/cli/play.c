@@ -52,7 +52,8 @@ static void commands(void){
     puts("          notes audit [N] | notes audit row|column|box N,");
     puts("          notes clear ROW COL, notes fill|prune ROW COL,");
     puts("          notes fill|prune row|column|box N (unit 1..9),");
-    puts("          candidates ROW COL, focus [N], auto-notes, prune-notes,");
+    puts("          candidates ROW COL, focus [N], analyze [N], auto-notes,");
+    puts("          prune-notes,");
     puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          undo [N], redo [N], reset, check [details|clear],");
@@ -76,6 +77,9 @@ static void commands(void){
     puts("Invalid/duplicate digits are rejected; one replacement = one Undo.");
     puts("'candidates' lists legal digits without guessing.");
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
+    puts("'analyze [N]' reports candidate counts and contradictions (default 10).");
+    puts("It detects zero-candidate cells and digits missing from every possible");
+    puts("position in a row/column/box, using no cached solved digits.");
     puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
     puts("'hint' shows one forced single; 'hint all' lists each distinct forced cell.");
     puts("'hint pairs [N]' previews actionable naked pairs (default 5).");
@@ -529,6 +533,81 @@ static unsigned pair_unit_cell(unsigned unit,unsigned slot){
         unsigned box=unit-18u;
         return ((box/3u)*3u+slot/3u)*9u+(box%3u)*3u+slot%3u;
     }
+}
+/* A solution-blind, read-only candidate health report for the entire
+ * live Sudoku board. Detect both zero-candidate empty cells and missing
+ * digits with no legal position in a row/column/box. These contradictions
+ * may occur after a locally legal but globally incorrect player move.
+ * Bound detailed findings while always reporting complete totals. */
+static unsigned analyze_bits(uint16_t mask){
+    unsigned count=0u;
+    while(mask){mask=(uint16_t)(mask&(uint16_t)(mask-1u));++count;}
+    return count;
+}
+static void analyze_board(const SudokuGame *game,unsigned limit){
+    uint16_t candidates[SUDOKU_CELL_COUNT]={0};
+    unsigned distribution[10]={0};
+    unsigned empty=0u,dead_cells=0u,blocked=0u,shown=0u;
+    unsigned i,unit,digit,slot;
+    if(sudoku_board_validate(&game->givens,NULL)!=SUDOKU_OK||
+       sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot analyze: invalid puzzle or current board.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        if(game->givens.cells[i]&&
+           game->state.board.cells[i]!=game->givens.cells[i]){
+            puts("Cannot analyze: immutable clues were altered.");
+            return;
+        }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+        unsigned count;
+        if(game->state.board.cells[i])continue;
+        ++empty;
+        candidates[i]=candidate_mask(game,i);
+        count=analyze_bits(candidates[i]);
+        ++distribution[count];
+    }
+    printf("Candidate analysis (%u empty, detail limit %u):\n",empty,limit);
+    fputs("Candidates per empty cell:",stdout);
+    for(i=0u;i<=9u;++i)printf(" %u:%u",i,distribution[i]);
+    putchar('\n');
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+        if(game->state.board.cells[i]||candidates[i])continue;
+        ++dead_cells;
+        if(shown<limit){
+            printf("Contradiction: row %u col %u has no legal candidates.\n",
+                   i/9u+1u,i%9u+1u);
+            ++shown;
+        }
+    }
+    for(unit=0u;unit<27u;++unit){
+        const char *kind=unit<9u?"row":unit<18u?"column":"box";
+        for(digit=1u;digit<=9u;++digit){
+            unsigned placed=0u,possible=0u;
+            uint16_t bit=(uint16_t)(1u<<digit);
+            for(slot=0u;slot<9u;++slot){
+                unsigned index=pair_unit_cell(unit,slot);
+                if(game->state.board.cells[index]==digit)placed=1u;
+                if(candidates[index]&bit)possible=1u;
+            }
+            if(placed||possible)continue;
+            ++blocked;
+            if(shown<limit){
+                printf("Contradiction: digit %u has no legal position in %s %u.\n",
+                       digit,kind,unit%9u+1u);
+                ++shown;
+            }
+        }
+    }
+    printf("Candidate analysis summary: %u zero-candidate cells; "
+           "%u missing-digit dead ends; %u contradictions.\n",
+           dead_cells,blocked,dead_cells+blocked);
+    if(dead_cells+blocked>shown)
+        printf("%u additional contradictions not listed (raise limit).\n",
+               dead_cells+blocked-shown);
+    if(!dead_cells&&!blocked)
+        puts("No immediate candidate contradictions found; solvability is not guaranteed.");
 }
 static void naked_pairs(SudokuGame *game,unsigned limit,int apply){
     uint16_t masks[SUDOKU_CELL_COUNT]={0};
@@ -1773,6 +1852,13 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             if(!a||strcmp(a,"givens")==0)export_board(game,0);
             else if(strcmp(a,"current")==0)export_board(game,1);
             else{export_board(game,0);export_board(game,1);}
+            continue;
+        }
+        if(strcmp(command,"analyze")==0){
+            uint64_t limit=10u;
+            if(!a||(!b&&decimal(a,SUDOKU_CELL_COUNT,&limit)&&limit>=1u))
+                analyze_board(game,(unsigned)limit);
+            else puts("Error: unknown command or invalid arguments. Type 'help'.");
             continue;
         }
         if(strcmp(command,"focus")==0){
