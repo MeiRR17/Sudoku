@@ -48,8 +48,8 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, focus [N], auto-notes, prune-notes,");
-    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|chain [N]],");
-    puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|chain [N]],");
+    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|chain [N]],");
+    puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|chain [N]],");
     puts("          undo [N], redo [N], reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
@@ -61,6 +61,8 @@ static void commands(void){
     puts("'hint' shows one forced single; 'hint all' lists each distinct forced cell.");
     puts("'hint pairs [N]' previews actionable naked pairs (default 5).");
     puts("'hint apply pairs [N]' removes matching pencil marks in one undo.");
+    puts("'hint triples [N]' previews actionable naked triples (default 5).");
+    puts("'hint apply triples [N]' removes their pencil marks in one undo.");
     puts("'hint hidden-pairs [N]' previews pairs hidden among more candidates.");
     puts("'hint apply hidden-pairs [N]' prunes those extra notes in one undo.");
     puts("'hint locked [N]' previews pointing/claiming candidate eliminations.");
@@ -452,6 +454,109 @@ done_pairs:
                    removed,removed==1u?"":"s");
         else
             puts("No matching pencil notes to remove; history unchanged.");
+    }
+}
+/* A naked triple reserves three candidate digits in exactly three cells
+ * of one row, column or box. The three cells each have 2..3 candidates,
+ * and their union must have exactly three digits. A fourth cell with a
+ * candidate set entirely inside the triple would be contradictory, so it
+ * cannot authorize eliminations. This is solution-blind and read-only
+ * until the caller explicitly requests an atomic pencil-note reduction. */
+static unsigned triple_bit_count(uint16_t mask){
+    unsigned n=0u;
+    while(mask){mask=(uint16_t)(mask&(uint16_t)(mask-1u));++n;}
+    return n;
+}
+static void naked_triples(SudokuGame *game,unsigned limit,int apply){
+    uint16_t candidates[SUDOKU_CELL_COUNT]={0};
+    uint16_t eliminations[SUDOKU_CELL_COUNT]={0};
+    unsigned unit,a,b,c,slot,i,d,total=0u;
+    if(sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot inspect triples: invalid current board.");
+        return;
+    }
+    if(sudoku_game_won(game)){
+        puts("Puzzle already solved; no triple hint needed.");
+        return;
+    }
+    if(sudoku_game_mistakes(game)){
+        puts(apply?"Cannot apply triples: correct the existing mistakes first.":
+                   "Cannot preview triples: correct the existing mistakes first.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        candidates[i]=candidate_mask(game,i);
+    for(unit=0u;unit<27u;++unit){
+        const char *kind=unit<9u?"row":unit<18u?"column":"box";
+        unsigned number=unit%9u+1u;
+        for(a=0u;a<7u;++a){
+            unsigned first=pair_unit_cell(unit,a);
+            if(triple_bit_count(candidates[first])<2u||
+               triple_bit_count(candidates[first])>3u)continue;
+            for(b=a+1u;b<8u;++b){
+                unsigned second=pair_unit_cell(unit,b);
+                if(triple_bit_count(candidates[second])<2u||
+                   triple_bit_count(candidates[second])>3u)continue;
+                for(c=b+1u;c<9u;++c){
+                    unsigned third=pair_unit_cell(unit,c),subset=0u,targets=0u;
+                    uint16_t digits;
+                    if(triple_bit_count(candidates[third])<2u||
+                       triple_bit_count(candidates[third])>3u)continue;
+                    digits=(uint16_t)(candidates[first]|candidates[second]|
+                                     candidates[third]);
+                    if(triple_bit_count(digits)!=3u)continue;
+                    for(slot=0u;slot<9u;++slot){
+                        unsigned cell=pair_unit_cell(unit,slot);
+                        uint16_t mask=candidates[cell];
+                        if(mask && !(mask&(uint16_t)~digits))++subset;
+                        if(slot!=a&&slot!=b&&slot!=c&&(mask&digits))++targets;
+                    }
+                    if(subset!=3u||targets==0u)continue;
+                    printf("Triple %u in %s %u: r%uc%u + r%uc%u + r%uc%u reserve ",
+                           total+1u,kind,number,first/9u+1u,first%9u+1u,
+                           second/9u+1u,second%9u+1u,third/9u+1u,third%9u+1u);
+                    {
+                        unsigned separator=0u;
+                        for(d=1u;d<=9u;++d)
+                            if(digits&(uint16_t)(1u<<d))
+                                printf("%s%u",separator++?",":"",d);
+                    }
+                    fputs("; eliminate from",stdout);
+                    for(slot=0u;slot<9u;++slot){
+                        uint16_t excluded;
+                        unsigned cell=pair_unit_cell(unit,slot),separator=0u;
+                        if(slot==a||slot==b||slot==c)continue;
+                        excluded=(uint16_t)(candidates[cell]&digits);
+                        if(!excluded)continue;
+                        if(apply)
+                            eliminations[cell]=(uint16_t)(eliminations[cell]|excluded);
+                        printf(" r%uc%u(",cell/9u+1u,cell%9u+1u);
+                        for(d=1u;d<=9u;++d)
+                            if(excluded&(uint16_t)(1u<<d))
+                                printf("%s%u",separator++?",":"",d);
+                        putchar(')');
+                    }
+                    putchar('\n');
+                    if(++total==limit)goto done_triples;
+                }
+            }
+        }
+    }
+done_triples:
+    if(!total){
+        puts("No actionable naked triples found.");
+        return;
+    }
+    if(apply){
+        unsigned removed=0u;
+        SudokuGameStatus status=sudoku_game_eliminate_notes(game,eliminations,&removed);
+        if(status!=SUDOKU_GAME_OK)
+            printf("Error: %s\n",sudoku_game_status_text(status));
+        else if(removed)
+            printf("Removed %u triple pencil candidate%s in one undoable edit.\n",
+                   removed,removed==1u?"":"s");
+        else
+            puts("No matching triple pencil notes to remove; history unchanged.");
     }
 }
 /* A hidden pair is two digits whose only possible locations within a
@@ -1320,6 +1425,9 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             else if(strcmp(a,"pairs")==0&&
                     (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
                 naked_pairs(game,(unsigned)(b?limit:5u),0);
+            else if(strcmp(a,"triples")==0&&
+                    (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
+                naked_triples(game,(unsigned)(b?limit:5u),0);
             else if(strcmp(a,"hidden-pairs")==0&&
                     (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
                 hidden_pairs(game,(unsigned)(b?limit:5u),0);
@@ -1343,6 +1451,10 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                     strcmp(b,"pairs")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
                 naked_pairs(game,(unsigned)(c?limit:5u),1);
+            else if(strcmp(a,"apply")==0&&b&&
+                    strcmp(b,"triples")==0&&
+                    (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
+                naked_triples(game,(unsigned)(c?limit:5u),1);
             else if(strcmp(a,"apply")==0&&b&&
                     strcmp(b,"hidden-pairs")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))

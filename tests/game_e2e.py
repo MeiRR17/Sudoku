@@ -302,6 +302,73 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Swordfish 1 ' not in stdout and not stderr
     checks += 1
 
+    # Naked triple in the classic unique puzzle: r3c4, r3c5 and r3c6
+    # reserve digits 2,3,4. The preview is deterministic and read-only.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint triples\nhint triples 1\nstatus\nquit\n')
+    first_triple = ('Triple 1 in row 3: r3c4 + r3c5 + r3c6 '
+                    'reserve 2,3,4; eliminate from '
+                    'r3c1(2) r3c7(3,4) r3c9(2,4)')
+    assert stdout.count(first_triple) == 2, stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # User notes may be arbitrary legal choices; only the matching bits are
+    # removed. One grouped Undo restores them and Redo repeats the removal.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'note 3 1 2\nnote 3 7 3\nnote 3 9 2\n'
+                         'note 3 1 7\nstatus\nhint apply triples 1\n'
+                         'notes 3 1\nnotes 3 7\nnotes 3 9\nstatus\n'
+                         'undo\nnotes 3 1\nstatus\nredo\n'
+                         'hint apply triples 1\nstatus\nquit\n')
+    assert 'Removed 3 triple pencil candidates in one undoable edit.' in stdout
+    assert 'Notes for row 3 col 1: 7\n' in stdout
+    assert 'Notes for row 3 col 7:\n' in stdout
+    assert 'Notes for row 3 col 9:\n' in stdout
+    assert 'Notes for row 3 col 1: 2 7\n' in stdout
+    assert stdout.count('undo 5, redo 0') == 2, stdout
+    assert 'undo 4, redo 1' in stdout
+    assert 'No matching triple pencil notes to remove; history unchanged.' in stdout
+    assert not stderr
+    checks += 1
+
+    # A preview never inserts digits or changes the saved state; applying
+    # without handwritten notes is a true history-neutral no-op.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint apply triples\nstatus\nundo\nquit\n')
+    assert 'No matching triple pencil notes to remove; history unchanged.' in stdout
+    assert 'undo 0, redo 0' in stdout
+    assert 'Error: no action to undo or redo' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--puzzle', solution],
+                         'hint triples\nhint apply triples\nstatus\nquit\n')
+    assert stdout.count('Puzzle already solved; no triple hint needed.') == 2
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 9 4\nhint triples\nhint apply triples\nstatus\nquit\n')
+    assert 'Cannot preview triples: correct the existing mistakes first.' in stdout
+    assert 'Cannot apply triples: correct the existing mistakes first.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    invalid_triples = [
+        'hint triples 0', 'hint triples 82', 'hint triples -1',
+        'hint triples nope', 'hint triples 1 extra',
+        'hint apply triples 0', 'hint apply triples 82',
+        'hint apply triples -1', 'hint apply triples nope',
+        'hint apply triples 1 extra',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(invalid_triples) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_triples)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'Triple 1 ' not in stdout and not stderr
+    checks += 1
+
     # Genuine 24-given unique puzzle with two actionable naked pairs. A
     # pair reserves two digits in exactly two unit cells; elimination reports
     # which candidate marks other cells in that unit could remove.
