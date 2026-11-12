@@ -1853,6 +1853,45 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'undo 1, redo 1' in stdout and not stderr
     checks += 1
 
+    # Summary aggregates actual retained snapshot differences separately
+    # for applied and redoable actions, without touching the Undo cursor.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'history summary\nset 1 3 4\nnotes set 1 4 19\n'
+                         'undo\nhistory summary\nredo\nhistory summary\n'
+                         'status\nquit\n')
+    assert 'History summary: 0 applied, 0 redoable actions (retained).' in stdout
+    assert 'History summary: 1 applied, 1 redoable actions (retained).' in stdout
+    assert 'History summary: 2 applied, 0 redoable actions (retained).' in stdout
+    assert ('Applied changes: 1 placed, 0 erased, 0 replaced; '
+            '0 note marks added, 0 removed; 1 cells touched.') in stdout
+    assert ('Redoable changes: 0 placed, 0 erased, 0 replaced; '
+            '2 note marks added, 0 removed; 1 cells touched.') in stdout
+    assert ('Applied changes: 1 placed, 0 erased, 0 replaced; '
+            '2 note marks added, 0 removed; 2 cells touched.') in stdout
+    assert 'undo 2, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A multi-cell hint is a single action but counts every changed cell.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint apply trial-forced 3\nhistory summary\n'
+                         'status\nquit\n')
+    assert 'History summary: 1 applied, 0 redoable actions (retained).' in stdout
+    assert ('Applied changes: 3 placed, 0 erased, 0 replaced; '
+            '0 note marks added, 0 removed; 3 cells touched.') in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A strict no-argument summary parser must not accept surplus tokens.
+    bad_summary = ['history summary extra', 'history summary 0',
+                   'history summary 1 2']
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(bad_summary) +
+                         '\nstatus\nhistory summary\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(bad_summary)
+    assert 'History summary: 0 applied, 0 redoable actions (retained).' in stdout
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
     # A new move after Undo cuts the old Redo branch. The timeline must
     # describe the replacement state, never the abandoned pencil notes.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],

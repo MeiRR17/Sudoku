@@ -198,6 +198,49 @@ static void history_diff(const SudokuGame *game,unsigned from,unsigned to){
            changed,placed,erased,replaced,notes_added,notes_removed);
     if(!changed)puts("  No observable differences between the snapshots.");
 }
+/* Read-only statistics for the retained snapshot timeline. Applied and
+ * redoable edits are counted separately; these totals do not represent
+ * actions that have already fallen off the bounded history buffer. */
+typedef struct HistoryTotals {
+    unsigned placed,erased,replaced,notes_added,notes_removed,cells_changed;
+} HistoryTotals;
+static void history_print_totals(const char *name,const HistoryTotals *totals){
+    printf("%s changes: %u placed, %u erased, %u replaced; "
+           "%u note marks added, %u removed; %u cells touched.\n",
+           name,totals->placed,totals->erased,totals->replaced,
+           totals->notes_added,totals->notes_removed,totals->cells_changed);
+}
+static void history_summary(const SudokuGame *game){
+    HistoryTotals applied={0},redoable={0};
+    unsigned step,index;
+    if(!history_valid(game))return;
+    for(step=1u;step<game->history_len;++step){
+        const SudokuGameSnapshot *before=&game->history[step-1u];
+        const SudokuGameSnapshot *after=&game->history[step];
+        HistoryTotals *totals=step<=game->history_cursor?&applied:&redoable;
+        for(index=0u;index<SUDOKU_CELL_COUNT;++index){
+            unsigned previous=before->board.cells[index];
+            unsigned next=after->board.cells[index];
+            uint16_t old_notes=before->notes[index];
+            uint16_t new_notes=after->notes[index];
+            if(previous!=next){
+                if(!previous)++totals->placed;
+                else if(!next)++totals->erased;
+                else ++totals->replaced;
+            }
+            totals->notes_added+=history_bit_count(
+                (uint16_t)(new_notes&(uint16_t)~old_notes));
+            totals->notes_removed+=history_bit_count(
+                (uint16_t)(old_notes&(uint16_t)~new_notes));
+            if(previous!=next||old_notes!=new_notes)
+                ++totals->cells_changed;
+        }
+    }
+    printf("History summary: %u applied, %u redoable actions (retained).\n",
+           game->history_cursor,game->history_len-1u-game->history_cursor);
+    history_print_totals("Applied",&applied);
+    history_print_totals("Redoable",&redoable);
+}
 /* Per-cell change timeline across all retained snapshots. It includes
  * REDO steps after the live cursor and never fabricates command names. */
 static void history_cell(const SudokuGame *game,unsigned row,unsigned col){
@@ -247,7 +290,8 @@ static void commands(void){
     puts("          prune-notes,");
     puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
-    puts("          undo [N], redo [N], history [N], history inspect STEP,");
+    puts("          undo [N], redo [N], history [N], history summary,");
+    puts("          history inspect STEP,");
     puts("          history goto STEP (0 = initial),");
     puts("          history diff FROM TO | history cell ROW COL,");
     puts("          reset, check [details|clear],");
@@ -291,6 +335,7 @@ static void commands(void){
     puts("It detects zero-candidate cells and digits missing from every possible");
     puts("position in a row/column/box, using no cached solved digits.");
     puts("'history [N]' lists recent state changes and redoable steps (default 10).");
+    puts("'history summary' totals applied and redoable snapshot changes.");
     puts("'history inspect STEP' shows exact digit/note changes at that step.");
     puts("'history diff FROM TO' compares any retained snapshots (0..127).");
     puts("'history cell ROW COL' shows that cell's complete change timeline.");
@@ -2887,6 +2932,8 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             uint64_t requested=10u;
             if(!a)
                 history_list(game,10u);
+            else if(strcmp(a,"summary")==0&&!b&&!c&&!extra)
+                history_summary(game);
             else if(strcmp(a,"inspect")==0&&b&&!c&&!extra&&
                     decimal(b,SUDOKU_GAME_HISTORY-1u,&requested)&&requested>=1u)
                 history_inspect(game,(unsigned)requested);
