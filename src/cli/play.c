@@ -48,8 +48,8 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, focus [N], auto-notes, prune-notes,");
-    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|chain [N]],");
-    puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|chain [N]],");
+    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|chain [N]],");
+    puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|chain [N]],");
     puts("          undo [N], redo [N], reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
@@ -65,6 +65,8 @@ static void commands(void){
     puts("'hint apply hidden-pairs [N]' prunes those extra notes in one undo.");
     puts("'hint locked [N]' previews pointing/claiming candidate eliminations.");
     puts("'hint apply locked [N]' prunes those pencil notes in one undo.");
+    puts("'hint x-wing [N]' finds row/column rectangle candidate eliminations.");
+    puts("'hint apply x-wing [N]' erases matching notes in one undo step.");
     puts("'hint chain [N]' previews up to N successive forced singles (1..81).");
     puts("'hint apply' places one; 'hint apply all' batches current forced cells.");
     puts("'hint apply chain [N]' commits at most N singles in one undo.");
@@ -677,6 +679,130 @@ done_locked:
             puts("No matching locked pencil notes to remove; history unchanged.");
     }
 }
+/* A digit confined to the same two columns in exactly two rows (or the
+ * same two rows in exactly two columns) forms an X-Wing. The four corners
+ * reserve both positions, so that digit can be removed from other cells of
+ * the intersecting columns/rows. Use only locally legal candidates, not the
+ * cached solved board; only existing handwritten notes are removed on apply.
+ * Requiring exactly two source lines avoids emitting patterns from a
+ * contradictory three-line/two-position state. */
+static unsigned xwing_index(unsigned axis,unsigned line,unsigned slot){
+    return axis ? slot*9u+line : line*9u+slot;
+}
+static void x_wings(SudokuGame *game,unsigned limit,int apply){
+    uint16_t masks[SUDOKU_CELL_COUNT]={0};
+    uint16_t eliminations[SUDOKU_CELL_COUNT]={0};
+    unsigned axis,digit,a,b,line,slot,first,second,total=0u,i;
+    if(sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot inspect X-Wings: invalid current board.");
+        return;
+    }
+    if(sudoku_game_won(game)){
+        puts("Puzzle already solved; no X-Wing hint needed.");
+        return;
+    }
+    if(sudoku_game_mistakes(game)){
+        puts(apply?"Cannot apply X-Wings: correct the existing mistakes first.":
+                   "Cannot preview X-Wings: correct the existing mistakes first.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        masks[i]=candidate_mask(game,i);
+    for(axis=0u;axis<2u;++axis){
+        for(digit=1u;digit<=9u;++digit){
+            uint16_t bit=(uint16_t)(1u<<digit);
+            for(a=0u;a<8u;++a){
+                unsigned pair=0u,count=0u;
+                for(slot=0u;slot<9u;++slot){
+                    i=xwing_index(axis,a,slot);
+                    if(masks[i]&bit){
+                        pair|=1u<<slot;
+                        ++count;
+                    }
+                }
+                if(count!=2u)continue;
+                first=0u;second=0u;
+                for(slot=0u;slot<9u;++slot)
+                    if(pair&(1u<<slot)){
+                        if(!(pair&( (1u<<slot)-1u)))first=slot;
+                        else second=slot;
+                    }
+                for(b=a+1u;b<9u;++b){
+                    unsigned other=0u,other_count=0u,extra=0u;
+                    unsigned targets[18],target_count=0u;
+                    for(slot=0u;slot<9u;++slot){
+                        i=xwing_index(axis,b,slot);
+                        if(masks[i]&bit){
+                            other|=1u<<slot;
+                            ++other_count;
+                        }
+                    }
+                    if(other_count!=2u||other!=pair)continue;
+                    /* An impossible 3+ matching-line pattern is not a
+                     * sound basis for reporting eliminations. */
+                    for(line=0u;line<9u;++line){
+                        unsigned position=0u,n=0u;
+                        if(line==a||line==b)continue;
+                        for(slot=0u;slot<9u;++slot){
+                            i=xwing_index(axis,line,slot);
+                            if(masks[i]&bit){
+                                position|=1u<<slot;
+                                ++n;
+                            }
+                        }
+                        if(n==2u&&position==pair)extra=1u;
+                    }
+                    if(extra)continue;
+                    for(line=0u;line<9u;++line){
+                        if(line==a||line==b)continue;
+                        for(slot=0u;slot<9u;++slot){
+                            if(!(pair&(1u<<slot)))continue;
+                            i=xwing_index(axis,line,slot);
+                            if(masks[i]&bit)targets[target_count++]=i;
+                        }
+                    }
+                    if(!target_count)continue;
+                    printf("X-Wing %u (%s %u,%u; %s %u,%u; digit %u): corners",
+                           total+1u,axis?"columns":"rows",a+1u,b+1u,
+                           axis?"rows":"columns",first+1u,second+1u,digit);
+                    for(line=a;line<=b;line=b){
+                        for(slot=first;slot<=second;slot=second){
+                            i=xwing_index(axis,line,slot);
+                            printf(" r%uc%u",i/9u+1u,i%9u+1u);
+                            if(slot==second)break;
+                        }
+                        if(line==b)break;
+                    }
+                    fputs("; eliminate",stdout);
+                    for(i=0u;i<target_count;++i){
+                        unsigned target=targets[i];
+                        printf(" r%uc%u",target/9u+1u,target%9u+1u);
+                        if(apply)
+                            eliminations[target]=(uint16_t)(eliminations[target]|bit);
+                    }
+                    putchar('\n');
+                    if(++total==limit)goto done_xwings;
+                }
+            }
+        }
+    }
+done_xwings:
+    if(!total){
+        puts("No actionable X-Wings found.");
+        return;
+    }
+    if(apply){
+        unsigned removed=0u;
+        SudokuGameStatus status=sudoku_game_eliminate_notes(game,eliminations,&removed);
+        if(status!=SUDOKU_GAME_OK)
+            printf("Error: %s\n",sudoku_game_status_text(status));
+        else if(removed)
+            printf("Removed %u X-Wing pencil candidate%s in one undoable edit.\n",
+                   removed,removed==1u?"":"s");
+        else
+            puts("No matching X-Wing pencil notes to remove; history unchanged.");
+    }
+}
 typedef struct LogicalHint {
     unsigned index, digit, group;
     int hidden;
@@ -1085,6 +1211,9 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             else if(strcmp(a,"locked")==0&&
                     (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
                 locked_candidates(game,(unsigned)(b?limit:5u),0);
+            else if(strcmp(a,"x-wing")==0&&
+                    (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
+                x_wings(game,(unsigned)(b?limit:5u),0);
             else if(strcmp(a,"apply")==0&&!b)print_hint(game,1);
             else if(strcmp(a,"chain")==0&&
                     (!b||(!c&&decimal(b,81u,&limit)&&limit>=1u)))
@@ -1104,6 +1233,10 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                     strcmp(b,"locked")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
                 locked_candidates(game,(unsigned)(c?limit:5u),1);
+            else if(strcmp(a,"apply")==0&&b&&
+                    strcmp(b,"x-wing")==0&&
+                    (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
+                x_wings(game,(unsigned)(c?limit:5u),1);
             else if(strcmp(a,"apply")==0&&b&&
                     strcmp(b,"chain")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))

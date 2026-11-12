@@ -227,6 +227,76 @@ with tempfile.TemporaryDirectory() as directory:
         '000000006001000284000009030040006000'
     )
     assert len(pair_puzzle) == 81
+    # X-Wing: in this unique puzzle, digit 2 is restricted to columns
+    # 2,3 in rows 2,5. Therefore 2 can be excluded from the same
+    # columns in other rows. Preview must not change game history.
+    stdout, stderr = run(['--puzzle', pair_puzzle],
+                         'hint x-wing\nhint x-wing 1\nstatus\nquit\n')
+    first_xwing = (
+        'X-Wing 1 (rows 2,5; columns 2,3; digit 2): '
+        'corners r2c2 r2c3 r5c2 r5c3; '
+        'eliminate r1c2 r1c3 r6c2 r6c3 r8c2 r8c3 r9c3'
+    )
+    assert stdout.count(first_xwing) == 2, stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Only existing handwritten marks are removed. Multiple eliminations
+    # form one Undo transaction and preserve unrelated notes/digits.
+    stdout, stderr = run(['--puzzle', pair_puzzle],
+                         'note 1 2 2\nnote 1 3 2\nnote 6 2 2\n'
+                         'note 1 2 7\nstatus\nhint apply x-wing 1\n'
+                         'notes 1 2\nnotes 1 3\nnotes 6 2\nstatus\n'
+                         'undo\nnotes 1 2\nstatus\nredo\n'
+                         'hint apply x-wing 1\nstatus\nquit\n')
+    assert 'Removed 3 X-Wing pencil candidates in one undoable edit.' in stdout
+    assert 'Notes for row 1 col 2: 7\n' in stdout
+    assert 'Notes for row 1 col 3:\n' in stdout
+    assert 'Notes for row 6 col 2:\n' in stdout
+    assert 'Notes for row 1 col 2: 2 7\n' in stdout
+    assert stdout.count('undo 5, redo 0') == 2, stdout
+    assert 'undo 4, redo 1' in stdout
+    assert 'No matching X-Wing pencil notes to remove; history unchanged.' in stdout
+    assert not stderr
+    checks += 1
+
+    # No handwritten candidates: applying a logical X-Wing is a history-neutral
+    # no-op; don't fill solution digits or guess.
+    stdout, stderr = run(['--puzzle', pair_puzzle],
+                         'hint apply x-wing\nstatus\nundo\nquit\n')
+    assert 'No matching X-Wing pencil notes to remove; history unchanged.' in stdout
+    assert 'undo 0, redo 0' in stdout
+    assert 'Error: no action to undo or redo' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--puzzle', solution],
+                         'hint x-wing\nhint apply x-wing\nstatus\nquit\n')
+    assert stdout.count('Puzzle already solved; no X-Wing hint needed.') == 2
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 9 4\nhint x-wing\nhint apply x-wing\nstatus\nquit\n')
+    assert 'Cannot preview X-Wings: correct the existing mistakes first.' in stdout
+    assert 'Cannot apply X-Wings: correct the existing mistakes first.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    invalid_xwing = [
+        'hint x-wing 0', 'hint x-wing 82', 'hint x-wing -1',
+        'hint x-wing nope', 'hint x-wing 1 extra',
+        'hint apply x-wing 0', 'hint apply x-wing 82',
+        'hint apply x-wing -1', 'hint apply x-wing nope',
+        'hint apply x-wing 1 extra',
+    ]
+    stdout, stderr = run(['--puzzle', pair_puzzle],
+                         'status\n' + '\n'.join(invalid_xwing) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_xwing)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'X-Wing 1 ' not in stdout and not stderr
+    checks += 1
+
     stdout, stderr = run(['--puzzle', pair_puzzle],
                          'hint pairs\nstatus\nnote 1 1 2\n'
                          'hint pairs 1\nnotes 1 1\nstatus\nundo\n'
