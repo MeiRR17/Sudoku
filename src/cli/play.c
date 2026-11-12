@@ -241,6 +241,52 @@ static void history_summary(const SudokuGame *game){
     history_print_totals("Applied",&applied);
     history_print_totals("Redoable",&redoable);
 }
+/* Identify frequently edited cells across retained Undo/Redo snapshots.
+ * A step changing both a digit and notes counts as one edited step, but
+ * contributes to both detail columns. Redoable steps are included. */
+typedef struct HistoryCellActivity {
+    unsigned steps,board_edits,note_edits,done,redo;
+} HistoryCellActivity;
+static void history_hotspots(const SudokuGame *game,unsigned limit){
+    HistoryCellActivity activity[SUDOKU_CELL_COUNT]={0};
+    unsigned char listed[SUDOKU_CELL_COUNT]={0};
+    unsigned step,i,rank,total=0u;
+    if(!history_valid(game))return;
+    for(step=1u;step<game->history_len;++step){
+        const SudokuGameSnapshot *before=&game->history[step-1u];
+        const SudokuGameSnapshot *after=&game->history[step];
+        for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+            unsigned board_changed=before->board.cells[i]!=after->board.cells[i];
+            unsigned notes_changed=before->notes[i]!=after->notes[i];
+            if(!board_changed&&!notes_changed)continue;
+            ++activity[i].steps;
+            activity[i].board_edits+=board_changed;
+            activity[i].note_edits+=notes_changed;
+            if(step<=game->history_cursor)++activity[i].done;
+            else ++activity[i].redo;
+        }
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        if(activity[i].steps)++total;
+    printf("History hotspots: %u edited cells across %u retained actions.\n",
+           total,game->history_len-1u);
+    if(!total){puts("No edited cells in retained history.");return;}
+    for(rank=0u;rank<limit&&rank<total;++rank){
+        unsigned best=SUDOKU_CELL_COUNT;
+        for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+            if(listed[i]||!activity[i].steps)continue;
+            if(best==SUDOKU_CELL_COUNT||activity[i].steps>activity[best].steps)
+                best=i;
+        }
+        listed[best]=1u;
+        printf("  r%uc%u: %u edited steps (%u board, %u notes; %u DONE, %u REDO).\n",
+               best/9u+1u,best%9u+1u,activity[best].steps,
+               activity[best].board_edits,activity[best].note_edits,
+               activity[best].done,activity[best].redo);
+    }
+    if(total>rank)
+        printf("%u more edited cells hidden (raise hotspots limit).\n",total-rank);
+}
 /* Per-cell change timeline across all retained snapshots. It includes
  * REDO steps after the live cursor and never fabricates command names. */
 static void history_cell(const SudokuGame *game,unsigned row,unsigned col){
@@ -291,6 +337,7 @@ static void commands(void){
     puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          undo [N], redo [N], history [N], history summary,");
+    puts("          history hotspots [N],");
     puts("          history inspect STEP,");
     puts("          history goto STEP (0 = initial),");
     puts("          history diff FROM TO | history cell ROW COL,");
@@ -336,6 +383,8 @@ static void commands(void){
     puts("position in a row/column/box, using no cached solved digits.");
     puts("'history [N]' lists recent state changes and redoable steps (default 10).");
     puts("'history summary' totals applied and redoable snapshot changes.");
+    puts("'history hotspots [N]' ranks most frequently edited cells (default 10).");
+    puts("History views include redoable edits and never reveal the solution.");
     puts("'history inspect STEP' shows exact digit/note changes at that step.");
     puts("'history diff FROM TO' compares any retained snapshots (0..127).");
     puts("'history cell ROW COL' shows that cell's complete change timeline.");
@@ -2934,6 +2983,9 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                 history_list(game,10u);
             else if(strcmp(a,"summary")==0&&!b&&!c&&!extra)
                 history_summary(game);
+            else if(strcmp(a,"hotspots")==0&&
+                    (!b||(!c&&!extra&&decimal(b,SUDOKU_CELL_COUNT,&requested)&&requested>=1u)))
+                history_hotspots(game,(unsigned)requested);
             else if(strcmp(a,"inspect")==0&&b&&!c&&!extra&&
                     decimal(b,SUDOKU_GAME_HISTORY-1u,&requested)&&requested>=1u)
                 history_inspect(game,(unsigned)requested);

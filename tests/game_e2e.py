@@ -1892,6 +1892,59 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 0, redo 0') == 2 and not stderr
     checks += 1
 
+    # Rank retained edits by cell without mutating applied or redoable history.
+    # Ties use row-major order, and counts are per snapshot transition.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'history hotspots\nset 1 3 4\nnotes set 1 4 19\n'
+                         'notes add 1 4 2\nundo\nhistory hotspots 1\n'
+                         'history hotspots 10\nstatus\nquit\n')
+    assert 'History hotspots: 0 edited cells across 0 retained actions.' in stdout
+    assert 'No edited cells in retained history.' in stdout
+    assert 'History hotspots: 2 edited cells across 3 retained actions.' in stdout
+    assert '  r1c4: 2 edited steps (0 board, 2 notes; 1 DONE, 1 REDO).' in stdout
+    assert '  r1c3: 1 edited steps (1 board, 0 notes; 1 DONE, 0 REDO).' in stdout
+    assert '1 more edited cells hidden (raise hotspots limit).' in stdout
+    assert 'undo 2, redo 1' in stdout and not stderr
+    checks += 1
+
+    # One bulk edit records one transition per affected cell, not one per digit
+    # and does not fabricate command names or consult the solved puzzle.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint apply trial-forced 3\n'
+                         'history hotspots 2\nstatus\nquit\n')
+    assert 'History hotspots: 3 edited cells across 1 retained actions.' in stdout
+    assert '  r1c6: 1 edited steps (1 board, 0 notes; 1 DONE, 0 REDO).' in stdout
+    assert '  r1c8: 1 edited steps (1 board, 0 notes; 1 DONE, 0 REDO).' in stdout
+    assert '1 more edited cells hidden (raise hotspots limit).' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Digit placement clearing pencil marks is a single edited step but
+    # contributes to both board and note details.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 3 19\nset 1 3 4\nundo\n'
+                         'history hotspots\nstatus\nquit\n')
+    assert 'History hotspots: 1 edited cells across 2 retained actions.' in stdout
+    assert '  r1c3: 2 edited steps (1 board, 2 notes; 1 DONE, 1 REDO).' in stdout
+    assert 'undo 1, redo 1' in stdout and not stderr
+    checks += 1
+
+    # Reject bad limits and trailing tokens instead of selecting a fallback
+    # operation or changing Undo/Redo state.
+    bad_hotspots = [
+        'history hotspots 0', 'history hotspots 82', 'history hotspots -1',
+        'history hotspots nope', 'history hotspots 1 extra',
+        'history hotspots 1 extra more', 'history hotspots 1.0',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(bad_hotspots) +
+                         '\nstatus\nhistory hotspots\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(bad_hotspots)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert stdout.count('History hotspots: 0 edited cells across 0 retained actions.') == 1
+    assert not stderr
+    checks += 1
+
     # A new move after Undo cuts the old Redo branch. The timeline must
     # describe the replacement state, never the abandoned pencil notes.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],
