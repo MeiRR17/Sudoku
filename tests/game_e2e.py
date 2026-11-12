@@ -968,6 +968,65 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'undo 2, redo 0' in stdout and not stderr
     checks += 1
 
+    # Fill exactly one row. Notes in a different row are preserved;
+    # repeated fill is history neutral and Undo reverses all row changes.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 2 2 9\nnotes fill row 1\n'
+                         'notes 1 3\nnotes 2 2\nstatus\n'
+                         'notes fill row 1\nstatus\nundo\nnotes 1 3\n'
+                         'notes 2 2\nstatus\nredo\nnotes 1 3\nstatus\nquit\n')
+    assert 'Notes for row 1 col 3: 1 2 4\n' in stdout
+    assert stdout.count('Notes for row 2 col 2: 9\n') == 2
+    assert 'Notes for row 1 col 3:\n' in stdout
+    assert stdout.count('undo 2, redo 0') == 3
+    assert 'undo 1, redo 1' in stdout and not stderr
+    checks += 1
+
+    # Prune marks only in row 1, adding no candidate digits or history
+    # for unchanged cells. Undo restores both dropped handwritten marks.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 3 19\nnotes set 1 4 8\n'
+                         'notes set 2 2 9\nnotes prune row 1\n'
+                         'notes 1 3\nnotes 1 4\nnotes 2 2\nstatus\n'
+                         'undo\nnotes 1 3\nnotes 1 4\nstatus\nquit\n')
+    assert 'Notes for row 1 col 3: 1\n' in stdout
+    assert 'Notes for row 1 col 3: 1 9\n' in stdout
+    assert 'Notes for row 1 col 4:\n' in stdout
+    assert 'Notes for row 1 col 4: 8\n' in stdout
+    assert 'Notes for row 2 col 2: 9\n' in stdout
+    assert 'undo 4, redo 0' in stdout and 'undo 3, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # Both a column and a box can be refreshed independently; outside
+    # their selected nine cells existing pencil marks must be unchanged.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes fill column 3\nnotes 1 3\nnotes 1 4\n'
+                         'notes fill box 1\nnotes 1 4\nnotes 1 3\n'
+                         'status\nundo\nstatus\nquit\n')
+    assert stdout.count('Notes for row 1 col 3: 1 2 4\n') == 2
+    assert stdout.count('Notes for row 1 col 4:\n') == 2
+    assert 'undo 2, redo 0' in stdout and 'undo 1, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # Reject invalid units, bounds and surplus tokens with no mutations.
+    bad_unit_notes = [
+        'notes fill row 0', 'notes fill row 10',
+        'notes prune column 0', 'notes prune box 10',
+        'notes fill block 1', 'notes prune boxes 1',
+        'notes fill row -1', 'notes fill box nope',
+        'notes fill row', 'notes prune column',
+        'notes fill row 1 extra', 'notes prune box 1 extra',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(bad_unit_notes) +
+                         '\nstatus\nnotes fill box 1\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(bad_unit_notes)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],

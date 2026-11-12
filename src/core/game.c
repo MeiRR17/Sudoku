@@ -312,6 +312,55 @@ SudokuGameStatus sudoku_game_prune_cell_notes(SudokuGame *game,
                                                unsigned row,unsigned col) {
     return refresh_cell_notes(game,row,col,1);
 }
+/* Refresh one row, column or box as a single undoable pencil-note edit.
+ * Only editable blanks in the chosen unit change. Live candidates are used,
+ * never the cached solution; invalid public state fails before mutation. */
+static SudokuGameStatus refresh_unit_notes(SudokuGame *game,
+                                            SudokuGameUnit unit,
+                                            unsigned number,int prune) {
+    SudokuGameSnapshot next;
+    unsigned slot;
+    int changed=0;
+    if(!valid_game(game))return SUDOKU_GAME_INVALID;
+    if(number<1u||number>9u||
+       (unit!=SUDOKU_GAME_ROW&&unit!=SUDOKU_GAME_COLUMN&&
+        unit!=SUDOKU_GAME_BOX))return SUDOKU_GAME_RANGE;
+    if(!valid_live_state(game))return SUDOKU_GAME_INVALID;
+    next=game->state;
+    for(slot=0u;slot<9u;++slot){
+        unsigned index,row,col;
+        uint16_t allowed,mask;
+        if(unit==SUDOKU_GAME_ROW)
+            index=(number-1u)*9u+slot;
+        else if(unit==SUDOKU_GAME_COLUMN)
+            index=slot*9u+number-1u;
+        else {
+            unsigned box=number-1u;
+            index=((box/3u)*3u+slot/3u)*9u+(box%3u)*3u+slot%3u;
+        }
+        if(next.board.cells[index])continue;
+        row=index/9u+1u;
+        col=index%9u+1u;
+        allowed=validated_candidates(&game->state.board,row,col);
+        mask=prune?(uint16_t)(game->state.notes[index]&allowed):allowed;
+        if(next.notes[index]!=mask){
+            next.notes[index]=mask;
+            changed=1;
+        }
+    }
+    if(!changed)return SUDOKU_GAME_OK;
+    game->state=next;
+    remember(game);
+    return SUDOKU_GAME_OK;
+}
+SudokuGameStatus sudoku_game_fill_unit_notes(SudokuGame *game,
+                                              SudokuGameUnit unit,unsigned number) {
+    return refresh_unit_notes(game,unit,number,0);
+}
+SudokuGameStatus sudoku_game_prune_unit_notes(SudokuGame *game,
+                                               SudokuGameUnit unit,unsigned number) {
+    return refresh_unit_notes(game,unit,number,1);
+}
 /* Validate the entire proposed elimination before changing one note bit.
  * This is a general-purpose, solution-blind pencil-mark operation. */
 SudokuGameStatus sudoku_game_eliminate_notes(

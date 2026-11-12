@@ -48,7 +48,8 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
-    puts("          notes clear ROW COL, notes fill ROW COL, notes prune ROW COL,");
+    puts("          notes clear ROW COL, notes fill|prune ROW COL,");
+    puts("          notes fill|prune row|column|box N (unit 1..9),");
     puts("          candidates ROW COL, focus [N], auto-notes, prune-notes,");
     puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
@@ -63,6 +64,8 @@ static void commands(void){
     puts("Adding existing or removing absent marks leaves history unchanged.");
     puts("'notes fill ROW COL' sets all locally legal marks for one cell.");
     puts("'notes prune ROW COL' removes illegal marks from that cell only.");
+    puts("'notes fill row 1' updates all blank cells in that row in one undo.");
+    puts("Use 'column' or 'box' instead of 'row', and 'prune' to remove only.");
     puts("Invalid/duplicate digits are rejected; one replacement = one Undo.");
     puts("'candidates' lists legal digits without guessing.");
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
@@ -1707,6 +1710,18 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             status=strcmp(a,"fill")==0 ?
                    sudoku_game_fill_cell_notes(game,r,d) :
                    sudoku_game_prune_cell_notes(game,r,d);
+        else if(strcmp(command,"notes")==0&&a&&
+                (strcmp(a,"fill")==0||strcmp(a,"prune")==0)&&
+                b&&c&&!extra&&
+                (strcmp(b,"row")==0||strcmp(b,"column")==0||
+                 strcmp(b,"box")==0)&&decimal(c,9u,&digit)&&digit>=1u){
+            SudokuGameUnit unit=strcmp(b,"row")==0?SUDOKU_GAME_ROW:
+                                strcmp(b,"column")==0?SUDOKU_GAME_COLUMN:
+                                SUDOKU_GAME_BOX;
+            status=strcmp(a,"fill")==0?
+                   sudoku_game_fill_unit_notes(game,unit,(unsigned)digit):
+                   sudoku_game_prune_unit_notes(game,unit,(unsigned)digit);
+        }
         else if(strcmp(command,"notes")==0&&position(a,b,&r,&d)&&!c&&!extra){
             print_notes(game,r,d);
             continue;

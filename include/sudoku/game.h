@@ -77,6 +77,20 @@ SudokuGameStatus sudoku_game_fill_cell_notes(SudokuGame *game,
                                               unsigned row, unsigned col);
 SudokuGameStatus sudoku_game_prune_cell_notes(SudokuGame *game,
                                                unsigned row, unsigned col);
+/* Atomic row/column/box pencil updates (unit number 1..9).
+ * Fill replaces only the selected unit's empty editable cells with current
+ * legal candidates; prune removes invalid marks only in those cells.
+ * Givens, filled cells and cells outside the unit remain untouched.
+ * No-op preserves Undo/Redo; corrupt public game state is rejected. */
+typedef enum SudokuGameUnit {
+    SUDOKU_GAME_ROW=0,
+    SUDOKU_GAME_COLUMN=1,
+    SUDOKU_GAME_BOX=2
+} SudokuGameUnit;
+SudokuGameStatus sudoku_game_fill_unit_notes(SudokuGame *game,
+                                              SudokuGameUnit unit,unsigned number);
+SudokuGameStatus sudoku_game_prune_unit_notes(SudokuGame *game,
+                                               SudokuGameUnit unit,unsigned number);
 /* 1 << digit bitmask (digits 1..9), based only on the current board.
  * Returns 0 on invalid arguments or a filled cell. Observational. */
 uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned col);
