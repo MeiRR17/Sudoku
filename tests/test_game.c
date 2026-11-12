@@ -269,6 +269,42 @@ static int check_game(void){
         game->state.notes[0]=0u;
         CHECK(sudoku_game_set_notes(game,1u,3u,chosen)==SUDOKU_GAME_OK);
         CHECK(game->state.notes[2]==chosen);
+        /* Multi-bit add/remove is idempotent; illegal masks are rejected
+         * even for removal, where invalid bits could otherwise vanish. */
+        cursor=game->history_cursor;
+        CHECK(sudoku_game_add_notes(game,1u,3u,(uint16_t)(1u<<5))==
+              SUDOKU_GAME_OK);
+        CHECK(game->state.notes[2]==(uint16_t)(chosen|(1u<<5)));
+        CHECK(game->history_cursor==cursor+1u);
+        cursor=game->history_cursor;
+        CHECK(sudoku_game_add_notes(game,1u,3u,(uint16_t)(1u<<5))==
+              SUDOKU_GAME_OK);
+        CHECK(game->history_cursor==cursor);
+        CHECK(sudoku_game_remove_notes(game,1u,3u,(uint16_t)(1u<<3))==
+              SUDOKU_GAME_OK);
+        CHECK(game->state.notes[2]==(uint16_t)((chosen|(1u<<5))&~(1u<<3)));
+        cursor=game->history_cursor;
+        CHECK(sudoku_game_remove_notes(game,1u,3u,(uint16_t)(1u<<3))==
+              SUDOKU_GAME_OK);
+        CHECK(game->history_cursor==cursor);
+        CHECK(sudoku_game_remove_notes(game,1u,3u,1u)==SUDOKU_GAME_RANGE);
+        CHECK(sudoku_game_add_notes(game,1u,3u,0x8000u)==SUDOKU_GAME_RANGE);
+        CHECK(sudoku_game_remove_notes(game,1u,3u,0x8000u)==SUDOKU_GAME_RANGE);
+        CHECK(sudoku_game_add_notes(game,1u,1u,(uint16_t)(1u<<3))==
+              SUDOKU_GAME_GIVEN);
+        CHECK(sudoku_game_remove_notes(game,1u,1u,(uint16_t)(1u<<3))==
+              SUDOKU_GAME_GIVEN);
+        CHECK(sudoku_game_add_notes(game,0u,3u,0u)==SUDOKU_GAME_RANGE);
+        CHECK(sudoku_game_remove_notes(NULL,1u,3u,0u)==SUDOKU_GAME_INVALID);
+        CHECK(game->history_cursor==cursor);
+        CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+        CHECK(game->state.notes[2]==(uint16_t)(chosen|(1u<<5)));
+        CHECK(sudoku_game_redo(game)==SUDOKU_GAME_OK);
+        CHECK(game->state.notes[2]==(uint16_t)((chosen|(1u<<5))&~(1u<<3)));
+        /* Reset this cell so the pre-existing single-toggle regression
+         * below starts with no pencil marks, not stale notes. */
+        CHECK(sudoku_game_set_notes(game,1u,3u,0u)==SUDOKU_GAME_OK);
+        CHECK(game->state.notes[2]==0u);
     }
     /* Erase must clear pencil marks even when no digit is placed, while
      * preserving undo/redo history and avoiding phantom no-op edits. */

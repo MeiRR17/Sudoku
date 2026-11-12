@@ -59,6 +59,14 @@ SudokuGameStatus sudoku_game_note(SudokuGame *game, unsigned row, unsigned col, 
  * Notes are personal marks, not restricted to live legal candidates. */
 SudokuGameStatus sudoku_game_set_notes(SudokuGame *game,
                                       unsigned row, unsigned col, uint16_t mask);
+/* Add/remove any subset of 1..9 pencil digits in one history snapshot.
+ * Unlike toggle, both are idempotent: a duplicate add or absent removal
+ * preserves the undo/redo cursor. Zero masks are valid no-ops. Both are
+ * atomic on invalid masks, coordinates, clues, filled cells or bad state. */
+SudokuGameStatus sudoku_game_add_notes(SudokuGame *game,
+                                     unsigned row, unsigned col, uint16_t mask);
+SudokuGameStatus sudoku_game_remove_notes(SudokuGame *game,
+                                        unsigned row, unsigned col, uint16_t mask);
 /* 1 << digit bitmask (digits 1..9), based only on the current board.
  * Returns 0 on invalid arguments or a filled cell. Observational. */
 uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned col);

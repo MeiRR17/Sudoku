@@ -262,6 +262,29 @@ SudokuGameStatus sudoku_game_set_notes(SudokuGame *game,
     remember(game);
     return SUDOKU_GAME_OK;
 }
+/* Add or remove a group of pencil digits in one undoable edit. Compute
+ * the desired mask, then let set_notes enforce all public-board, clue and
+ * pencil-integrity invariants before touching live history. Note that
+ * removal must validate the supplied mask BEFORE applying complement:
+ * otherwise an illegal bit would silently disappear as a no-op. */
+static SudokuGameStatus modify_notes(SudokuGame *game,unsigned row,
+                                      unsigned col,uint16_t mask,int add) {
+    int idx=cell_index(row,col);
+    uint16_t next;
+    if (!game) return SUDOKU_GAME_INVALID;
+    if (idx<0 || (mask & (uint16_t)~0x3feu)!=0u) return SUDOKU_GAME_RANGE;
+    next=add ? (uint16_t)(game->state.notes[idx]|mask) :
+               (uint16_t)(game->state.notes[idx]&(uint16_t)~mask);
+    return sudoku_game_set_notes(game,row,col,next);
+}
+SudokuGameStatus sudoku_game_add_notes(SudokuGame *game,
+                                     unsigned row,unsigned col,uint16_t mask) {
+    return modify_notes(game,row,col,mask,1);
+}
+SudokuGameStatus sudoku_game_remove_notes(SudokuGame *game,
+                                        unsigned row,unsigned col,uint16_t mask) {
+    return modify_notes(game,row,col,mask,0);
+}
 /* Validate the entire proposed elimination before changing one note bit.
  * This is a general-purpose, solution-blind pencil-mark operation. */
 SudokuGameStatus sudoku_game_eliminate_notes(

@@ -47,7 +47,8 @@ static int use(const char *message){
 }
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
-    puts("          notes ROW COL, notes set ROW COL DIGITS, notes clear ROW COL,");
+    puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
+    puts("          notes clear ROW COL,");
     puts("          candidates ROW COL, focus [N], auto-notes, prune-notes,");
     puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
@@ -58,6 +59,8 @@ static void commands(void){
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'note' toggles a mark; 'notes set ROW COL 135' replaces the full set.");
     puts("'notes set ROW COL -' or 'notes clear ROW COL' clears only that cell.");
+    puts("'notes add ROW COL 135' adds marks; 'notes remove ROW COL 135' erases.");
+    puts("Adding existing or removing absent marks leaves history unchanged.");
     puts("Invalid/duplicate digits are rejected; one replacement = one Undo.");
     puts("'candidates' lists legal digits without guessing.");
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
@@ -1681,14 +1684,17 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                         sudoku_game_empty(game),sudoku_game_mistakes(game));
             continue;
         }
-        else if(strcmp(command,"notes")==0&&a&&strcmp(a,"set")==0&&
-                position(b,c,&r,&d)&&extra){
+        else if(strcmp(command,"notes")==0&&a&&
+                (strcmp(a,"set")==0||strcmp(a,"add")==0||
+                 strcmp(a,"remove")==0)&&position(b,c,&r,&d)&&extra){
             uint16_t mask=0u;
             if(!parse_note_digits(extra,&mask)){
                 puts("Error: invalid note digits; use 1..9 once each, or '-'.");
                 continue;
             }
-            status=sudoku_game_set_notes(game,r,d,mask);
+            if(strcmp(a,"set")==0)status=sudoku_game_set_notes(game,r,d,mask);
+            else if(strcmp(a,"add")==0)status=sudoku_game_add_notes(game,r,d,mask);
+            else status=sudoku_game_remove_notes(game,r,d,mask);
         }
         else if(strcmp(command,"notes")==0&&a&&strcmp(a,"clear")==0&&
                 position(b,c,&r,&d)&&!extra)
