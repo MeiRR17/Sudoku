@@ -1314,6 +1314,83 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Notes for row 1 col 1: 1 9\n' in stdout and not stderr
     checks += 1
 
+    # Probe a locally legal but globally wrong digit without placing it:
+    # the tentative 4 at r1c9 makes r7c9 lose its final candidate.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'probe 1 9 4\nstatus\nnotes 1 9\nquit\n')
+    assert 'Probe row 1 col 9 = 4: locally legal, NOT applied.' in stdout
+    assert 'Probe dead end: row 7 col 9 would have no legal digits.' in stdout
+    assert ('Probe summary: 10 peer candidates removed; '
+            '1 new zero-candidate cells; 0 new missing-digit unit gaps.') in stdout
+    assert 'Progress: 30/81 filled' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Unit-level dead-end distinct from a cell with no candidates.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'probe 1 3 1\nstatus\nquit\n')
+    assert 'Probe row 1 col 3 = 1: locally legal, NOT applied.' in stdout
+    assert 'Probe dead end: digit 1 would have no place in column 8.' in stdout
+    assert ('Probe summary: 7 peer candidates removed; '
+            '0 new zero-candidate cells; 1 new missing-digit unit gaps.') in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A locally allowed hypothesis without immediate contradictions cannot
+    # be certified correct; the report must say so explicitly.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'probe 1 3 4\nstatus\nquit\n')
+    assert 'Probe row 1 col 3 = 4: locally legal, NOT applied.' in stdout
+    assert ('Probe summary: 8 peer candidates removed; '
+            '0 new zero-candidate cells; 0 new missing-digit unit gaps.') in stdout
+    assert 'does NOT prove the move is correct.' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Immediate local violations, immutable clues and filled entries fail
+    # without modifying the board, handwritten marks or Undo history.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 3 19\n'
+                         'probe 1 3 5\nprobe 1 1 5\nnotes 1 3\n'
+                         'status\nset 1 3 4\nprobe 1 3 1\n'
+                         'status\nquit\n')
+    assert 'Cannot probe row 1 col 3 = 5: digit is not locally legal.' in stdout
+    assert 'Cannot probe row 1 col 1: immutable original clue.' in stdout
+    assert 'Cannot probe row 1 col 3: cell already contains 4.' in stdout
+    assert 'Notes for row 1 col 3: 1 9\n' in stdout
+    assert 'undo 1, redo 0' in stdout and 'undo 2, redo 0' in stdout
+    assert not stderr
+    checks += 1
+
+    # Probe of the final open cell in a near-solved puzzle is preview only
+    # and must not automatically declare victory or create a history step.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'probe 1 1 5\nstatus\nquit\n')
+    assert 'Probe row 1 col 1 = 5: locally legal, NOT applied.' in stdout
+    assert ('Probe summary: 0 peer candidates removed; '
+            '0 new zero-candidate cells; 0 new missing-digit unit gaps.') in stdout
+    assert 'Progress: 80/81 filled' in stdout
+    assert 'SOLVED!' not in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Strict command argument parsing: invalid digits, coordinates, extra
+    # tokens and unsupported aliases never evaluate or apply a hypothesis.
+    invalid_probes = [
+        'probe', 'probe 1', 'probe 1 3',
+        'probe 0 3 1', 'probe 10 3 1',
+        'probe 1 0 1', 'probe 1 3 0', 'probe 1 3 10',
+        'probe 1 3 -1', 'probe 1 3 x',
+        'probe 1 3 1 extra', 'probe 1 3 1 extra extra',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(invalid_probes) +
+                         '\nstatus\nprobe 1 3 4\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_probes)
+    assert stdout.count('Probe row 1 col 3 = 4: locally legal, NOT applied.') == 1
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],

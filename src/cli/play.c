@@ -53,7 +53,8 @@ static void commands(void){
     puts("          notes audit [N] | notes audit row|column|box N,");
     puts("          notes clear ROW COL, notes fill|prune ROW COL,");
     puts("          notes fill|prune row|column|box N (unit 1..9),");
-    puts("          candidates ROW COL, focus [N], analyze [N], auto-notes,");
+    puts("          candidates ROW COL, probe ROW COL DIGIT, focus [N],");
+    puts("          analyze [N], auto-notes,");
     puts("          prune-notes,");
     puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
@@ -80,6 +81,8 @@ static void commands(void){
     puts("Invalid/duplicate digits are rejected; one replacement = one Undo.");
     puts("'candidates' lists legal digits without guessing.");
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
+    puts("'probe ROW COL DIGIT' previews one locally legal move without applying.");
+    puts("It lists newly impossible cells/digits, but does not prove correctness.");
     puts("'analyze [N]' reports candidate counts and contradictions (default 10).");
     puts("It detects zero-candidate cells and digits missing from every possible");
     puts("position in a row/column/box, using no cached solved digits.");
@@ -684,6 +687,117 @@ static void analyze_board(const SudokuGame *game,unsigned limit){
                dead_cells+blocked-shown);
     if(!dead_cells&&!blocked)
         puts("No immediate candidate contradictions found; solvability is not guaranteed.");
+}
+/* Read-only speculative placement: use the current public board and local
+ * row/column/box rules only. A probe is NOT a move or a solution oracle.
+ * Compare before/after legal candidates to expose immediate dead ends
+ * without consulting the cached solved grid or changing game history. */
+static uint16_t probe_candidates(const SudokuBoard *board,unsigned index){
+    uint16_t occupied=0u;
+    unsigned row=index/9u,col=index%9u,k;
+    if(board->cells[index])return 0u;
+    for(k=0u;k<9u;++k){
+        unsigned row_digit=board->cells[row*9u+k];
+        unsigned col_digit=board->cells[k*9u+col];
+        unsigned box_digit=board->cells[(row/3u*3u+k/3u)*9u+
+                                       (col/3u*3u+k%3u)];
+        occupied=(uint16_t)(occupied|
+                            (uint16_t)(1u<<row_digit)|
+                            (uint16_t)(1u<<col_digit)|
+                            (uint16_t)(1u<<box_digit));
+    }
+    return (uint16_t)(0x3feu&(uint16_t)~occupied);
+}
+static unsigned probe_count_bits(uint16_t mask){
+    unsigned count=0u;
+    while(mask){mask=(uint16_t)(mask&(uint16_t)(mask-1u));++count;}
+    return count;
+}
+static void probe_placement(const SudokuGame *game,
+                            unsigned row,unsigned col,unsigned digit){
+    SudokuBoard trial;
+    uint16_t before[SUDOKU_CELL_COUNT]={0};
+    uint16_t after[SUDOKU_CELL_COUNT]={0};
+    unsigned i,unit,slot,d,removed=0u,new_zero=0u,new_gaps=0u,shown=0u;
+    unsigned target=(row-1u)*9u+col-1u;
+    uint16_t bit=(uint16_t)(1u<<digit);
+    if(sudoku_board_validate(&game->givens,NULL)!=SUDOKU_OK||
+       sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot probe: invalid puzzle or current board.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        if(game->givens.cells[i]&&
+           game->state.board.cells[i]!=game->givens.cells[i]){
+            puts("Cannot probe: immutable clues were altered.");
+            return;
+        }
+    if(game->givens.cells[target]){
+        printf("Cannot probe row %u col %u: immutable original clue.\n",row,col);
+        return;
+    }
+    if(game->state.board.cells[target]){
+        printf("Cannot probe row %u col %u: cell already contains %u.\n",
+               row,col,(unsigned)game->state.board.cells[target]);
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        before[i]=probe_candidates(&game->state.board,i);
+    if(!(before[target]&bit)){
+        printf("Cannot probe row %u col %u = %u: digit is not locally legal.\n",
+               row,col,digit);
+        return;
+    }
+    trial=game->state.board;
+    trial.cells[target]=(uint8_t)digit;
+    if(sudoku_board_validate(&trial,NULL)!=SUDOKU_OK){
+        puts("Cannot probe: hypothetical move violates Sudoku rules.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        after[i]=probe_candidates(&trial,i);
+    printf("Probe row %u col %u = %u: locally legal, NOT applied.\n",
+           row,col,digit);
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+        if(i==target||game->state.board.cells[i])continue;
+        removed+=probe_count_bits((uint16_t)(before[i]&(uint16_t)~after[i]));
+        if(before[i]&&!after[i]){
+            ++new_zero;
+            if(new_zero<=4u)
+                printf("Probe dead end: row %u col %u would have no legal digits.\n",
+                       i/9u+1u,i%9u+1u);
+        }
+    }
+    for(unit=0u;unit<27u;++unit){
+        const char *kind=unit<9u?"row":unit<18u?"column":"box";
+        for(d=1u;d<=9u;++d){
+            unsigned existed=0u,remains=0u;
+            uint16_t check=(uint16_t)(1u<<d);
+            for(slot=0u;slot<9u;++slot){
+                unsigned index=pair_unit_cell(unit,slot);
+                if(game->state.board.cells[index]==d||
+                   (before[index]&check))existed=1u;
+                if(trial.cells[index]==d||(after[index]&check))remains=1u;
+            }
+            if(existed&&!remains){
+                ++new_gaps;
+                if(new_gaps<=4u)
+                    printf("Probe dead end: digit %u would have no place in %s %u.\n",
+                           d,kind,unit%9u+1u);
+            }
+        }
+    }
+    printf("Probe summary: %u peer candidates removed; "
+           "%u new zero-candidate cells; %u new missing-digit unit gaps.\n",
+           removed,new_zero,new_gaps);
+    if(new_zero>4u||new_gaps>4u){
+        shown=(new_zero>4u?new_zero-4u:0u)+
+              (new_gaps>4u?new_gaps-4u:0u);
+        printf("%u additional immediate dead ends not listed.\n",shown);
+    }
+    if(!new_zero&&!new_gaps)
+        puts("No immediate contradiction found; this does NOT prove the move is correct.");
+    puts("Probe is read-only; use 'set' to make a move.");
 }
 static void naked_pairs(SudokuGame *game,unsigned limit,int apply){
     uint16_t masks[SUDOKU_CELL_COUNT]={0};
@@ -1934,6 +2048,13 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             uint64_t limit=10u;
             if(!a||(!b&&decimal(a,SUDOKU_CELL_COUNT,&limit)&&limit>=1u))
                 analyze_board(game,(unsigned)limit);
+            else puts("Error: unknown command or invalid arguments. Type 'help'.");
+            continue;
+        }
+        if(strcmp(command,"probe")==0){
+            if(position(a,b,&r,&d)&&c&&!extra&&
+               decimal(c,9u,&digit)&&digit>=1u)
+                probe_placement(game,r,d,(unsigned)digit);
             else puts("Error: unknown command or invalid arguments. Type 'help'.");
             continue;
         }
