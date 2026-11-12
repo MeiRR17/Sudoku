@@ -49,6 +49,7 @@ static void commands(void){
     puts("Commands: show [notes|candidates], set ROW COL DIGIT, erase ROW COL,");
     puts("          note ROW COL DIGIT,");
     puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
+    puts("          notes audit [N] | notes audit row|column|box N,");
     puts("          notes clear ROW COL, notes fill|prune ROW COL,");
     puts("          notes fill|prune row|column|box N (unit 1..9),");
     puts("          candidates ROW COL, focus [N], auto-notes, prune-notes,");
@@ -65,6 +66,9 @@ static void commands(void){
     puts("'notes set ROW COL -' or 'notes clear ROW COL' clears only that cell.");
     puts("'notes add ROW COL 135' adds marks; 'notes remove ROW COL 135' erases.");
     puts("Adding existing or removing absent marks leaves history unchanged.");
+    puts("'notes audit [N]' lists stale and unmarked legal digits (default 10).");
+    puts("'notes audit row|column|box N' limits the report to one unit.");
+    puts("Unmarked legal digits are optional pencil notes, not mistakes.");
     puts("'notes fill ROW COL' sets all locally legal marks for one cell.");
     puts("'notes prune ROW COL' removes illegal marks from that cell only.");
     puts("'notes fill row 1' updates all blank cells in that row in one undo.");
@@ -392,6 +396,80 @@ static void print_candidates(const SudokuGame *game,unsigned r,unsigned c){
     for(d=1u;d<=9u;++d)
         if((mask&(uint16_t)(1u<<d))!=0u)printf(" %u",d);
     putchar('\n');
+}
+/* Audit handwritten marks against live legal candidates; this neither
+ * reads the solution nor mutates the board, timer or Undo/Redo history.
+ * Scope 0 means all cells, 1/2/3 means row/column/box. "Unmarked
+ * legal" indicates optional pencil entries, not incorrect placements.
+ * Complete totals are kept even when the printed list is limited. */
+static void audit_mask_digits(uint16_t mask){
+    unsigned digit,shown=0u;
+    for(digit=1u;digit<=9u;++digit)
+        if(mask&(uint16_t)(1u<<digit))
+            printf("%s%u",shown++?",":"",digit);
+    if(!shown)putchar('-');
+}
+static void audit_notes(const SudokuGame *game,unsigned limit,
+                        unsigned scope,unsigned number){
+    const char *kind=scope==1u?"row":scope==2u?"column":"box";
+    unsigned i,examined=0u,differing=0u,shown=0u,stale_total=0u,
+             unmarked_total=0u;
+    if(sudoku_board_validate(&game->givens,NULL)!=SUDOKU_OK||
+       sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot audit notes: invalid puzzle or current board.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+        if(game->givens.cells[i]&&
+           game->state.board.cells[i]!=game->givens.cells[i]){
+            puts("Cannot audit notes: immutable clues were altered.");
+            return;
+        }
+        if((game->state.notes[i]&(uint16_t)~0x3feu)!=0u||
+           (game->state.board.cells[i]&&game->state.notes[i])){
+            puts("Cannot audit notes: invalid handwritten pencil state.");
+            return;
+        }
+    }
+    if(!scope)printf("Pencil audit (all cells; show at most %u):\n",limit);
+    else printf("Pencil audit (%s %u):\n",kind,number);
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+        unsigned row=i/9u+1u,col=i%9u+1u,
+                 box=((row-1u)/3u)*3u+(col-1u)/3u+1u;
+        uint16_t legal,notes,stale,unmarked;
+        unsigned digit;
+        if(game->state.board.cells[i])continue;
+        if((scope==1u&&row!=number)||
+           (scope==2u&&col!=number)||
+           (scope==3u&&box!=number))continue;
+        ++examined;
+        legal=candidate_mask(game,i);
+        notes=game->state.notes[i];
+        stale=(uint16_t)(notes&(uint16_t)~legal);
+        unmarked=(uint16_t)(legal&(uint16_t)~notes);
+        if(!stale&&!unmarked)continue;
+        ++differing;
+        for(digit=1u;digit<=9u;++digit){
+            if(stale&(uint16_t)(1u<<digit))++stale_total;
+            if(unmarked&(uint16_t)(1u<<digit))++unmarked_total;
+        }
+        if(shown<limit){
+            printf("row %u col %u: stale ",row,col);
+            audit_mask_digits(stale);
+            fputs("; unmarked legal ",stdout);
+            audit_mask_digits(unmarked);
+            putchar('\n');
+            ++shown;
+        }
+    }
+    printf("Pencil audit summary: %u empty inspected; %u cells differ; "
+           "%u stale marks; %u unmarked legal candidates.\n",
+           examined,differing,stale_total,unmarked_total);
+    if(!differing)
+        puts("All inspected pencil marks match the current legal candidates.");
+    else if(differing>shown)
+        printf("%u additional differing cells not listed (raise limit).\n",
+               differing-shown);
 }
 /* Read-only candidate pressure report for players who want to choose
  * their next cell without asking the cached solution for an answer.
@@ -1746,6 +1824,21 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             else if(sudoku_game_won(game))puts("SOLVED! All cells are correct.");
             else printf("Check: %u empty, %u incorrect.\n",
                         sudoku_game_empty(game),sudoku_game_mistakes(game));
+            continue;
+        }
+        else if(strcmp(command,"notes")==0&&a&&strcmp(a,"audit")==0&&
+                ((!b&&!c&&!extra)||
+                 (b&&!c&&!extra&&decimal(b,81u,&digit)&&digit>=1u)||
+                 (b&&c&&!extra&&
+                  (strcmp(b,"row")==0||strcmp(b,"column")==0||
+                   strcmp(b,"box")==0)&&decimal(c,9u,&digit)&&digit>=1u))){
+            if(!b)audit_notes(game,10u,0u,0u);
+            else if(!c)audit_notes(game,(unsigned)digit,0u,0u);
+            else{
+                unsigned scope=strcmp(b,"row")==0?1u:
+                               strcmp(b,"column")==0?2u:3u;
+                audit_notes(game,9u,scope,(unsigned)digit);
+            }
             continue;
         }
         else if(strcmp(command,"notes")==0&&a&&

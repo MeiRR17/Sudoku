@@ -1100,6 +1100,82 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Notes for row 1 col 1: 1 9\n' in stdout and not stderr
     checks += 1
 
+    # Stale manual marks differ from locally legal but unmarked options;
+    # audit is read-only and supports whole-board or unit selection.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'notes set 1 1 19\nnotes audit 1\n'
+                         'notes audit row 1\nnotes audit column 1\n'
+                         'notes audit box 1\nnotes 1 1\nstatus\nquit\n')
+    assert stdout.count('row 1 col 1: stale 1,9; unmarked legal 5') == 4
+    assert stdout.count('Pencil audit summary: 1 empty inspected; '
+                        '1 cells differ; 2 stale marks; '
+                        '1 unmarked legal candidates.') == 4
+    assert 'Notes for row 1 col 1: 1 9\n' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Complete candidate set => clean audit, and Undo after audits still
+    # returns directly to the original blank pencil state.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'notes set 1 1 5\nnotes audit\nnotes audit 81\n'
+                         'notes audit row 1\nstatus\nundo\nnotes 1 1\n'
+                         'status\nquit\n')
+    assert stdout.count('0 cells differ; 0 stale marks; '
+                        '0 unmarked legal candidates.') == 3
+    assert stdout.count('All inspected pencil marks match the current '
+                        'legal candidates.') == 3
+    assert 'Notes for row 1 col 1:\n' in stdout
+    assert 'undo 0, redo 1' in stdout and not stderr
+    checks += 1
+
+    # Report limit bounds detail, but never the totals across inspected
+    # empty cells. Unmarked legal digits are not actual solution values.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes audit 1\nstatus\nquit\n')
+    assert 'Pencil audit (all cells; show at most 1):' in stdout
+    assert 'row 1 col 3: stale -; unmarked legal 1,2,4' in stdout
+    assert 'additional differing cells not listed (raise limit)' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Unit filters restrict the scan while preserving every handwritten
+    # mark and the complete Undo/Redo history.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 3 9\n'
+                         'notes audit row 1\nnotes audit column 3\n'
+                         'notes audit box 1\nnotes 1 3\nstatus\nquit\n')
+    assert stdout.count('row 1 col 3: stale 9; unmarked legal 1,2,4') == 3
+    assert 'Pencil audit (row 1):' in stdout
+    assert 'Pencil audit (column 3):' in stdout
+    assert 'Pencil audit (box 1):' in stdout
+    assert 'Notes for row 1 col 3: 9\n' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Invalid scopes, counts and trailing tokens fail without listing or
+    # modifying notes.
+    invalid_audits = [
+        'notes audit 0', 'notes audit 82', 'notes audit -1',
+        'notes audit nope', 'notes audit row 0',
+        'notes audit row 10', 'notes audit box x',
+        'notes audit blocks 1', 'notes audit rows 1',
+        'notes audit 1 extra', 'notes audit column 1 extra',
+        'notes audit row', 'notes audit column'
+    ]
+    stdout, stderr = run(['--puzzle', near_win],
+                         'status\n' + '\n'.join(invalid_audits) +
+                         '\nstatus\nnotes audit 1\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_audits)
+    assert stdout.count('Pencil audit (') == 1
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--puzzle', solution],
+                         'notes audit\nstatus\nquit\n')
+    assert 'Pencil audit summary: 0 empty inspected; 0 cells differ;' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],
