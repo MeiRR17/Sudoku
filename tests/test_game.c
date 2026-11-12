@@ -51,6 +51,43 @@ static int check_game(void){
     CHECK(sudoku_game_set(game,0,1,4)==SUDOKU_GAME_RANGE);
     CHECK(sudoku_game_set(game,1,3,0)==SUDOKU_GAME_RANGE);
     CHECK(sudoku_game_set(game,1,3,5)==SUDOKU_GAME_CONFLICT);
+    /* Editing entry points must fail closed on erased original clues,
+     * including no-op actions and bulk note/history mutators. */
+    {
+        SudokuGameSnapshot snapshot = game->state;
+        SudokuBoard original_givens = game->givens;
+        SudokuGameMove move = {1u, 3u, 4u};
+        uint16_t masks[SUDOKU_CELL_COUNT] = {0};
+        unsigned applied = 99u, removed = 99u;
+        unsigned cursor = game->history_cursor, length = game->history_len;
+        game->state.board.cells[0] = 0u; /* Original r1c1 clue erased. */
+        game->state.notes[2] = (uint16_t)(1u << 4);
+        masks[2] = (uint16_t)(1u << 4);
+        CHECK(sudoku_game_set(game, 1u, 3u, 4u) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_erase(game, 1u, 3u) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_note(game, 1u, 3u, 4u) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_auto_notes(game) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_prune_notes(game) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_clear_notes(game) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_set_many(game, &move, 1u, &applied) == SUDOKU_GAME_INVALID);
+        CHECK(applied == 0u);
+        CHECK(sudoku_game_eliminate_notes(game, masks, &removed) == SUDOKU_GAME_INVALID);
+        CHECK(removed == 0u);
+        CHECK(sudoku_game_clear_mistakes(game) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_reset(game) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_candidates(game, 1u, 3u) == 0u);
+        CHECK(game->state.board.cells[0] == 0u);
+        CHECK(game->state.notes[2] == (1u << 4));
+        CHECK(game->history_cursor == cursor && game->history_len == length);
+        game->state = snapshot;
+        game->givens.cells[2] = 5u; /* Invalid given: duplicate row one 5. */
+        CHECK(sudoku_game_set(game, 1u, 3u, 4u) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_note(game, 1u, 3u, 4u) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_clear_notes(game) == SUDOKU_GAME_INVALID);
+        CHECK(game->history_cursor == cursor && game->history_len == length);
+        game->givens = original_givens;
+        game->state = snapshot;
+    }
     /* Reset must fail closed if a C caller alters the public game into
      * a conflicting/out-of-range board or erases an immutable clue.
      * Neither the snapshot nor the undo/redo cursor may change. */
