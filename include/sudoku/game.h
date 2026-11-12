@@ -77,6 +77,10 @@ SudokuGameStatus sudoku_game_clear_notes(SudokuGame *game);
 SudokuGameStatus sudoku_game_clear_mistakes(SudokuGame *game);
 /* Move 1..127 existing history steps atomically. If fewer steps are
  * available, return NO_HISTORY without modifying board, notes or cursor.
+ * The target snapshot must preserve givens, obey Sudoku constraints, and
+ * contain only legal pencil notes on empty cells; otherwise return INVALID
+ * without changing the live board or history cursor. Only the target is
+ * checked, permitting Undo to recover a corrupted current board.
  * No new history entries are created; zero/out-of-range counts are RANGE. */
 SudokuGameStatus sudoku_game_undo_steps(SudokuGame *game, unsigned steps);
 SudokuGameStatus sudoku_game_redo_steps(SudokuGame *game, unsigned steps);

@@ -51,6 +51,67 @@ static int check_game(void){
     CHECK(sudoku_game_set(game,0,1,4)==SUDOKU_GAME_RANGE);
     CHECK(sudoku_game_set(game,1,3,0)==SUDOKU_GAME_RANGE);
     CHECK(sudoku_game_set(game,1,3,5)==SUDOKU_GAME_CONFLICT);
+    /* Historical Undo/Redo targets can be tampered with through the public
+     * C struct. A bad destination must not change the live board or cursor;
+     * an intact target remains usable even if the current board is damaged. */
+    {
+        SudokuGame *probe = malloc(sizeof *probe);
+        SudokuGameSnapshot original_undo, original_redo, live;
+        unsigned cursor, length;
+        CHECK(probe != NULL);
+        CHECK(sudoku_game_start(probe, &board) == SUDOKU_GAME_OK);
+        CHECK(sudoku_game_note(probe, 1u, 3u, 1u) == SUDOKU_GAME_OK);
+        CHECK(sudoku_game_note(probe, 1u, 3u, 2u) == SUDOKU_GAME_OK);
+        CHECK(probe->history_cursor == 2u && probe->history_len == 3u);
+        original_undo = probe->history[1];
+        original_redo = probe->history[2];
+        live = probe->state;
+        cursor = probe->history_cursor;
+        length = probe->history_len;
+        probe->history[1].board.cells[0] = 0u; /* Erased given. */
+        CHECK(sudoku_game_undo(probe) == SUDOKU_GAME_INVALID);
+        CHECK(probe->history_cursor == cursor &&
+              probe->history_len == length);
+        CHECK(memcmp(probe->state.board.cells, live.board.cells,
+                     sizeof live.board.cells) == 0);
+        CHECK(probe->state.notes[2] == live.notes[2]);
+        probe->history[1] = original_undo;
+        probe->history[1].board.cells[2] = 5u; /* Conflicts with row 1. */
+        CHECK(sudoku_game_undo(probe) == SUDOKU_GAME_INVALID);
+        probe->history[1] = original_undo;
+        probe->history[1].board.cells[2] = 10u; /* Outside digit range. */
+        CHECK(sudoku_game_undo(probe) == SUDOKU_GAME_INVALID);
+        probe->history[1] = original_undo;
+        probe->history[1].notes[2] = 1u; /* Illegal bit 0. */
+        CHECK(sudoku_game_undo(probe) == SUDOKU_GAME_INVALID);
+        probe->history[1] = original_undo;
+        probe->history[1].notes[0] = (uint16_t)(1u << 3); /* Filled clue. */
+        CHECK(sudoku_game_undo(probe) == SUDOKU_GAME_INVALID);
+        probe->history[1] = original_undo;
+        CHECK(probe->history_cursor == cursor &&
+              probe->state.notes[2] == live.notes[2]);
+        CHECK(sudoku_game_undo(probe) == SUDOKU_GAME_OK);
+        CHECK(probe->history_cursor == 1u &&
+              probe->state.notes[2] == (1u << 1));
+        probe->history[2].notes[2] = 0x8000u; /* Illegal high pencil bit. */
+        CHECK(sudoku_game_redo(probe) == SUDOKU_GAME_INVALID);
+        CHECK(probe->history_cursor == 1u &&
+              probe->state.notes[2] == (1u << 1));
+        probe->history[2] = original_redo;
+        CHECK(sudoku_game_redo(probe) == SUDOKU_GAME_OK);
+        CHECK(probe->history_cursor == 2u &&
+              probe->state.notes[2] == ((1u << 1) | (1u << 2)));
+        /* A valid snapshot is an intentional recovery route for bad live
+         * state; checking the destination must not require valid current. */
+        probe->state.board.cells[0] = 0u;
+        CHECK(sudoku_game_undo(probe) == SUDOKU_GAME_OK);
+        CHECK(probe->state.board.cells[0] == board.cells[0]);
+        /* Corrupted public givens make even sound history unsafe. */
+        probe->givens.cells[2] = 5u;
+        CHECK(sudoku_game_redo(probe) == SUDOKU_GAME_INVALID);
+        CHECK(probe->history_cursor == 1u);
+        free(probe);
+    }
     /* Editing entry points must fail closed on erased original clues,
      * including no-op actions and bulk note/history mutators. */
     {

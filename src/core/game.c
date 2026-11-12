@@ -308,23 +308,51 @@ SudokuGameStatus sudoku_game_clear_mistakes(SudokuGame *game) {
     remember(game);
     return SUDOKU_GAME_OK;
 }
-/* Bounds are checked before changing the history cursor or live board:
- * an excessive undo/redo request cannot partially apply the history. */
+/* Historical snapshots are public fields too. Do not restore a tampered
+ * snapshot with invalid clues, out-of-range or conflicting values, illegal
+ * pencil bits, or notes on filled cells. Validate only the destination:
+ * Undo can still recover a corrupted *current* board when history is sound. */
+static int valid_history_target(const SudokuGame *game,
+                                const SudokuGameSnapshot *target) {
+    unsigned i;
+    if (sudoku_board_validate(&game->givens, NULL) != SUDOKU_OK ||
+        sudoku_board_validate(&target->board, NULL) != SUDOKU_OK)
+        return 0;
+    for (i = 0u; i < SUDOKU_CELL_COUNT; ++i) {
+        if (game->givens.cells[i] &&
+            target->board.cells[i] != game->givens.cells[i])
+            return 0;
+        if ((target->notes[i] & (uint16_t)~0x3feu) != 0u ||
+            (target->board.cells[i] && target->notes[i]))
+            return 0;
+    }
+    return 1;
+}
+/* Bounds and destination integrity are checked before changing the
+ * history cursor or live board; failed multi-step actions are atomic. */
 SudokuGameStatus sudoku_game_undo_steps(SudokuGame *game, unsigned steps) {
+    unsigned target;
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
     if (steps == 0u || steps >= SUDOKU_GAME_HISTORY) return SUDOKU_GAME_RANGE;
     if (steps > game->history_cursor) return SUDOKU_GAME_NO_HISTORY;
-    game->history_cursor -= steps;
-    game->state = game->history[game->history_cursor];
+    target = game->history_cursor - steps;
+    if (!valid_history_target(game, &game->history[target]))
+        return SUDOKU_GAME_INVALID;
+    game->history_cursor = target;
+    game->state = game->history[target];
     return SUDOKU_GAME_OK;
 }
 SudokuGameStatus sudoku_game_redo_steps(SudokuGame *game, unsigned steps) {
+    unsigned target;
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
     if (steps == 0u || steps >= SUDOKU_GAME_HISTORY) return SUDOKU_GAME_RANGE;
     if (steps > game->history_len - 1u - game->history_cursor)
         return SUDOKU_GAME_NO_HISTORY;
-    game->history_cursor += steps;
-    game->state = game->history[game->history_cursor];
+    target = game->history_cursor + steps;
+    if (!valid_history_target(game, &game->history[target]))
+        return SUDOKU_GAME_INVALID;
+    game->history_cursor = target;
+    game->state = game->history[target];
     return SUDOKU_GAME_OK;
 }
 SudokuGameStatus sudoku_game_undo(SudokuGame *game) {
