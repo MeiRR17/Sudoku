@@ -1727,6 +1727,114 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Safe set row 1 col 3 = ' not in stdout and not stderr
     checks += 1
 
+    # Targeted proof-required placement: r1c6=8 is forced because the
+    # other three locally legal digits immediately contradict Sudoku.
+    # This is a real placement, unlike 'probe compare' and 'hint' preview.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set proven 1 6 8\nstatus\nundo\nstatus\n'
+                         'redo\nstatus\nquit\n')
+    assert ('Proven set row 1 col 6 = 8: 3 of 3 alternatives '
+            'refuted; placement committed.') in stdout
+    assert stdout.count('Progress: 31/81 filled') == 2
+    assert 'Progress: 30/81 filled' in stdout
+    assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # A locally legal choice is not automatically proven. r1c3=4 has
+    # another unrefuted candidate (2), so the board remains unchanged.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set proven 1 3 4\nstatus\nquit\n')
+    assert ('Proven set refused: row 1 col 3 = 4 has 1 unresolved '
+            'alternative; not logically forced.') in stdout
+    assert 'Progress: 30/81 filled' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # An otherwise locally legal but contradictory target itself must
+    # fail, regardless of whether any alternatives can be refuted.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set proven 1 3 1\nstatus\nquit\n')
+    assert ('Proven set refused: row 1 col 3 = 1 creates an immediate '
+            'contradiction.') in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # An incorrect value that has no immediate contradiction must NOT
+    # pass a proof-required placement just because it passes 'set safe'.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set proven 1 3 2\nstatus\nquit\n')
+    assert ('Proven set refused: row 1 col 3 = 2 has 1 unresolved '
+            'alternative; not logically forced.') in stdout
+    assert 'Progress: 30/81 filled' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A simple single is a legitimate proof with zero alternatives.
+    # This may complete the puzzle but must not depend on solution lookup.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'set proven 1 1 5\nstatus\nquit\n')
+    assert ('Proven set row 1 col 1 = 5: 0 of 0 alternatives '
+            'refuted; placement committed.') in stdout
+    assert 'SOLVED!' in stdout and 'undo 1, redo 0' in stdout
+    assert not stderr
+    checks += 1
+
+    # Applying the proven digit clears notes in only the selected cell,
+    # preserves notes elsewhere, and a single Undo restores the old marks.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 6 26\nnotes set 1 3 19\n'
+                         'set proven 1 6 8\nnotes 1 6\nnotes 1 3\n'
+                         'status\nundo\nnotes 1 6\nnotes 1 3\n'
+                         'status\nquit\n')
+    assert 'Proven set row 1 col 6 = 8:' in stdout
+    assert 'Notes for row 1 col 6:\n' in stdout
+    assert 'Notes for row 1 col 6: 2 6\n' in stdout
+    assert stdout.count('Notes for row 1 col 3: 1 9\n') == 2
+    assert 'undo 3, redo 0' in stdout
+    assert 'undo 2, redo 1' in stdout and not stderr
+    checks += 1
+
+    # Original clues, occupied cells, locally illegal choices, existing
+    # incorrect digits, and immediate baseline contradictions fail closed.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set proven 1 1 5\nset proven 1 6 5\n'
+                         'set proven 1 6 8\nset proven 1 6 8\n'
+                         'set 1 3 2\nset proven 1 8 1\n'
+                         'status\nquit\n')
+    assert 'Proven set refused: row 1 col 1 is an original clue.' in stdout
+    assert 'Proven set refused: 5 is not locally legal at row 1 col 6.' in stdout
+    assert 'Proven set refused: row 1 col 6 is already filled.' in stdout
+    assert 'Proven set refused: correct existing incorrect entries first.' in stdout
+    assert 'undo 2, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Another puzzle state with no locally legal candidates must be
+    # rejected before relying on the hypothetical proof.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 9 4\nset proven 1 3 4\nstatus\nquit\n')
+    assert 'Proven set refused: correct existing incorrect entries first.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Strict four-token form after 'set proven': extra tokens, invalid
+    # or partial coordinates/digits never modify the board or history.
+    bad_proven = [
+        'set proven', 'set proven 1', 'set proven 1 6',
+        'set proven 0 6 8', 'set proven 10 6 8',
+        'set proven 1 0 8', 'set proven 1 10 8',
+        'set proven 1 6 0', 'set proven 1 6 10',
+        'set proven 1 6 -1', 'set proven 1 6 nope',
+        'set proven 1 6 8 extra', 'set proven 1 6 8 extra more',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(bad_proven) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(bad_proven)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'Proven set row ' not in stdout and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],
