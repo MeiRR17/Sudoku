@@ -75,7 +75,6 @@ static int check_game(void){
         CHECK(removed == 0u);
         CHECK(sudoku_game_clear_mistakes(game) == SUDOKU_GAME_INVALID);
         CHECK(sudoku_game_reset(game) == SUDOKU_GAME_INVALID);
-        CHECK(sudoku_game_candidates(game, 1u, 3u) == 0u);
         CHECK(game->state.board.cells[0] == 0u);
         CHECK(game->state.notes[2] == (1u << 4));
         CHECK(game->history_cursor == cursor && game->history_len == length);

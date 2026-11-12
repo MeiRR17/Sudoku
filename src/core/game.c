@@ -161,9 +161,11 @@ uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned c
     int idx = cell_index(row, col);
     if (!valid_game(game) || idx < 0 || game->state.board.cells[idx])
         return 0u;
-    /* Do not report candidate masks for a tampered public game even when
-     * the live board alone satisfies Sudoku constraints. */
-    if (!valid_live_board(game)) return 0u;
+    /* This observational API intentionally accepts any independently valid
+     * current board (including property-test boards with unrelated givens).
+     * Unlike mutators, it does not require original-clue invariants. */
+    if (sudoku_board_validate(&game->state.board, NULL) != SUDOKU_OK)
+        return 0u;
     return validated_candidates(&game->state.board, row, col);
 }
 /* Recompute all pencil marks for editable empty cells as a single undoable

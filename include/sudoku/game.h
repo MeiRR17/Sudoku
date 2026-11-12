@@ -34,9 +34,10 @@ typedef struct SudokuGame {
 
 /* Unique-solution puzzles only; transactional on error. */
 SudokuGameStatus sudoku_game_start(SudokuGame *game, const SudokuBoard *givens);
-/* All editing APIs validate the current board and immutable original clues
- * before committing a snapshot, even when a public C caller tampered with
- * the state. Rejected edits preserve the live state and Undo/Redo history. */
+/* Direct placement, erase, pencil-note and bulk edit operations validate
+ * the live board and original clues before committing a snapshot. Rejected
+ * edits do not change state or Undo/Redo; observational candidate lookup
+ * deliberately accepts independently valid boards. */
 SudokuGameStatus sudoku_game_set(SudokuGame *game, unsigned row, unsigned col, unsigned digit);
 /* Apply 0..81 distinct placements as one atomic, undoable edit.
  * Every target must be an empty non-given cell; malformed/duplicate/conflicting
