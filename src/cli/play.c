@@ -45,6 +45,111 @@ static int use(const char *message){
     fputs("Usage: sudoku play (--puzzle DIGITS | --file FILE | --resume SAVE | --seed UINT32 --difficulty easy|medium|hard) [--symmetry none|rotational] [--save PATH]\n",stderr);
     return 2;
 }
+/* Non-mutating history timeline. Snapshot differences are derived from
+ * actual board and pencil marks, not guesses about the command that
+ * produced them. Steps above the current cursor are redoable snapshots. */
+static unsigned history_bit_count(uint16_t mask){
+    unsigned n=0u;
+    while(mask){mask=(uint16_t)(mask&(uint16_t)(mask-1u));++n;}
+    return n;
+}
+static void history_mask(uint16_t mask){
+    unsigned d,shown=0u;
+    for(d=1u;d<=9u;++d)
+        if(mask&(uint16_t)(1u<<d))
+            printf("%s%u",shown++?",":"",d);
+    if(!shown)putchar('-');
+}
+static int history_valid(const SudokuGame *game){
+    if(!game||game->history_len==0u||
+       game->history_len>SUDOKU_GAME_HISTORY||
+       game->history_cursor>=game->history_len){
+        puts("History unavailable: invalid timeline metadata.");
+        return 0;
+    }
+    return 1;
+}
+static void history_list(const SudokuGame *game,unsigned limit){
+    unsigned count,first,step;
+    if(!history_valid(game))return;
+    count=game->history_len-1u;
+    printf("History: %u recorded actions; cursor %u; undo %u; redo %u.\n",
+           count,game->history_cursor,game->history_cursor,
+           count-game->history_cursor);
+    if(!count){
+        puts("No history entries yet.");
+        return;
+    }
+    first=count>limit?count-limit+1u:1u;
+    for(step=first;step<=count;++step){
+        const SudokuGameSnapshot *before=&game->history[step-1u];
+        const SudokuGameSnapshot *after=&game->history[step];
+        unsigned i,placed=0u,erased=0u,replaced=0u;
+        unsigned notes_added=0u,notes_removed=0u;
+        unsigned changed_cells=0u,single=0u;
+        for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+            unsigned prior=before->board.cells[i],next=after->board.cells[i];
+            uint16_t old_notes=before->notes[i],new_notes=after->notes[i];
+            if(prior!=next){
+                if(!prior)++placed;
+                else if(!next)++erased;
+                else ++replaced;
+            }
+            notes_added+=history_bit_count((uint16_t)(new_notes&(uint16_t)~old_notes));
+            notes_removed+=history_bit_count((uint16_t)(old_notes&(uint16_t)~new_notes));
+            if(prior!=next||old_notes!=new_notes){
+                ++changed_cells;
+                single=i;
+            }
+        }
+        printf("History step %u [%s]: %u placed, %u erased, %u replaced; "
+               "%u note marks added, %u removed",
+               step,step<=game->history_cursor?"DONE":"REDO",
+               placed,erased,replaced,notes_added,notes_removed);
+        if(changed_cells==1u)
+            printf("; r%uc%u",single/9u+1u,single%9u+1u);
+        else
+            printf("; %u changed cells",changed_cells);
+        putchar('\n');
+    }
+    if(first>1u)
+        printf("%u earlier actions hidden (raise history limit).\n",first-1u);
+}
+static void history_inspect(const SudokuGame *game,unsigned step){
+    const SudokuGameSnapshot *before,*after;
+    unsigned index,changed=0u;
+    if(!history_valid(game))return;
+    if(step>=game->history_len){
+        printf("History step %u is not recorded.\n",step);
+        return;
+    }
+    before=&game->history[step-1u];
+    after=&game->history[step];
+    printf("History inspect step %u [%s]:\n",step,
+           step<=game->history_cursor?"DONE":"REDO");
+    for(index=0u;index<SUDOKU_CELL_COUNT;++index){
+        unsigned r=index/9u+1u,c=index%9u+1u;
+        unsigned old_digit=before->board.cells[index];
+        unsigned new_digit=after->board.cells[index];
+        if(old_digit!=new_digit){
+            printf("  Board r%uc%u: ",r,c);
+            if(old_digit)printf("%u",old_digit);else putchar('-');
+            fputs(" -> ",stdout);
+            if(new_digit)printf("%u",new_digit);else putchar('-');
+            putchar('\n');
+            ++changed;
+        }
+        if(before->notes[index]!=after->notes[index]){
+            printf("  Notes r%uc%u: ",r,c);
+            history_mask(before->notes[index]);
+            fputs(" -> ",stdout);
+            history_mask(after->notes[index]);
+            putchar('\n');
+            ++changed;
+        }
+    }
+    if(!changed)puts("  No observable board or pencil-note changes.");
+}
 static void commands(void){
     puts("Commands: show [notes|candidates|heatmap|digit N],");
     puts("          set ROW COL DIGIT | set safe|proven ROW COL DIGIT,");
@@ -60,7 +165,8 @@ static void commands(void){
     puts("          prune-notes,");
     puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
-    puts("          undo [N], redo [N], reset, check [details|clear],");
+    puts("          undo [N], redo [N], history [N], history inspect STEP,");
+    puts("          reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
     puts("prints entered digits too; neither is a full save or stored solution.");
@@ -94,6 +200,9 @@ static void commands(void){
     puts("'analyze [N]' reports candidate counts and contradictions (default 10).");
     puts("It detects zero-candidate cells and digits missing from every possible");
     puts("position in a row/column/box, using no cached solved digits.");
+    puts("'history [N]' lists recent state changes and redoable steps (default 10).");
+    puts("'history inspect STEP' shows exact digit/note changes at that step.");
+    puts("History views are read-only and use retained Undo/Redo snapshots.");
     puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
     puts("'hint' shows one forced single; 'hint all' lists each distinct forced cell.");
     puts("'hint pairs [N]' previews actionable naked pairs (default 5).");
@@ -2544,6 +2653,20 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                     decimal(b,9u,&digit)&&digit>=1u)
                 show_candidate_map(game,(unsigned)digit);
             else puts("Error: unknown command or invalid arguments. Type 'help'.");
+            continue;
+        }
+        if(strcmp(command,"history")==0){
+            uint64_t requested=10u;
+            if(!a)
+                history_list(game,10u);
+            else if(strcmp(a,"inspect")==0&&b&&!c&&!extra&&
+                    decimal(b,SUDOKU_GAME_HISTORY-1u,&requested)&&requested>=1u)
+                history_inspect(game,(unsigned)requested);
+            else if(!b&&!c&&!extra&&
+                    decimal(a,SUDOKU_GAME_HISTORY-1u,&requested)&&requested>=1u)
+                history_list(game,(unsigned)requested);
+            else
+                puts("Error: unknown command or invalid arguments. Type 'help'.");
             continue;
         }
         if(strcmp(command,"status")==0&&!a){

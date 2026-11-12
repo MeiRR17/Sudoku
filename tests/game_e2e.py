@@ -1835,6 +1835,96 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Proven set row ' not in stdout and not stderr
     checks += 1
 
+    # Read-only timeline lists committed versus undoable/redoable edits and
+    # exposes the true digit/note differences for each snapshot.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'history\nset 1 3 4\nnotes set 1 4 19\n'
+                         'undo\nhistory 2\nhistory inspect 1\n'
+                         'history inspect 2\nstatus\nquit\n')
+    assert 'History: 0 recorded actions; cursor 0; undo 0; redo 0.' in stdout
+    assert 'No history entries yet.' in stdout
+    assert 'History: 2 recorded actions; cursor 1; undo 1; redo 1.' in stdout
+    assert ('History step 1 [DONE]: 1 placed, 0 erased, 0 replaced; '
+            '0 note marks added, 0 removed; r1c3') in stdout
+    assert ('History step 2 [REDO]: 0 placed, 0 erased, 0 replaced; '
+            '2 note marks added, 0 removed; r1c4') in stdout
+    assert 'History inspect step 1 [DONE]:\n  Board r1c3: - -> 4' in stdout
+    assert 'History inspect step 2 [REDO]:\n  Notes r1c4: - -> 1,9' in stdout
+    assert 'undo 1, redo 1' in stdout and not stderr
+    checks += 1
+
+    # A new move after Undo cuts the old Redo branch. The timeline must
+    # describe the replacement state, never the abandoned pencil notes.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nnotes set 1 4 19\nundo\n'
+                         'set 1 4 6\nhistory\nhistory inspect 2\n'
+                         'status\nquit\n')
+    assert 'History: 2 recorded actions; cursor 2; undo 2; redo 0.' in stdout
+    assert 'History step 2 [DONE]: 1 placed, 0 erased, 0 replaced;' in stdout
+    assert 'History inspect step 2 [DONE]:\n  Board r1c4: - -> 6' in stdout
+    assert 'Notes r1c4: - -> 1,9' not in stdout
+    assert 'undo 2, redo 0' in stdout and not stderr
+    checks += 1
+
+    # An atomic three-cell placement appears as one history step with
+    # three board changes in the detailed inspection.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint apply trial-forced 3\nhistory 1\n'
+                         'history inspect 1\nstatus\nquit\n')
+    assert 'Applied 3 trial-forced placements in one undoable edit.' in stdout
+    assert ('History step 1 [DONE]: 3 placed, 0 erased, 0 replaced; '
+            '0 note marks added, 0 removed; 3 changed cells') in stdout
+    assert 'History inspect step 1 [DONE]:' in stdout
+    for board_line in ['Board r1c6: - -> 8',
+                       'Board r1c8: - -> 1', 'Board r1c9: - -> 2']:
+        assert board_line in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Reset is accurately represented as one combined erasure of digits
+    # and notes, with correct counts rather than struct-padding memcmp.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nnotes set 1 4 19\nreset\n'
+                         'history 1\nhistory inspect 3\nstatus\nquit\n')
+    assert ('History step 3 [DONE]: 0 placed, 1 erased, 0 replaced; '
+            '0 note marks added, 2 removed; 2 changed cells') in stdout
+    assert 'History inspect step 3 [DONE]:' in stdout
+    assert 'Board r1c3: 4 -> -' in stdout
+    assert 'Notes r1c4: 1,9 -> -' in stdout
+    assert 'undo 3, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Limit affects listing, not the full count. Inspecting an absent
+    # record is nonfatal and does not create an Undo snapshot.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nnotes set 1 4 19\n'
+                         'history 1\nhistory inspect 3\n'
+                         'status\nquit\n')
+    assert 'History: 2 recorded actions; cursor 2; undo 2; redo 0.' in stdout
+    assert 'History step 2 [DONE]:' in stdout
+    assert 'History step 1 [DONE]:' not in stdout
+    assert '1 earlier actions hidden (raise history limit).' in stdout
+    assert 'History step 3 is not recorded.' in stdout
+    assert 'undo 2, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Reader must reject malformed limits, nonexistent step zero and
+    # surplus tokens rather than running a different command.
+    bad_history = [
+        'history 0', 'history 128', 'history -1', 'history abc',
+        'history inspect', 'history inspect 0', 'history inspect 128',
+        'history inspect -1', 'history inspect nope',
+        'history 2 extra', 'history inspect 1 extra',
+        'history inspect 1 2', 'history foo bar'
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n'+'\n'.join(bad_history)+
+                         '\nstatus\nhistory\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(bad_history)
+    assert stdout.count('History: 0 recorded actions; cursor 0; undo 0; redo 0.') == 1
+    assert stdout.count('undo 0, redo 0') == 3 and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],
