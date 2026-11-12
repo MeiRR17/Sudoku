@@ -48,8 +48,8 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, focus [N], auto-notes, prune-notes,");
-    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|chain [N]],");
-    puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|chain [N]],");
+    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|chain [N]],");
+    puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|chain [N]],");
     puts("          undo [N], redo [N], reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
@@ -67,6 +67,8 @@ static void commands(void){
     puts("'hint apply locked [N]' prunes those pencil notes in one undo.");
     puts("'hint x-wing [N]' finds row/column rectangle candidate eliminations.");
     puts("'hint apply x-wing [N]' erases matching notes in one undo step.");
+    puts("'hint swordfish [N]' previews three-line candidate eliminations.");
+    puts("'hint apply swordfish [N]' removes matching notes in one undo.");
     puts("'hint chain [N]' previews up to N successive forced singles (1..81).");
     puts("'hint apply' places one; 'hint apply all' batches current forced cells.");
     puts("'hint apply chain [N]' commits at most N singles in one undo.");
@@ -801,6 +803,121 @@ done_xwings:
             puts("No matching X-Wing pencil notes to remove; history unchanged.");
     }
 }
+/* Swordfish: three rows/columns each have 2..3 candidates for a digit,
+ * restricted to exactly three opposite columns/rows. Each opposite line
+ * must contain at least two source candidates, excluding degenerate fish.
+ * Candidate elimination never consults the cached Sudoku solution. */
+static unsigned fish_bits(uint16_t mask){
+    unsigned n=0u;
+    while(mask){mask=(uint16_t)(mask&(uint16_t)(mask-1u));++n;}
+    return n;
+}
+static void swordfish(SudokuGame *game,unsigned limit,int apply){
+    uint16_t masks[SUDOKU_CELL_COUNT]={0};
+    uint16_t eliminations[SUDOKU_CELL_COUNT]={0};
+    unsigned axis,digit,line,slot,a,b,c,total=0u,i;
+    if(sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot inspect Swordfish: invalid current board.");
+        return;
+    }
+    if(sudoku_game_won(game)){
+        puts("Puzzle already solved; no Swordfish hint needed.");
+        return;
+    }
+    if(sudoku_game_mistakes(game)){
+        puts(apply?"Cannot apply Swordfish: correct the existing mistakes first.":
+                   "Cannot preview Swordfish: correct the existing mistakes first.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        masks[i]=candidate_mask(game,i);
+    for(axis=0u;axis<2u;++axis){
+        for(digit=1u;digit<=9u;++digit){
+            uint16_t line_masks[9]={0};
+            uint16_t bit=(uint16_t)(1u<<digit);
+            for(line=0u;line<9u;++line)
+                for(slot=0u;slot<9u;++slot)
+                    if(masks[xwing_index(axis,line,slot)]&bit)
+                        line_masks[line]=(uint16_t)(line_masks[line]|(uint16_t)(1u<<slot));
+            for(a=0u;a<7u;++a){
+                if(fish_bits(line_masks[a])<2u||fish_bits(line_masks[a])>3u)continue;
+                for(b=a+1u;b<8u;++b){
+                    if(fish_bits(line_masks[b])<2u||fish_bits(line_masks[b])>3u)continue;
+                    for(c=b+1u;c<9u;++c){
+                        uint16_t union_mask;
+                        unsigned targets[18],target_count=0u,valid=1u;
+                        if(fish_bits(line_masks[c])<2u||
+                           fish_bits(line_masks[c])>3u)continue;
+                        union_mask=(uint16_t)(line_masks[a]|line_masks[b]|line_masks[c]);
+                        if(fish_bits(union_mask)!=3u)continue;
+                        for(slot=0u;slot<9u;++slot){
+                            uint16_t bit_slot=(uint16_t)(1u<<slot);
+                            unsigned repeats=0u;
+                            if(!(union_mask&bit_slot))continue;
+                            if(line_masks[a]&bit_slot)++repeats;
+                            if(line_masks[b]&bit_slot)++repeats;
+                            if(line_masks[c]&bit_slot)++repeats;
+                            if(repeats<2u){valid=0u;break;}
+                        }
+                        if(!valid)continue;
+                        for(line=0u;line<9u;++line){
+                            if(line==a||line==b||line==c)continue;
+                            for(slot=0u;slot<9u;++slot){
+                                if(!(union_mask&(uint16_t)(1u<<slot)))continue;
+                                i=xwing_index(axis,line,slot);
+                                if(masks[i]&bit)targets[target_count++]=i;
+                            }
+                        }
+                        if(!target_count)continue;
+                        printf("Swordfish %u (%s %u,%u,%u; %s",
+                               total+1u,axis?"columns":"rows",a+1u,b+1u,c+1u,
+                               axis?"rows":"columns");
+                        {
+                            unsigned shown=0u;
+                            for(slot=0u;slot<9u;++slot)
+                                if(union_mask&(uint16_t)(1u<<slot))
+                                    printf("%s%u",shown++?",":" ",slot+1u);
+                        }
+                        printf("; digit %u): sources",digit);
+                        for(line=0u;line<9u;++line){
+                            if(line!=a&&line!=b&&line!=c)continue;
+                            for(slot=0u;slot<9u;++slot)
+                                if(line_masks[line]&(uint16_t)(1u<<slot)){
+                                    i=xwing_index(axis,line,slot);
+                                    printf(" r%uc%u",i/9u+1u,i%9u+1u);
+                                }
+                        }
+                        fputs("; eliminate",stdout);
+                        for(i=0u;i<target_count;++i){
+                            unsigned target=targets[i];
+                            printf(" r%uc%u",target/9u+1u,target%9u+1u);
+                            if(apply)
+                                eliminations[target]=(uint16_t)(eliminations[target]|bit);
+                        }
+                        putchar('\n');
+                        if(++total==limit)goto done_swordfish;
+                    }
+                }
+            }
+        }
+    }
+done_swordfish:
+    if(!total){
+        puts("No actionable Swordfish found.");
+        return;
+    }
+    if(apply){
+        unsigned removed=0u;
+        SudokuGameStatus status=sudoku_game_eliminate_notes(game,eliminations,&removed);
+        if(status!=SUDOKU_GAME_OK)
+            printf("Error: %s\n",sudoku_game_status_text(status));
+        else if(removed)
+            printf("Removed %u Swordfish pencil candidate%s in one undoable edit.\n",
+                   removed,removed==1u?"":"s");
+        else
+            puts("No matching Swordfish pencil notes to remove; history unchanged.");
+    }
+}
 typedef struct LogicalHint {
     unsigned index, digit, group;
     int hidden;
@@ -1212,6 +1329,9 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             else if(strcmp(a,"x-wing")==0&&
                     (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
                 x_wings(game,(unsigned)(b?limit:5u),0);
+            else if(strcmp(a,"swordfish")==0&&
+                    (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
+                swordfish(game,(unsigned)(b?limit:5u),0);
             else if(strcmp(a,"apply")==0&&!b)print_hint(game,1);
             else if(strcmp(a,"chain")==0&&
                     (!b||(!c&&decimal(b,81u,&limit)&&limit>=1u)))
@@ -1235,6 +1355,10 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                     strcmp(b,"x-wing")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
                 x_wings(game,(unsigned)(c?limit:5u),1);
+            else if(strcmp(a,"apply")==0&&b&&
+                    strcmp(b,"swordfish")==0&&
+                    (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
+                swordfish(game,(unsigned)(c?limit:5u),1);
             else if(strcmp(a,"apply")==0&&b&&
                     strcmp(b,"chain")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))

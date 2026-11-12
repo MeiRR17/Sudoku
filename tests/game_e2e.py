@@ -219,6 +219,89 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Locked 1 ' not in stdout and not stderr
     checks += 1
 
+    # A verified unique-solution puzzle has a column Swordfish for digit 2:
+    # columns 4,6,7 restrict candidate positions to rows 3,7,9.
+    swordfish_puzzle = (
+        '500600902000105308000000500800001020000003000'
+        '010920800060500004280000000305000070'
+    )
+    swordfish_transpose = ''.join(
+        swordfish_puzzle[row * 9 + col]
+        for col in range(9) for row in range(9)
+    )
+    assert len(swordfish_puzzle) == len(swordfish_transpose) == 81
+    stdout, stderr = run(['--puzzle', swordfish_puzzle],
+                         'hint swordfish\nhint swordfish 1\nstatus\nquit\n')
+    column_fish = (
+        'Swordfish 1 (columns 4,6,7; rows 3,7,9; digit 2): '
+        'sources r3c4 r9c4 r3c6 r7c6 r9c6 r7c7 r9c7; '
+        'eliminate r3c2 r3c3'
+    )
+    assert stdout.count(column_fish) == 2, stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--puzzle', swordfish_transpose],
+                         'hint swordfish 1\nstatus\nquit\n')
+    row_fish = (
+        'Swordfish 1 (rows 4,6,7; columns 3,7,9; digit 2): '
+        'sources r4c3 r4c9 r6c3 r6c7 r6c9 r7c7 r7c9; '
+        'eliminate r2c3 r3c3'
+    )
+    assert row_fish in stdout and 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--puzzle', swordfish_puzzle],
+                         'note 3 2 2\nnote 3 3 2\nnote 3 2 7\n'
+                         'status\nhint apply swordfish 1\nnotes 3 2\n'
+                         'notes 3 3\nstatus\nundo\nnotes 3 2\n'
+                         'status\nredo\nhint apply swordfish 1\n'
+                         'status\nquit\n')
+    assert 'Removed 2 Swordfish pencil candidates in one undoable edit.' in stdout
+    assert 'Notes for row 3 col 2: 7\n' in stdout
+    assert 'Notes for row 3 col 3:\n' in stdout
+    assert 'Notes for row 3 col 2: 2 7\n' in stdout
+    assert stdout.count('undo 4, redo 0') == 2, stdout
+    assert 'undo 3, redo 1' in stdout
+    assert 'No matching Swordfish pencil notes to remove; history unchanged.' in stdout
+    assert not stderr
+    checks += 1
+
+    stdout, stderr = run(['--puzzle', swordfish_puzzle],
+                         'hint apply swordfish\nstatus\nundo\nquit\n')
+    assert 'No matching Swordfish pencil notes to remove; history unchanged.' in stdout
+    assert 'undo 0, redo 0' in stdout
+    assert 'Error: no action to undo or redo' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--puzzle', solution],
+                         'hint swordfish\nhint apply swordfish\nstatus\nquit\n')
+    assert stdout.count('Puzzle already solved; no Swordfish hint needed.') == 2
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 9 4\nhint swordfish\nhint apply swordfish\nstatus\nquit\n')
+    assert 'Cannot preview Swordfish: correct the existing mistakes first.' in stdout
+    assert 'Cannot apply Swordfish: correct the existing mistakes first.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    invalid_swordfish = [
+        'hint swordfish 0', 'hint swordfish 82', 'hint swordfish -1',
+        'hint swordfish nope', 'hint swordfish 1 extra',
+        'hint apply swordfish 0', 'hint apply swordfish 82',
+        'hint apply swordfish -1', 'hint apply swordfish nope',
+        'hint apply swordfish 1 extra',
+    ]
+    stdout, stderr = run(['--puzzle', swordfish_puzzle],
+                         'status\n' + '\n'.join(invalid_swordfish) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_swordfish)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'Swordfish 1 ' not in stdout and not stderr
+    checks += 1
+
     # Genuine 24-given unique puzzle with two actionable naked pairs. A
     # pair reserves two digits in exactly two unit cells; elimination reports
     # which candidate marks other cells in that unit could remove.
