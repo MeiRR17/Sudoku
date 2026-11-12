@@ -245,6 +245,23 @@ SudokuGameStatus sudoku_game_note(SudokuGame *game, unsigned row, unsigned col, 
     remember(game);
     return SUDOKU_GAME_OK;
 }
+/* Replace all pencil marks in a single editable cell as one undoable move.
+ * Unlike toggling notes one by one, this is idempotent and preserves redo
+ * when the requested set already matches the live set. Manual pencil notes
+ * need not be currently legal candidates, consistent with sudoku_game_note. */
+SudokuGameStatus sudoku_game_set_notes(SudokuGame *game,
+                                      unsigned row,unsigned col,uint16_t mask) {
+    int idx=cell_index(row,col);
+    if (!valid_game(game)) return SUDOKU_GAME_INVALID;
+    if (idx<0 || (mask & (uint16_t)~0x3feu)!=0u) return SUDOKU_GAME_RANGE;
+    if (!valid_live_state(game)) return SUDOKU_GAME_INVALID;
+    if (game->givens.cells[idx]) return SUDOKU_GAME_GIVEN;
+    if (game->state.board.cells[idx]) return SUDOKU_GAME_NOT_EMPTY;
+    if (game->state.notes[idx]==mask) return SUDOKU_GAME_OK;
+    game->state.notes[idx]=mask;
+    remember(game);
+    return SUDOKU_GAME_OK;
+}
 /* Validate the entire proposed elimination before changing one note bit.
  * This is a general-purpose, solution-blind pencil-mark operation. */
 SudokuGameStatus sudoku_game_eliminate_notes(

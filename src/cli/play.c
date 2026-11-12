@@ -47,7 +47,8 @@ static int use(const char *message){
 }
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
-    puts("          notes ROW COL, candidates ROW COL, focus [N], auto-notes, prune-notes,");
+    puts("          notes ROW COL, notes set ROW COL DIGITS, notes clear ROW COL,");
+    puts("          candidates ROW COL, focus [N], auto-notes, prune-notes,");
     puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          undo [N], redo [N], reset, check [details|clear],");
@@ -55,7 +56,10 @@ static void commands(void){
     puts("'export' prints copyable 81-digit original clues; 'export current'");
     puts("prints entered digits too; neither is a full save or stored solution.");
     puts("Coordinates and digits are 1..9; original clues are immutable.");
-    puts("'note' toggles pencil marks; 'candidates' lists legal digits without guessing.");
+    puts("'note' toggles a mark; 'notes set ROW COL 135' replaces the full set.");
+    puts("'notes set ROW COL -' or 'notes clear ROW COL' clears only that cell.");
+    puts("Invalid/duplicate digits are rejected; one replacement = one Undo.");
+    puts("'candidates' lists legal digits without guessing.");
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
     puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
     puts("'hint' shows one forced single; 'hint all' lists each distinct forced cell.");
@@ -267,6 +271,28 @@ static int position(const char *row,const char *col,unsigned *r,unsigned *c){
     uint64_t a,b;
     if(!row||!col||!decimal(row,9,&a)||!decimal(col,9,&b)||a<1u||b<1u)return 0;
     *r=(unsigned)a;*c=(unsigned)b;return 1;
+}
+/* Parse a compact user-selected set of distinct digits: "13579" or "-"
+ * for no marks. Reject duplicates and all non-1..9 bytes rather than
+ * partially applying an invalid request. Order is irrelevant. */
+static int parse_note_digits(const char *digits,uint16_t *out){
+    uint16_t mask=0u;
+    size_t len;
+    if(!digits||!out)return 0;
+    if(strcmp(digits,"-")==0){*out=0u;return 1;}
+    len=strlen(digits);
+    if(len<1u||len>9u)return 0;
+    while(*digits){
+        unsigned digit;
+        uint16_t bit;
+        if(*digits<'1'||*digits>'9')return 0;
+        digit=(unsigned)(*digits++-'0');
+        bit=(uint16_t)(1u<<digit);
+        if(mask&bit)return 0;
+        mask=(uint16_t)(mask|bit);
+    }
+    *out=mask;
+    return 1;
 }
 static void print_notes(const SudokuGame *game,unsigned r,unsigned c){
     unsigned i=(r-1u)*9u+c-1u,d;
@@ -1438,7 +1464,7 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
     display(game);
     for (;;) {
         int line_status = read_command_line(line, sizeof line);
-        char *command,*a,*b,*c,*extra;
+        char *command,*a,*b,*c,*extra,*tail;
         unsigned r,d;uint64_t digit;
         SudokuGameStatus status=SUDOKU_GAME_OK;
         if (line_status == 0) break;
@@ -1523,6 +1549,12 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         b=strtok(NULL," \t\r\n");
         c=strtok(NULL," \t\r\n");
         extra=strtok(NULL," \t\r\n");
+        tail=strtok(NULL," \t\r\n");
+        /* Never let fifth and later arguments vanish after tokenization. */
+        if(tail){
+            puts("Error: unknown command or invalid arguments. Type 'help'.");
+            continue;
+        }
         if(strcmp(command,"quit")==0||strcmp(command,"exit")==0){
             if(a)puts("Error: quit takes no argument");
             else{puts("Goodbye. Use 'save' before quitting to preserve progress.");return 0;}
@@ -1649,7 +1681,21 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                         sudoku_game_empty(game),sudoku_game_mistakes(game));
             continue;
         }
-        else if(strcmp(command,"notes")==0&&position(a,b,&r,&d)&&!c){print_notes(game,r,d);continue;}
+        else if(strcmp(command,"notes")==0&&a&&strcmp(a,"set")==0&&
+                position(b,c,&r,&d)&&extra){
+            uint16_t mask=0u;
+            if(parse_note_digits(extra,&mask))
+                status=sudoku_game_set_notes(game,r,d,mask);
+            else puts("Error: invalid note digits; use 1..9 once each, or '-'.");
+            if(!parse_note_digits(extra,&mask))continue;
+        }
+        else if(strcmp(command,"notes")==0&&a&&strcmp(a,"clear")==0&&
+                position(b,c,&r,&d)&&!extra)
+            status=sudoku_game_set_notes(game,r,d,0u);
+        else if(strcmp(command,"notes")==0&&position(a,b,&r,&d)&&!c&&!extra){
+            print_notes(game,r,d);
+            continue;
+        }
         else if(strcmp(command,"candidates")==0&&position(a,b,&r,&d)&&!c){
             print_candidates(game,r,d);continue;
         }

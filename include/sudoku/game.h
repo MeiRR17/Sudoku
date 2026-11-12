@@ -53,6 +53,12 @@ SudokuGameStatus sudoku_game_set_many(SudokuGame *game,
                                       unsigned count, unsigned *applied);
 SudokuGameStatus sudoku_game_erase(SudokuGame *game, unsigned row, unsigned col);
 SudokuGameStatus sudoku_game_note(SudokuGame *game, unsigned row, unsigned col, unsigned digit);
+/* Atomically replace the pencil-note bitmask (bits 1..9, or 0 to clear) in
+ * one editable empty cell. Reject invalid game/board/mask/coordinates and
+ * given or filled cells without mutation; unchanged masks are history-neutral.
+ * Notes are personal marks, not restricted to live legal candidates. */
+SudokuGameStatus sudoku_game_set_notes(SudokuGame *game,
+                                      unsigned row, unsigned col, uint16_t mask);
 /* 1 << digit bitmask (digits 1..9), based only on the current board.
  * Returns 0 on invalid arguments or a filled cell. Observational. */
 uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned col);

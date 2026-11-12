@@ -823,6 +823,55 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Current board:' not in stdout and not stderr
     checks += 1
 
+    # One CLI command replaces all notes on a cell and consumes one Undo.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'notes set 1 1 135\nnotes 1 1\nstatus\n'
+                         'notes set 1 1 135\nstatus\n'
+                         'notes set 1 1 79\nnotes 1 1\nstatus\n'
+                         'undo\nnotes 1 1\nstatus\nredo\nnotes 1 1\n'
+                         'notes clear 1 1\nnotes 1 1\nstatus\n'
+                         'undo\nnotes 1 1\nquit\n')
+    assert 'Notes for row 1 col 1: 1 3 5\n' in stdout
+    assert 'Notes for row 1 col 1: 7 9\n' in stdout
+    assert 'Notes for row 1 col 1:\n' in stdout
+    assert stdout.count('undo 1, redo 0') == 2, stdout
+    assert 'undo 2, redo 0' in stdout and 'undo 1, redo 1' in stdout
+    assert 'undo 3, redo 0' in stdout and 'undo 2, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # '-' clears exactly one cell; same mask remains history-neutral.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'notes set 1 1 913\nnotes set 1 1 139\n'
+                         'status\nnotes set 1 1 -\nnotes 1 1\n'
+                         'status\nnotes clear 1 1\nstatus\nquit\n')
+    assert stdout.count('undo 1, redo 0') == 1, stdout
+    assert stdout.count('undo 2, redo 0') == 2, stdout
+    assert 'Notes for row 1 col 1:\n' in stdout and not stderr
+    checks += 1
+
+    # Fail closed on duplicate, oversized or illegal pencil sequences,
+    # missing arguments, clue cells, and extra trailing tokens.
+    bad_notes = [
+        'notes set 1 1 113', 'notes set 1 1 0', 'notes set 1 1 112345678',
+        'notes set 1 1 12a', 'notes set 1 1 1,2',
+        'notes set 1 1', 'notes set 1 1 - trailing',
+        'notes clear 1 1 trailing', 'notes set 1 1 12 trailing',
+        'notes set 1 1 12345 trailing extra',
+    ]
+    stdout, stderr = run(['--puzzle', near_win],
+                         'status\n' + '\n'.join(bad_notes) +
+                         '\nnotes 1 1\nstatus\nnotes set 1 2 135\n'
+                         'notes set 1 1 135\nset 1 1 5\n'
+                         'notes set 1 1 1\nstatus\nquit\n')
+    assert stdout.count('Error:') >= len(bad_notes) + 2, stdout
+    assert 'Notes for row 1 col 1:\n' in stdout
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'Error: cannot modify an original clue' in stdout
+    assert 'Error: pencil notes only allowed in empty cells' in stdout
+    assert 'undo 2, redo 0' in stdout and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],

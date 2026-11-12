@@ -224,6 +224,47 @@ static int check_game(void){
         CHECK(memcmp(game->state.board.cells, snapshot.board.cells,
                      sizeof snapshot.board.cells) == 0);
     }
+    /* Atomic note replacement: one history step for any set of digits,
+     * canonical bitmask checks, and no-op preservation of Redo. */
+    {
+        unsigned cursor=game->history_cursor, length=game->history_len;
+        uint16_t chosen=(uint16_t)((1u<<1)|(1u<<3)|(1u<<9));
+        CHECK(sudoku_game_set_notes(game,1u,3u,chosen)==SUDOKU_GAME_OK);
+        CHECK(game->state.notes[2]==chosen);
+        CHECK(game->history_cursor==cursor+1u &&
+              game->history_len==length+1u);
+        cursor=game->history_cursor;
+        CHECK(sudoku_game_set_notes(game,1u,3u,chosen)==SUDOKU_GAME_OK);
+        CHECK(game->history_cursor==cursor);
+        CHECK(sudoku_game_set_notes(game,1u,3u,1u)==SUDOKU_GAME_RANGE);
+        CHECK(sudoku_game_set_notes(game,1u,3u,0x8000u)==SUDOKU_GAME_RANGE);
+        CHECK(sudoku_game_set_notes(game,0u,3u,chosen)==SUDOKU_GAME_RANGE);
+        CHECK(sudoku_game_set_notes(game,1u,1u,chosen)==SUDOKU_GAME_GIVEN);
+        CHECK(game->state.notes[2]==chosen && game->history_cursor==cursor);
+        CHECK(sudoku_game_set_notes(game,1u,3u,0u)==SUDOKU_GAME_OK);
+        CHECK(game->state.notes[2]==0u);
+        CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+        CHECK(game->state.notes[2]==chosen);
+        CHECK(sudoku_game_undo(game)==SUDOKU_GAME_OK);
+        CHECK(game->state.notes[2]==0u);
+        CHECK(sudoku_game_redo(game)==SUDOKU_GAME_OK);
+        CHECK(game->state.notes[2]==chosen);
+        cursor=game->history_cursor;
+        length=game->history_len;
+        CHECK(sudoku_game_set_notes(game,1u,3u,chosen)==SUDOKU_GAME_OK);
+        CHECK(game->history_cursor==cursor && game->history_len==length);
+        CHECK(sudoku_game_redo(game)==SUDOKU_GAME_OK);
+        CHECK(game->state.notes[2]==0u);
+        CHECK(sudoku_game_set(game,1u,3u,4u)==SUDOKU_GAME_OK);
+        cursor=game->history_cursor;
+        CHECK(sudoku_game_set_notes(game,1u,3u,chosen)==SUDOKU_GAME_NOT_EMPTY);
+        CHECK(game->history_cursor==cursor);
+        CHECK(sudoku_game_erase(game,1u,3u)==SUDOKU_GAME_OK);
+        /* Corrupted public original clues cannot be bypassed. */
+        game->state.board.cells[0]=0u;
+        CHECK(sudoku_game_set_notes(game,1u,3u,chosen)==SUDOKU_GAME_INVALID);
+        game->state.board.cells[0]=game->givens.cells[0];
+    }
     /* Erase must clear pencil marks even when no digit is placed, while
      * preserving undo/redo history and avoiding phantom no-op edits. */
     CHECK(sudoku_game_note(game,1,3,4)==SUDOKU_GAME_OK);
