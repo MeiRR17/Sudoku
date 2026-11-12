@@ -1391,6 +1391,87 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 0, redo 0') == 2 and not stderr
     checks += 1
 
+    # One-ply trial hints: the classic unique puzzle has r1c3=1 as its
+    # first locally legal but immediately contradictory hypothesis.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint trial 1\nhint trial 2\nstatus\nquit\n')
+    first_trial = ('Trial 1: exclude 1 from r1c3 '
+                   '(digit 1 would have no place in column 8).')
+    second_trial = ('Trial 2: exclude 2 from r1c6 '
+                    '(digit 8 would have no place in column 6).')
+    assert stdout.count(first_trial) == 2, stdout
+    assert second_trial in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # The 10th row-major trial identifies the previously tested
+    # candidate r1c9=4 as excluding the last legal digit of r7c9.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint trial 10\nstatus\nquit\n')
+    assert ('Trial 10: exclude 4 from r1c9 '
+            '(r7c9 would have no legal candidates).') in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Apply only removes matching handwritten pencil marks, in one
+    # history entry. It never fills the answer and preserves other marks.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 3 14\nstatus\nhint apply trial 1\n'
+                         'notes 1 3\nstatus\nundo\nnotes 1 3\n'
+                         'status\nredo\nnotes 1 3\n'
+                         'hint apply trial 1\nstatus\nquit\n')
+    assert 'Removed 1 trial pencil candidate in one undoable edit.' in stdout
+    assert stdout.count('Notes for row 1 col 3: 4\n') == 2, stdout
+    assert 'Notes for row 1 col 3: 1 4\n' in stdout
+    assert 'undo 2, redo 0' in stdout
+    assert 'undo 1, redo 1' in stdout
+    assert 'No matching trial pencil notes to remove; history unchanged.' in stdout
+    assert not stderr
+    checks += 1
+
+    # An application without handwritten matches must preserve Redo.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint apply trial 1\nstatus\nundo\nquit\n')
+    assert 'No matching trial pencil notes to remove; history unchanged.' in stdout
+    assert 'undo 0, redo 0' in stdout
+    assert 'Error: no action to undo or redo' in stdout and not stderr
+    checks += 1
+
+    # Solved games and mistakes must be gated. A single open cell with a
+    # forced value does not itself imply any contradiction-based deduction.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'hint trial\nhint apply trial\nstatus\nquit\n')
+    assert stdout.count('No immediate-contradiction trial hints found.') == 2
+    assert 'undo 0, redo 0' in stdout and not stderr
+    stdout, stderr = run(['--puzzle', solution],
+                         'hint trial\nhint apply trial\nstatus\nquit\n')
+    assert stdout.count('Puzzle already solved; no trial hints needed.') == 2
+    assert 'undo 0, redo 0' in stdout and not stderr
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 9 4\nhint trial\nhint apply trial\n'
+                         'status\nquit\n')
+    assert 'Cannot preview trial hints: correct the existing mistakes first.' in stdout
+    assert 'Cannot apply trial hints: correct the existing mistakes first.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Reject zero/out-of-range limits, malformed integers and extra
+    # arguments without changing the board or history.
+    bad_trial_args = [
+        'hint trial 0', 'hint trial 82', 'hint trial -1',
+        'hint trial nope', 'hint trial 2 extra',
+        'hint apply trial 0', 'hint apply trial 82',
+        'hint apply trial -1', 'hint apply trial nope',
+        'hint apply trial 2 extra'
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(bad_trial_args) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(bad_trial_args)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'Trial 1:' not in stdout and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],

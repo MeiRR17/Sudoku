@@ -56,8 +56,8 @@ static void commands(void){
     puts("          candidates ROW COL, probe ROW COL DIGIT, focus [N],");
     puts("          analyze [N], auto-notes,");
     puts("          prune-notes,");
-    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
-    puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
+    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|triples [N]|hidden-triples [N]|chain [N]],");
+    puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          undo [N], redo [N], reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
@@ -101,6 +101,9 @@ static void commands(void){
     puts("'hint x-wing [N]' finds row/column rectangle candidate eliminations.");
     puts("'hint apply x-wing [N]' erases matching notes in one undo step.");
     puts("'hint swordfish [N]' previews three-line candidate eliminations.");
+    puts("'hint trial [N]' excludes locally legal digits causing an immediate");
+    puts("candidate contradiction when hypothetically placed (default 5).");
+    puts("'hint apply trial [N]' prunes matching handwritten notes in one undo.");
     puts("'hint apply swordfish [N]' removes matching notes in one undo.");
     puts("'hint chain [N]' previews up to N successive forced singles (1..81).");
     puts("'hint apply' places one; 'hint apply all' batches current forced cells.");
@@ -798,6 +801,145 @@ static void probe_placement(const SudokuGame *game,
     if(!new_zero&&!new_gaps)
         puts("No immediate contradiction found; this does NOT prove the move is correct.");
     puts("Probe is read-only; use 'set' to make a move.");
+}
+/* Single-ply contradiction hint: if placing a locally legal candidate
+ * makes some other empty square lose its last legal candidate, or leaves
+ * a required digit without any position in a row/column/box, that tested
+ * candidate can be excluded. All tests use only the present Sudoku rules,
+ * never the cached solved grid. Baseline contradictions prevent deductions. */
+typedef struct TrialWitness{
+    unsigned kind;  /* 0 none, 1 empty cell, 2 missing digit in unit */
+    unsigned index; /* cell index or 0..26 unit index */
+    unsigned digit;
+} TrialWitness;
+static TrialWitness trial_witness(const SudokuBoard *board,
+                                  const uint16_t before[SUDOKU_CELL_COUNT],
+                                  unsigned target,unsigned digit){
+    SudokuBoard hypothetical=*board;
+    uint16_t after[SUDOKU_CELL_COUNT]={0};
+    TrialWitness result={0u,0u,0u};
+    unsigned i,unit,slot,d;
+    hypothetical.cells[target]=(uint8_t)digit;
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        after[i]=probe_candidates(&hypothetical,i);
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+        if(i!=target&&before[i]&&!after[i]){
+            result.kind=1u;
+            result.index=i;
+            return result;
+        }
+    }
+    for(unit=0u;unit<27u;++unit)
+        for(d=1u;d<=9u;++d){
+            uint16_t bit=(uint16_t)(1u<<d);
+            unsigned existed=0u,remains=0u;
+            for(slot=0u;slot<9u;++slot){
+                unsigned index=pair_unit_cell(unit,slot);
+                if(board->cells[index]==d||(before[index]&bit))
+                    existed=1u;
+                if(hypothetical.cells[index]==d||(after[index]&bit))
+                    remains=1u;
+            }
+            if(existed&&!remains){
+                result.kind=2u;
+                result.index=unit;
+                result.digit=d;
+                return result;
+            }
+        }
+    return result;
+}
+static int trial_baseline_consistent(const SudokuBoard *board,
+                                     const uint16_t before[SUDOKU_CELL_COUNT]){
+    unsigned i,unit,d,slot;
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        if(!board->cells[i]&&!before[i])return 0;
+    for(unit=0u;unit<27u;++unit)
+        for(d=1u;d<=9u;++d){
+            uint16_t bit=(uint16_t)(1u<<d);
+            unsigned possible=0u;
+            for(slot=0u;slot<9u;++slot){
+                unsigned index=pair_unit_cell(unit,slot);
+                if(board->cells[index]==d||(before[index]&bit)){
+                    possible=1u;
+                    break;
+                }
+            }
+            if(!possible)return 0;
+        }
+    return 1;
+}
+static void hint_trial(SudokuGame *game,unsigned limit,int apply){
+    uint16_t before[SUDOKU_CELL_COUNT]={0};
+    uint16_t eliminations[SUDOKU_CELL_COUNT]={0};
+    unsigned i,d,found=0u;
+    if(sudoku_board_validate(&game->givens,NULL)!=SUDOKU_OK||
+       sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot inspect trial hints: invalid board.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        if(game->givens.cells[i]&&
+           game->givens.cells[i]!=game->state.board.cells[i]){
+            puts("Cannot inspect trial hints: original clues were changed.");
+            return;
+        }
+    if(sudoku_game_won(game)){
+        puts("Puzzle already solved; no trial hints needed.");
+        return;
+    }
+    if(sudoku_game_mistakes(game)){
+        puts(apply?"Cannot apply trial hints: correct the existing mistakes first.":
+                   "Cannot preview trial hints: correct the existing mistakes first.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        before[i]=probe_candidates(&game->state.board,i);
+    if(!trial_baseline_consistent(&game->state.board,before)){
+        puts("Cannot inspect trial hints: current candidates already contain a contradiction.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+        if(game->state.board.cells[i])continue;
+        for(d=1u;d<=9u;++d){
+            TrialWitness witness;
+            if(!(before[i]&(uint16_t)(1u<<d)))continue;
+            witness=trial_witness(&game->state.board,before,i,d);
+            if(!witness.kind)continue;
+            printf("Trial %u: exclude %u from r%uc%u (",
+                   found+1u,d,i/9u+1u,i%9u+1u);
+            if(witness.kind==1u)
+                printf("r%uc%u would have no legal candidates",
+                       witness.index/9u+1u,witness.index%9u+1u);
+            else{
+                const char *kind=witness.index<9u?"row":
+                                 witness.index<18u?"column":"box";
+                printf("digit %u would have no place in %s %u",
+                       witness.digit,kind,witness.index%9u+1u);
+            }
+            puts(").");
+            if(apply)
+                eliminations[i]=(uint16_t)(eliminations[i]|
+                                          (uint16_t)(1u<<d));
+            if(++found==limit)goto done_trial_hints;
+        }
+    }
+done_trial_hints:
+    if(!found){
+        puts("No immediate-contradiction trial hints found.");
+        return;
+    }
+    if(apply){
+        unsigned removed=0u;
+        SudokuGameStatus result=sudoku_game_eliminate_notes(game,eliminations,&removed);
+        if(result!=SUDOKU_GAME_OK)
+            printf("Error: %s\n",sudoku_game_status_text(result));
+        else if(removed)
+            printf("Removed %u trial pencil candidate%s in one undoable edit.\n",
+                   removed,removed==1u?"":"s");
+        else
+            puts("No matching trial pencil notes to remove; history unchanged.");
+    }
 }
 static void naked_pairs(SudokuGame *game,unsigned limit,int apply){
     uint16_t masks[SUDOKU_CELL_COUNT]={0};
@@ -1994,6 +2136,9 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             else if(strcmp(a,"swordfish")==0&&
                     (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
                 swordfish(game,(unsigned)(b?limit:5u),0);
+            else if(strcmp(a,"trial")==0&&
+                    (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
+                hint_trial(game,(unsigned)(b?limit:5u),0);
             else if(strcmp(a,"apply")==0&&!b)print_hint(game,1);
             else if(strcmp(a,"chain")==0&&
                     (!b||(!c&&decimal(b,81u,&limit)&&limit>=1u)))
@@ -2029,6 +2174,10 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                     strcmp(b,"swordfish")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
                 swordfish(game,(unsigned)(c?limit:5u),1);
+            else if(strcmp(a,"apply")==0&&b&&
+                    strcmp(b,"trial")==0&&
+                    (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
+                hint_trial(game,(unsigned)(c?limit:5u),1);
             else if(strcmp(a,"apply")==0&&b&&
                     strcmp(b,"chain")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
