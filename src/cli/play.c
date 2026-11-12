@@ -1684,10 +1684,11 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         else if(strcmp(command,"notes")==0&&a&&strcmp(a,"set")==0&&
                 position(b,c,&r,&d)&&extra){
             uint16_t mask=0u;
-            if(parse_note_digits(extra,&mask))
-                status=sudoku_game_set_notes(game,r,d,mask);
-            else puts("Error: invalid note digits; use 1..9 once each, or '-'.");
-            if(!parse_note_digits(extra,&mask))continue;
+            if(!parse_note_digits(extra,&mask)){
+                puts("Error: invalid note digits; use 1..9 once each, or '-'.");
+                continue;
+            }
+            status=sudoku_game_set_notes(game,r,d,mask);
         }
         else if(strcmp(command,"notes")==0&&a&&strcmp(a,"clear")==0&&
                 position(b,c,&r,&d)&&!extra)

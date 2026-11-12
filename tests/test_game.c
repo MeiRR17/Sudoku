@@ -260,10 +260,15 @@ static int check_game(void){
         CHECK(sudoku_game_set_notes(game,1u,3u,chosen)==SUDOKU_GAME_NOT_EMPTY);
         CHECK(game->history_cursor==cursor);
         CHECK(sudoku_game_erase(game,1u,3u)==SUDOKU_GAME_OK);
-        /* Corrupted public original clues cannot be bypassed. */
+        /* Corrupt public state cannot enter the history as new notes. */
         game->state.board.cells[0]=0u;
         CHECK(sudoku_game_set_notes(game,1u,3u,chosen)==SUDOKU_GAME_INVALID);
         game->state.board.cells[0]=game->givens.cells[0];
+        game->state.notes[0]=(uint16_t)(1u<<3);
+        CHECK(sudoku_game_set_notes(game,1u,3u,chosen)==SUDOKU_GAME_INVALID);
+        game->state.notes[0]=0u;
+        CHECK(sudoku_game_set_notes(game,1u,3u,chosen)==SUDOKU_GAME_OK);
+        CHECK(game->state.notes[2]==chosen);
     }
     /* Erase must clear pencil marks even when no digit is placed, while
      * preserving undo/redo history and avoiding phantom no-op edits. */
