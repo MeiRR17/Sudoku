@@ -34,10 +34,11 @@ typedef struct SudokuGame {
 
 /* Unique-solution puzzles only; transactional on error. */
 SudokuGameStatus sudoku_game_start(SudokuGame *game, const SudokuBoard *givens);
-/* Direct placement, erase, pencil-note and bulk edit operations validate
- * the live board and original clues before committing a snapshot. Rejected
- * edits do not change state or Undo/Redo; observational candidate lookup
- * deliberately accepts independently valid boards. */
+/* Ordinary placement, erase, pencil-note and bulk edit operations validate
+ * the live board, immutable clues and canonical note masks before making a
+ * new history snapshot. Rejected edits are atomic. Explicit auto-notes,
+ * prune-notes, clear-notes and reset can repair malformed public notes;
+ * read-only candidate lookup accepts independently valid boards. */
 SudokuGameStatus sudoku_game_set(SudokuGame *game, unsigned row, unsigned col, unsigned digit);
 /* Apply 0..81 distinct placements as one atomic, undoable edit.
  * Every target must be an empty non-given cell; malformed/duplicate/conflicting
@@ -55,8 +56,9 @@ SudokuGameStatus sudoku_game_note(SudokuGame *game, unsigned row, unsigned col, 
 /* 1 << digit bitmask (digits 1..9), based only on the current board.
  * Returns 0 on invalid arguments or a filled cell. Observational. */
 uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned col);
-/* Fill candidate notes on all empty editable cells in one undoable step.
- * Replaces existing pencil notes; repeated unchanged action is a no-op. */
+/* Fill candidates on empty cells, and clear any notes on filled cells,
+ * in one undoable step. Repairs malformed note masks without altering
+ * digits; repeated unchanged action is a no-op. */
 SudokuGameStatus sudoku_game_auto_notes(SudokuGame *game);
 /* Remove pencil notes that conflict with the current board, but never add
  * missing marks. One undoable state change, or no history change if unchanged. */

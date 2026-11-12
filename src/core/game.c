@@ -42,6 +42,20 @@ static int valid_live_board(const SudokuGame *game) {
             return 0;
     return 1;
 }
+/* The public snapshot stores pencil marks as bits 1..9 only; filled cells
+ * cannot have notes. Ordinary edits must not copy bad public notes into
+ * a new, unrestorable Undo/Redo record. */
+static int valid_snapshot_notes(const SudokuGameSnapshot *snapshot) {
+    unsigned i;
+    for (i = 0u; i < SUDOKU_CELL_COUNT; ++i)
+        if ((snapshot->notes[i] & (uint16_t)~0x3feu) != 0u ||
+            (snapshot->board.cells[i] && snapshot->notes[i]))
+            return 0;
+    return 1;
+}
+static int valid_live_state(const SudokuGame *game) {
+    return valid_live_board(game) && valid_snapshot_notes(&game->state);
+}
 static void remember(SudokuGame *game) {
     if (game->history_cursor + 1u < game->history_len)
         game->history_len = game->history_cursor + 1u;
@@ -77,7 +91,7 @@ SudokuGameStatus sudoku_game_set(SudokuGame *game, unsigned row, unsigned col, u
     SudokuBoard candidate;
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
     if (idx < 0 || digit < 1u || digit > 9u) return SUDOKU_GAME_RANGE;
-    if (!valid_live_board(game)) return SUDOKU_GAME_INVALID;
+    if (!valid_live_state(game)) return SUDOKU_GAME_INVALID;
     if (game->givens.cells[idx]) return SUDOKU_GAME_GIVEN;
     if (game->state.board.cells[idx] == digit) return SUDOKU_GAME_OK;
     candidate = game->state.board;
@@ -101,7 +115,7 @@ SudokuGameStatus sudoku_game_set_many(SudokuGame *game,
     if (!valid_game(game) || count > SUDOKU_CELL_COUNT ||
         (count != 0u && moves == NULL))
         return SUDOKU_GAME_INVALID;
-    if (!valid_live_board(game)) return SUDOKU_GAME_INVALID;
+    if (!valid_live_state(game)) return SUDOKU_GAME_INVALID;
     if (count == 0u) return SUDOKU_GAME_OK;
     proposed = game->state;
     for (i = 0u; i < count; ++i) {
@@ -126,7 +140,7 @@ SudokuGameStatus sudoku_game_erase(SudokuGame *game, unsigned row, unsigned col)
     int idx = cell_index(row, col);
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
     if (idx < 0) return SUDOKU_GAME_RANGE;
-    if (!valid_live_board(game)) return SUDOKU_GAME_INVALID;
+    if (!valid_live_state(game)) return SUDOKU_GAME_INVALID;
     if (game->givens.cells[idx]) return SUDOKU_GAME_GIVEN;
     /* Erasing an editable cell clears its value AND its pencil marks.
      * Previously 'erase' on an empty noted cell silently did nothing,
@@ -168,10 +182,10 @@ uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned c
         return 0u;
     return validated_candidates(&game->state.board, row, col);
 }
-/* Recompute all pencil marks for editable empty cells as a single undoable
- * snapshot. The user's deliberate notes are replaced only on this command;
- * repeat without board changes is history-neutral. Filled/given cells remain
- * unchanged, and no solution digit is disclosed or inserted. */
+/* Recompute canonical pencil marks in one undoable snapshot: legal
+ * candidates on empty cells and zero notes on every filled cell. This also
+ * repairs malformed public notes without changing any board digit. Repeated
+ * unchanged actions preserve Undo/Redo; no solution value is consulted. */
 SudokuGameStatus sudoku_game_auto_notes(SudokuGame *game) {
     SudokuGameSnapshot proposed;
     unsigned index;
@@ -182,9 +196,9 @@ SudokuGameStatus sudoku_game_auto_notes(SudokuGame *game) {
     proposed = game->state;
     for (index = 0u; index < SUDOKU_CELL_COUNT; ++index) {
         uint16_t mask;
-        if (game->state.board.cells[index]) continue;
-        mask = validated_candidates(&game->state.board,
-                                    index / 9u + 1u, index % 9u + 1u);
+        mask = game->state.board.cells[index] ? 0u :
+            validated_candidates(&game->state.board,
+                                 index / 9u + 1u, index % 9u + 1u);
         if (proposed.notes[index] != mask) {
             proposed.notes[index] = mask;
             changed = 1;
@@ -224,7 +238,7 @@ SudokuGameStatus sudoku_game_note(SudokuGame *game, unsigned row, unsigned col, 
     int idx = cell_index(row, col);
     if (!valid_game(game)) return SUDOKU_GAME_INVALID;
     if (idx < 0 || digit < 1u || digit > 9u) return SUDOKU_GAME_RANGE;
-    if (!valid_live_board(game)) return SUDOKU_GAME_INVALID;
+    if (!valid_live_state(game)) return SUDOKU_GAME_INVALID;
     if (game->givens.cells[idx]) return SUDOKU_GAME_GIVEN;
     if (game->state.board.cells[idx]) return SUDOKU_GAME_NOT_EMPTY;
     game->state.notes[idx] ^= (uint16_t)(1u << digit);
@@ -239,14 +253,12 @@ SudokuGameStatus sudoku_game_eliminate_notes(
     unsigned i, d, total=0u;
     if (removed) *removed=0u;
     if (!valid_game(game) || !masks) return SUDOKU_GAME_INVALID;
-    if (!valid_live_board(game)) return SUDOKU_GAME_INVALID;
+    if (!valid_live_state(game)) return SUDOKU_GAME_INVALID;
     for (i=0u;i<SUDOKU_CELL_COUNT;++i) {
         if ((masks[i] & (uint16_t)~0x3feu)!=0u)
             return SUDOKU_GAME_RANGE;
         if (masks[i] && game->state.board.cells[i])
             return SUDOKU_GAME_NOT_EMPTY;
-        if (game->state.notes[i] & (uint16_t)~0x3feu)
-            return SUDOKU_GAME_INVALID;
     }
     proposed=game->state;
     for (i=0u;i<SUDOKU_CELL_COUNT;++i) {
@@ -283,7 +295,7 @@ SudokuGameStatus sudoku_game_clear_mistakes(SudokuGame *game) {
     SudokuGameSnapshot proposed;
     unsigned index;
     int changed = 0;
-    if (!valid_live_board(game) ||
+    if (!valid_live_state(game) ||
         sudoku_board_validate(&game->solution, NULL) != SUDOKU_OK)
         return SUDOKU_GAME_INVALID;
     for (index = 0u; index < SUDOKU_CELL_COUNT; ++index) {
@@ -318,15 +330,11 @@ static int valid_history_target(const SudokuGame *game,
     if (sudoku_board_validate(&game->givens, NULL) != SUDOKU_OK ||
         sudoku_board_validate(&target->board, NULL) != SUDOKU_OK)
         return 0;
-    for (i = 0u; i < SUDOKU_CELL_COUNT; ++i) {
+    for (i = 0u; i < SUDOKU_CELL_COUNT; ++i)
         if (game->givens.cells[i] &&
             target->board.cells[i] != game->givens.cells[i])
             return 0;
-        if ((target->notes[i] & (uint16_t)~0x3feu) != 0u ||
-            (target->board.cells[i] && target->notes[i]))
-            return 0;
-    }
-    return 1;
+    return valid_snapshot_notes(target);
 }
 /* Bounds and destination integrity are checked before changing the
  * history cursor or live board; failed multi-step actions are atomic. */

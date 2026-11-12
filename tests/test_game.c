@@ -51,6 +51,54 @@ static int check_game(void){
     CHECK(sudoku_game_set(game,0,1,4)==SUDOKU_GAME_RANGE);
     CHECK(sudoku_game_set(game,1,3,0)==SUDOKU_GAME_RANGE);
     CHECK(sudoku_game_set(game,1,3,5)==SUDOKU_GAME_CONFLICT);
+    /* Pencil marks in the public C struct can be altered directly. Reject
+     * malformed masks during ordinary edits, even when the board is legal;
+     * explicit note cleanup and reset remain usable recovery operations. */
+    {
+        SudokuGame *probe = malloc(sizeof *probe);
+        SudokuGameMove move = {1u, 3u, 4u};
+        uint16_t masks[SUDOKU_CELL_COUNT] = {0};
+        unsigned applied = 99u, removed = 99u;
+        unsigned cursor, length;
+        CHECK(probe != NULL);
+        CHECK(sudoku_game_start(probe, &board) == SUDOKU_GAME_OK);
+        cursor = probe->history_cursor;
+        length = probe->history_len;
+        probe->state.notes[0] = (uint16_t)(1u << 2); /* Note on a given. */
+        CHECK(sudoku_game_set(probe, 1u, 3u, 4u) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_erase(probe, 1u, 3u) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_note(probe, 1u, 3u, 4u) == SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_set_many(probe, &move, 1u, &applied) ==
+              SUDOKU_GAME_INVALID);
+        CHECK(applied == 0u);
+        CHECK(sudoku_game_eliminate_notes(probe, masks, &removed) ==
+              SUDOKU_GAME_INVALID);
+        CHECK(removed == 0u);
+        CHECK(sudoku_game_clear_mistakes(probe) == SUDOKU_GAME_INVALID);
+        CHECK(probe->state.notes[0] == (1u << 2));
+        CHECK(probe->history_cursor == cursor && probe->history_len == length);
+        CHECK(sudoku_game_auto_notes(probe) == SUDOKU_GAME_OK);
+        CHECK(probe->state.notes[0] == 0u && probe->state.board.cells[0] == 5u);
+        CHECK(probe->history_cursor == 1u && probe->history_len == 2u);
+        CHECK(sudoku_game_undo(probe) == SUDOKU_GAME_OK);
+        CHECK(probe->state.notes[0] == 0u); /* Snapshot remains restorable. */
+        probe->state.notes[2] = 0x8000u; /* Illegal empty-cell note. */
+        cursor = probe->history_cursor;
+        length = probe->history_len;
+        CHECK(sudoku_game_note(probe, 1u, 3u, 4u) == SUDOKU_GAME_INVALID);
+        CHECK(probe->history_cursor == cursor && probe->history_len == length);
+        CHECK(sudoku_game_prune_notes(probe) == SUDOKU_GAME_OK);
+        CHECK(probe->state.notes[2] == 0u);
+        probe->state.notes[0] = 1u; /* Illegal bit zero on a clue. */
+        CHECK(sudoku_game_clear_notes(probe) == SUDOKU_GAME_OK);
+        CHECK(probe->state.notes[0] == 0u);
+        probe->state.notes[0] = 0x8000u;
+        CHECK(sudoku_game_reset(probe) == SUDOKU_GAME_OK);
+        CHECK(probe->state.notes[0] == 0u && probe->state.board.cells[0] == 5u);
+        CHECK(sudoku_game_undo(probe) == SUDOKU_GAME_OK);
+        CHECK(probe->state.notes[0] == 0u);
+        free(probe);
+    }
     /* Historical Undo/Redo targets can be tampered with through the public
      * C struct. A bad destination must not change the live board or cursor;
      * an intact target remains usable even if the current board is damaged. */
