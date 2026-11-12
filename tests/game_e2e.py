@@ -241,6 +241,31 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'undo 0, redo 0' in stdout and not stderr
     checks += 1
 
+    # Verify the column-oriented transpose, not only row-based X-Wings.
+    # The classic fixture has two actionable column patterns, including a
+    # digit-6 rectangle with sources in columns 4,6 and rows 1,9.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint x-wing 1\nhint x-wing 2\nstatus\nquit\n')
+    col_xwing = (
+        'X-Wing 1 (columns 4,6; rows 1,9; digit 6): '
+        'corners r1c4 r9c4 r1c6 r9c6; eliminate r9c7'
+    )
+    second_col_xwing = (
+        'X-Wing 2 (columns 4,6; rows 4,7; digit 7): '
+        'corners r4c4 r7c4 r4c6 r7c6; eliminate r7c3 r4c7'
+    )
+    assert stdout.count(col_xwing) == 2, stdout
+    assert stdout.count(second_col_xwing) == 1, stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A board with only one blank has no X-Wing elimination.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'hint x-wing\nhint apply x-wing\nstatus\nquit\n')
+    assert stdout.count('No actionable X-Wings found.') == 2
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
     # Only existing handwritten marks are removed. Multiple eliminations
     # form one Undo transaction and preserve unrelated notes/digits.
     stdout, stderr = run(['--puzzle', pair_puzzle],

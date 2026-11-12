@@ -721,10 +721,10 @@ static void x_wings(SudokuGame *game,unsigned limit,int apply){
                     }
                 }
                 if(count!=2u)continue;
-                first=0u;second=0u;
+                first=9u;second=9u;
                 for(slot=0u;slot<9u;++slot)
                     if(pair&(1u<<slot)){
-                        if(!(pair&( (1u<<slot)-1u)))first=slot;
+                        if(first==9u)first=slot;
                         else second=slot;
                     }
                 for(b=a+1u;b<9u;++b){
@@ -765,14 +765,12 @@ static void x_wings(SudokuGame *game,unsigned limit,int apply){
                     printf("X-Wing %u (%s %u,%u; %s %u,%u; digit %u): corners",
                            total+1u,axis?"columns":"rows",a+1u,b+1u,
                            axis?"rows":"columns",first+1u,second+1u,digit);
-                    for(line=a;line<=b;line=b){
-                        for(slot=first;slot<=second;slot=second){
-                            i=xwing_index(axis,line,slot);
+                    /* Print the four corners in deterministic order. */
+                    for(line=0u;line<2u;++line)
+                        for(slot=0u;slot<2u;++slot){
+                            i=xwing_index(axis,line?b:a,slot?second:first);
                             printf(" r%uc%u",i/9u+1u,i%9u+1u);
-                            if(slot==second)break;
                         }
-                        if(line==b)break;
-                    }
                     fputs("; eliminate",stdout);
                     for(i=0u;i<target_count;++i){
                         unsigned target=targets[i];
