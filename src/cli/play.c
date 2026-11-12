@@ -46,7 +46,8 @@ static int use(const char *message){
     return 2;
 }
 static void commands(void){
-    puts("Commands: show [notes|candidates], set ROW COL DIGIT, erase ROW COL,");
+    puts("Commands: show [notes|candidates|heatmap|digit N],");
+    puts("          set ROW COL DIGIT, erase ROW COL,");
     puts("          note ROW COL DIGIT,");
     puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
     puts("          notes audit [N] | notes audit row|column|box N,");
@@ -63,6 +64,8 @@ static void commands(void){
     puts("Coordinates and digits are 1..9; original clues are immutable.");
     puts("'show notes' renders pencil marks in a 9x9 mini-grid; '.' is absent.");
     puts("'show candidates' shows live Sudoku candidates, not the solved grid.");
+    puts("'show heatmap' shows candidate counts in empty cells (! = none).");
+    puts("'show digit N' marks existing N as # and legal vacancies as *, 1..9.");
     puts("'note' toggles a mark; 'notes set ROW COL 135' replaces the full set.");
     puts("'notes set ROW COL -' or 'notes clear ROW COL' clears only that cell.");
     puts("'notes add ROW COL 135' adds marks; 'notes remove ROW COL 135' erases.");
@@ -474,6 +477,79 @@ static void audit_notes(const SudokuGame *game,unsigned limit,
     else if(differing>shown)
         printf("%u additional differing cells not listed (raise limit).\n",
                differing-shown);
+}
+/* Read-only candidate maps: [d] distinguishes a filled digit from
+ * the count of legal candidates in an empty cell. Heatmap shows counts;
+ * digit mode shows the selected placed digit as # and legal vacancies
+ * as *. Neither reads the solved grid or edits game history. */
+static int can_show_candidate_map(const SudokuGame *game){
+    unsigned i;
+    if(sudoku_board_validate(&game->givens,NULL)!=SUDOKU_OK||
+       sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot display candidate map: invalid current board.");
+        return 0;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        if(game->givens.cells[i]&&
+           game->state.board.cells[i]!=game->givens.cells[i]){
+            puts("Cannot display candidate map: immutable clues were altered.");
+            return 0;
+        }
+    return 1;
+}
+static unsigned count_candidate_digits(uint16_t mask){
+    unsigned n=0u;
+    while(mask){mask=(uint16_t)(mask&(uint16_t)(mask-1u));++n;}
+    return n;
+}
+static void show_candidate_map(const SudokuGame *game,unsigned digit){
+    unsigned row,col,placed=0u,possible=0u,dead=0u;
+    uint16_t live[SUDOKU_CELL_COUNT]={0};
+    if(!can_show_candidate_map(game))return;
+    for(row=0u;row<9u;++row)
+        for(col=0u;col<9u;++col){
+            unsigned i=row*9u+col;
+            if(game->state.board.cells[i]){
+                if(game->state.board.cells[i]==digit)++placed;
+            }else{
+                live[i]=candidate_mask(game,i);
+                if(digit&&(live[i]&(uint16_t)(1u<<digit)))++possible;
+                if(!live[i])++dead;
+            }
+        }
+    if(digit)
+        printf("Digit %u map (* = legal empty; # = placed digit; . = unavailable):\n",
+               digit);
+    else
+        puts("Candidate heatmap ([d] = filled; 1..9 = legal choices; ! = none):");
+    puts("       1   2   3   4   5   6   7   8   9");
+    puts("    +-----------+-----------+-----------+");
+    for(row=0u;row<9u;++row){
+        printf("  %u |",row+1u);
+        for(col=0u;col<9u;++col){
+            unsigned i=row*9u+col,d=game->state.board.cells[i];
+            if(d){
+                if(digit&&d==digit)fputs(" # ",stdout);
+                else printf("[%u]",d);
+            }else if(digit)
+                fputs((live[i]&(uint16_t)(1u<<digit))?" * ":" . ",stdout);
+            else{
+                unsigned count=count_candidate_digits(live[i]);
+                if(!count)fputs(" ! ",stdout);
+                else printf(" %u ",count);
+            }
+            if(col%3u==2u)putchar('|');
+            else putchar(' ');
+        }
+        putchar('\n');
+        if(row%3u==2u)puts("    +-----------+-----------+-----------+");
+    }
+    if(digit)
+        printf("Digit %u summary: %u placed; %u legal empty locations.\n",
+               digit,placed,possible);
+    else
+        printf("Heatmap summary: %u empty cells with no legal candidates.\n",
+               dead);
 }
 /* Read-only candidate pressure report for players who want to choose
  * their next cell without asking the cached solution for an answer.
@@ -1872,6 +1948,10 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             if(!a)display(game);
             else if(!b&&strcmp(a,"notes")==0)display_note_grid(game,0);
             else if(!b&&strcmp(a,"candidates")==0)display_note_grid(game,1);
+            else if(!b&&strcmp(a,"heatmap")==0)show_candidate_map(game,0u);
+            else if(b&&!c&&!extra&&strcmp(a,"digit")==0&&
+                    decimal(b,9u,&digit)&&digit>=1u)
+                show_candidate_map(game,(unsigned)digit);
             else puts("Error: unknown command or invalid arguments. Type 'help'.");
             continue;
         }

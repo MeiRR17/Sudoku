@@ -1241,6 +1241,79 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 0, redo 0') == 2 and not stderr
     checks += 1
 
+    # Heatmap labels immutable/player-filled digits with [d] and shows
+    # the number of locally legal candidates in each remaining cell.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'show heatmap\nshow digit 5\nstatus\nquit\n')
+    assert 'Candidate heatmap ([d] = filled; 1..9 = legal choices; ! = none):' in stdout
+    assert '  1 | 1  [3] [4]|[6] [7] [8]|[9] [1] [2]|' in stdout
+    assert 'Heatmap summary: 0 empty cells with no legal candidates.' in stdout
+    assert 'Digit 5 map (* = legal empty; # = placed digit; . = unavailable):' in stdout
+    assert '  1 | *  [3] [4]|[6] [7] [8]|[9] [1] [2]|' in stdout
+    assert 'Digit 5 summary: 8 placed; 1 legal empty locations.' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Classic puzzle has three candidates for r1c3: 1,2,4. The digit map
+    # highlights that legal location without guessing its solved value.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'show heatmap\nshow digit 4\nstatus\nquit\n')
+    assert '  1 |[5] [3]  3 |' in stdout
+    assert '  1 |[5] [3]  * |' in stdout
+    assert 'Digit 4 summary:' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Both views are read-only even after incorrect manual notes and
+    # across undo/redo. Notes must survive every visualization.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'notes set 1 1 19\nshow heatmap\nshow digit 5\n'
+                         'notes 1 1\nstatus\nundo\nshow heatmap\n'
+                         'redo\nshow digit 5\nnotes 1 1\nstatus\nquit\n')
+    assert stdout.count('Heatmap summary: 0 empty cells with no legal candidates.') == 2
+    assert stdout.count('Digit 5 summary: 8 placed; 1 legal empty locations.') == 2
+    assert stdout.count('Notes for row 1 col 1: 1 9\n') == 2
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A legal-looking wrong move can leave another empty square without
+    # candidates; display ! while leaving board and history unchanged.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 9 4\nshow heatmap\nstatus\nquit\n')
+    assert 'Heatmap summary: 1 empty cells with no legal candidates.' in stdout
+    assert ' ! |' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Invalid digit selectors and redundant parameters fail closed.
+    invalid_candidate_maps = [
+        'show digit', 'show digit 0', 'show digit 10',
+        'show digit -1', 'show digit x', 'show digit 5 extra',
+        'show digit 5 6', 'show heatmap 5', 'show heatmap extra',
+        'show heatmap 1 2', 'show digits 5'
+    ]
+    stdout, stderr = run(['--puzzle', near_win],
+                         'status\n' + '\n'.join(invalid_candidate_maps) +
+                         '\nstatus\nshow digit 5\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_candidate_maps)
+    assert stdout.count('Digit 5 map (') == 1
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
+    # Both views are also available after resuming a saved game, and
+    # neither changes the selected save destination or handwritten marks.
+    map_save = folder / 'candidate visual map.save'
+    stdout, stderr = run(['--puzzle', near_win, '--save', map_save],
+                         'notes set 1 1 19\nsave\nquit\n')
+    assert 'Saved to ' in stdout and map_save.exists() and not stderr
+    stdout, stderr = run(['--resume', map_save],
+                         'show heatmap\nshow digit 5\nnotes 1 1\n'
+                         'status\nquit\n')
+    assert 'Digit 5 summary: 8 placed; 1 legal empty locations.' in stdout
+    assert 'Heatmap summary: 0 empty cells with no legal candidates.' in stdout
+    assert 'Notes for row 1 col 1: 1 9\n' in stdout and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],
