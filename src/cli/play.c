@@ -234,6 +234,7 @@ static void commands(void){
     puts("Commands: show [notes|candidates|heatmap|digit N],");
     puts("          set ROW COL DIGIT | set safe|proven ROW COL DIGIT,");
     puts("          set batch r1c3=4,r1c4=6 (comma-separated, atomic),");
+    puts("          set batch check|safe r1c3=4,r1c4=6,");
     puts("          erase ROW COL,");
     puts("          note ROW COL DIGIT,");
     puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
@@ -273,6 +274,9 @@ static void commands(void){
     puts("'candidates' lists legal digits without guessing.");
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
     puts("'set batch r1c3=4,r1c4=6' places all digits in a single Undo step.");
+    puts("'set batch check LIST' previews a whole batch without applying it.");
+    puts("'set batch safe LIST' commits only if no immediate contradiction");
+    puts("would result; this still does NOT prove digits are correct.");
     puts("All selected cells must be blank/editable and mutually legal.");
     puts("Invalid or duplicate placements reject the entire batch.");
     puts("'set proven ROW COL DIGIT' commits only if every other locally legal");
@@ -1338,6 +1342,106 @@ static SudokuGameStatus set_proven(SudokuGame *game,
                "refuted; placement committed.\n",
                row,col,digit,excluded,choices-1u);
     return status;
+}
+/* Batch guard uses only the current board's row/column/box rules, never
+ * the solved grid. Validate every input and the simultaneous final board
+ * before examining candidate dead ends. No partial edits or history writes.
+ * Passing this check is NOT proof that the proposed digits are correct. */
+static SudokuGameStatus batch_check(const SudokuGame *game,
+                                    const SudokuGameMove *moves,
+                                    unsigned count){
+    SudokuBoard proposed;
+    uint16_t before[SUDOKU_CELL_COUNT]={0};
+    uint16_t after[SUDOKU_CELL_COUNT]={0};
+    unsigned char seen[SUDOKU_CELL_COUNT]={0};
+    unsigned i,unit,digit,slot;
+    if(!game||!moves||count==0u||count>SUDOKU_CELL_COUNT)
+        return SUDOKU_GAME_INVALID;
+    if(game->history_len<1u||
+       game->history_len>SUDOKU_GAME_HISTORY||
+       game->history_cursor>=game->history_len||
+       sudoku_board_validate(&game->givens,NULL)!=SUDOKU_OK||
+       sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Batch check refused: invalid current game or board.");
+        return SUDOKU_GAME_INVALID;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+        if(game->givens.cells[i]&&
+           game->state.board.cells[i]!=game->givens.cells[i]){
+            puts("Batch check refused: an original clue was altered.");
+            return SUDOKU_GAME_INVALID;
+        }
+        if((game->state.notes[i]&(uint16_t)~0x3feu)!=0u||
+           (game->state.board.cells[i]&&game->state.notes[i])){
+            puts("Batch check refused: invalid pencil state.");
+            return SUDOKU_GAME_INVALID;
+        }
+        before[i]=probe_candidates(&game->state.board,i);
+    }
+    if(!trial_baseline_consistent(&game->state.board,before)){
+        puts("Batch check refused: current board already has a candidate contradiction.");
+        return SUDOKU_GAME_CONFLICT;
+    }
+    proposed=game->state.board;
+    for(i=0u;i<count;++i){
+        unsigned index;
+        if(moves[i].row<1u||moves[i].row>9u||
+           moves[i].col<1u||moves[i].col>9u||
+           moves[i].digit<1u||moves[i].digit>9u)return SUDOKU_GAME_RANGE;
+        index=(moves[i].row-1u)*9u+moves[i].col-1u;
+        if(seen[index]){
+            printf("Batch check refused: r%uc%u occurs more than once.\n",
+                   moves[i].row,moves[i].col);
+            return SUDOKU_GAME_INVALID;
+        }
+        seen[index]=1u;
+        if(game->givens.cells[index]){
+            printf("Batch check refused: r%uc%u is an original clue.\n",
+                   moves[i].row,moves[i].col);
+            return SUDOKU_GAME_GIVEN;
+        }
+        if(game->state.board.cells[index]){
+            printf("Batch check refused: r%uc%u is already filled.\n",
+                   moves[i].row,moves[i].col);
+            return SUDOKU_GAME_NOT_EMPTY;
+        }
+        proposed.cells[index]=(uint8_t)moves[i].digit;
+    }
+    if(sudoku_board_validate(&proposed,NULL)!=SUDOKU_OK){
+        puts("Batch check refused: combined placements conflict with Sudoku rules.");
+        return SUDOKU_GAME_CONFLICT;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        after[i]=probe_candidates(&proposed,i);
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+        if(proposed.cells[i]||after[i])continue;
+        printf("Batch check refused: r%uc%u would have no legal candidates.\n",
+               i/9u+1u,i%9u+1u);
+        return SUDOKU_GAME_CONFLICT;
+    }
+    for(unit=0u;unit<27u;++unit){
+        const char *kind=unit<9u?"row":unit<18u?"column":"box";
+        for(digit=1u;digit<=9u;++digit){
+            unsigned possible=0u;
+            uint16_t bit=(uint16_t)(1u<<digit);
+            for(slot=0u;slot<9u;++slot){
+                unsigned index=pair_unit_cell(unit,slot);
+                if(proposed.cells[index]==digit||(after[index]&bit)){
+                    possible=1u;
+                    break;
+                }
+            }
+            if(!possible){
+                printf("Batch check refused: digit %u would have no place in %s %u.\n",
+                       digit,kind,unit%9u+1u);
+                return SUDOKU_GAME_CONFLICT;
+            }
+        }
+    }
+    printf("Batch check passed: %u simultaneous placement%s; "
+           "no immediate contradictions (NOT proof of correctness).\n",
+           count,count==1u?"":"s");
+    return SUDOKU_GAME_OK;
 }
 static void hint_trial_forced(SudokuGame *game,unsigned limit,int apply){
     uint16_t before[SUDOKU_CELL_COUNT]={0};
@@ -2907,6 +3011,28 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         }
         else if(strcmp(command,"candidates")==0&&position(a,b,&r,&d)&&!c){
             print_candidates(game,r,d);continue;
+        }
+        else if(strcmp(command,"set")==0&&a&&strcmp(a,"batch")==0&&
+                b&&c&&!extra&&
+                (strcmp(b,"check")==0||strcmp(b,"safe")==0)){
+            SudokuGameMove moves[SUDOKU_CELL_COUNT];
+            unsigned count=0u,applied=0u;
+            if(!parse_batch_moves(c,moves,&count)){
+                puts("Error: malformed batch. Use set batch safe r1c3=4,r1c4=6.");
+                continue;
+            }
+            status=batch_check(game,moves,count);
+            if(status==SUDOKU_GAME_OK&&strcmp(b,"safe")==0){
+                status=sudoku_game_set_many(game,moves,count,&applied);
+                if(status==SUDOKU_GAME_OK)
+                    printf("Safe batch placed %u digit%s in one undoable edit.\n",
+                           applied,applied==1u?"":"s");
+            }
+            if(status!=SUDOKU_GAME_OK)
+                printf("Error: %s\n",sudoku_game_status_text(status));
+            else if(strcmp(b,"safe")==0)
+                display(game);
+            continue;
         }
         else if(strcmp(command,"set")==0&&a&&strcmp(a,"batch")==0&&
                 b&&!c&&!extra){

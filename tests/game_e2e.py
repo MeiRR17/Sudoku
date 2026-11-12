@@ -2205,6 +2205,115 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 0, redo 0') == 2 and not stderr
     checks += 1
 
+    # Read-only check of a complete batch: no board, notes, or Undo/Redo
+    # changes; safe application then commits the same batch in one action.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set batch check r1c3=4,r1c4=6\n'
+                         'status\nset batch safe r1c3=4,r1c4=6\n'
+                         'status\nundo\nstatus\nredo\nstatus\nquit\n')
+    assert stdout.count(
+        'Batch check passed: 2 simultaneous placements; '
+        'no immediate contradictions (NOT proof of correctness).') == 2
+    assert 'Safe batch placed 2 digits in one undoable edit.' in stdout
+    assert stdout.count('Progress: 30/81 filled') == 2
+    assert stdout.count('Progress: 32/81 filled') == 2
+    assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # One locally legal but globally wrong candidate in the batch creates
+    # a zero-candidate cell, and the complete batch is refused atomically.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set batch check r1c9=4\n'
+                         'set batch safe r1c3=4,r1c9=4\n'
+                         'status\nhistory\nquit\n')
+    assert 'Batch check refused: r7c9 would have no legal candidates.' in stdout
+    assert 'Batch check refused: combined placements conflict with Sudoku rules.' in stdout
+    assert 'Progress: 30/81 filled' in stdout
+    assert 'History: 0 recorded actions; cursor 0; undo 0; redo 0.' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Another locally legal hypothesis makes a required digit impossible
+    # in its unit. It must fail before any commit.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set batch safe r1c3=1\nstatus\nquit\n')
+    assert 'Batch check refused: digit 1 would have no place in column 8.' in stdout
+    assert 'Batch check passed:' not in stdout
+    assert 'Safe batch placed' not in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # No immediate contradiction does not prove a correct value: the
+    # safe batch can accept a deliberately globally incorrect but locally
+    # consistent player guess, with explicit disclaimer.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set batch safe r1c3=2\nstatus\nquit\n')
+    assert ('Batch check passed: 1 simultaneous placement; '
+            'no immediate contradictions (NOT proof of correctness).') in stdout
+    assert 'Safe batch placed 1 digit in one undoable edit.' in stdout
+    assert 'Progress: 31/81 filled, 1 mistakes' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Failed guarded batch after an Undo cannot discard the redo history;
+    # inspection is read-only, then conventional Redo succeeds.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nundo\n'
+                         'set batch check r1c9=4\n'
+                         'set batch safe r1c9=4\nstatus\n'
+                         'redo\nstatus\nquit\n')
+    assert stdout.count('Batch check refused: r7c9 would have no legal candidates.') == 2
+    assert 'undo 0, redo 1' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Duplicate targets, givens, filled cells, and contradictory combined
+    # placements are rejected before the atomic core operation.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set batch check r1c3=4,r1c3=4\n'
+                         'set batch safe r1c1=5,r1c4=6\n'
+                         'set batch safe r1c3=4,r1c9=4\n'
+                         'set 1 3 4\n'
+                         'set batch check r1c3=4\nstatus\nquit\n')
+    assert 'Batch check refused: r1c3 occurs more than once.' in stdout
+    assert 'Batch check refused: r1c1 is an original clue.' in stdout
+    assert 'Batch check refused: combined placements conflict with Sudoku rules.' in stdout
+    assert 'Batch check refused: r1c3 is already filled.' in stdout
+    assert 'Progress: 31/81 filled' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Check mode on a near-complete puzzle leaves the game unsolved,
+    # and safe mode may then commit the final digit.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'set batch check r1c1=5\nstatus\n'
+                         'set batch safe r1c1=5\nstatus\nquit\n')
+    assert ('Batch check passed: 1 simultaneous placement; '
+            'no immediate contradictions (NOT proof of correctness).') in stdout
+    assert 'Progress: 80/81 filled' in stdout
+    assert 'Safe batch placed 1 digit in one undoable edit.' in stdout
+    assert 'SOLVED!' in stdout and 'undo 1, redo 0' in stdout
+    assert not stderr
+    checks += 1
+
+    # Malformed four-token forms cannot accidentally fall through to the
+    # original unguarded batch command or mutate any part of the game.
+    invalid_safe_batches = [
+        'set batch safe', 'set batch check',
+        'set batch safe r1c3=0', 'set batch check r0c3=4',
+        'set batch check r1c3=4,', 'set batch safe r1c3=4,',
+        'set batch safe r1c3=4 extra', 'set batch check r1c3=4 extra',
+        'set batch unsafe r1c3=4', 'set batch preview r1c3=4',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(invalid_safe_batches) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: ') == len(invalid_safe_batches)
+    assert 'Safe batch placed' not in stdout
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],
