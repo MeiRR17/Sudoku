@@ -57,8 +57,8 @@ static void commands(void){
     puts("          probe compare ROW COL, focus [N],");
     puts("          analyze [N], auto-notes,");
     puts("          prune-notes,");
-    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|triples [N]|hidden-triples [N]|chain [N]],");
-    puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|triples [N]|hidden-triples [N]|chain [N]],");
+    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
+    puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          undo [N], redo [N], reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
@@ -104,6 +104,9 @@ static void commands(void){
     puts("'hint x-wing [N]' finds row/column rectangle candidate eliminations.");
     puts("'hint apply x-wing [N]' erases matching notes in one undo step.");
     puts("'hint swordfish [N]' previews three-line candidate eliminations.");
+    puts("'hint trial-forced [N]' finds forced placements when every");
+    puts("other candidate at a cell causes an immediate contradiction.");
+    puts("'hint apply trial-forced [N]' places these in one Undo step.");
     puts("'hint trial [N]' excludes locally legal digits causing an immediate");
     puts("candidate contradiction when hypothetically placed (default 5).");
     puts("'hint apply trial [N]' prunes matching handwritten notes in one undo.");
@@ -946,6 +949,85 @@ static void probe_compare(const SudokuGame *game,unsigned row,unsigned col){
            excluded,excluded==1u?"":"s",undetermined);
     puts("No immediate contradiction does not prove a candidate correct.");
     puts("Compare is read-only; use 'set' to make a move.");
+}
+/* A surviving digit is forced when a cell has multiple currently legal
+ * candidates and every alternative yields a provable immediate Sudoku
+ * contradiction. Use only live row/column/box constraints, never the
+ * stored solution to select a digit. Preview is read-only; explicit apply
+ * commits all chosen forced cells in one validated Undo transaction. */
+static void hint_trial_forced(SudokuGame *game,unsigned limit,int apply){
+    uint16_t before[SUDOKU_CELL_COUNT]={0};
+    SudokuGameMove moves[SUDOKU_CELL_COUNT];
+    unsigned i,d,found=0u;
+    if(sudoku_board_validate(&game->givens,NULL)!=SUDOKU_OK||
+       sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot inspect trial-forced hints: invalid board.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        if(game->givens.cells[i]&&
+           game->givens.cells[i]!=game->state.board.cells[i]){
+            puts("Cannot inspect trial-forced hints: original clues were changed.");
+            return;
+        }
+    if(sudoku_game_won(game)){
+        puts("Puzzle already solved; no trial-forced hints needed.");
+        return;
+    }
+    if(sudoku_game_mistakes(game)){
+        puts(apply?"Cannot apply trial-forced hints: correct the existing mistakes first.":
+                   "Cannot preview trial-forced hints: correct the existing mistakes first.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        before[i]=probe_candidates(&game->state.board,i);
+    if(!trial_baseline_consistent(&game->state.board,before)){
+        puts("Cannot inspect trial-forced hints: current candidates already contain a contradiction.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+        unsigned choices=0u,excluded=0u,survivor=0u,survivors=0u;
+        if(game->state.board.cells[i])continue;
+        for(d=1u;d<=9u;++d){
+            TrialWitness witness;
+            if(!(before[i]&(uint16_t)(1u<<d)))continue;
+            ++choices;
+            witness=trial_witness(&game->state.board,before,i,d);
+            if(witness.kind)++excluded;
+            else{
+                ++survivors;
+                survivor=d;
+            }
+        }
+        /* Leave ordinary naked singles to the existing simple hint.
+         * Never call a digit forced if all candidates contradict. */
+        if(choices<2u||survivors!=1u||excluded!=choices-1u)continue;
+        printf("Trial forced %u: row %u col %u -> %u "
+               "(%u of %u candidates excluded by immediate contradiction).\n",
+               found+1u,i/9u+1u,i%9u+1u,survivor,excluded,choices);
+        if(apply){
+            moves[found].row=i/9u+1u;
+            moves[found].col=i%9u+1u;
+            moves[found].digit=survivor;
+        }
+        if(++found==limit)break;
+    }
+    if(!found){
+        puts("No trial-forced placements found.");
+        return;
+    }
+    if(apply){
+        unsigned placed=0u;
+        SudokuGameStatus result=sudoku_game_set_many(game,moves,found,&placed);
+        if(result!=SUDOKU_GAME_OK){
+            printf("Error: %s (no trial-forced placements committed).\n",
+                   sudoku_game_status_text(result));
+            return;
+        }
+        printf("Applied %u trial-forced placement%s in one undoable edit.\n",
+               placed,placed==1u?"":"s");
+        if(sudoku_game_won(game))puts("SOLVED! All cells are correct.");
+    }
 }
 static void hint_trial(SudokuGame *game,unsigned limit,int apply){
     uint16_t before[SUDOKU_CELL_COUNT]={0};
@@ -2217,6 +2299,9 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             else if(strcmp(a,"trial")==0&&
                     (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
                 hint_trial(game,(unsigned)(b?limit:5u),0);
+            else if(strcmp(a,"trial-forced")==0&&
+                    (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
+                hint_trial_forced(game,(unsigned)(b?limit:5u),0);
             else if(strcmp(a,"apply")==0&&!b)print_hint(game,1);
             else if(strcmp(a,"chain")==0&&
                     (!b||(!c&&decimal(b,81u,&limit)&&limit>=1u)))
@@ -2256,6 +2341,10 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                     strcmp(b,"trial")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
                 hint_trial(game,(unsigned)(c?limit:5u),1);
+            else if(strcmp(a,"apply")==0&&b&&
+                    strcmp(b,"trial-forced")==0&&
+                    (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
+                hint_trial_forced(game,(unsigned)(c?limit:5u),1);
             else if(strcmp(a,"apply")==0&&b&&
                     strcmp(b,"chain")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))

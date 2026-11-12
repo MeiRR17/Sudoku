@@ -1556,6 +1556,81 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 0, redo 0') == 2 and not stderr
     checks += 1
 
+    # Trial-forced preview: no hint is selected from the cached solution.
+    # In the classic puzzle, every alternative for r1c6, r1c8 and r1c9
+    # causes an immediate cell/row/column/box contradiction.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint trial-forced 1\nhint trial-forced 3\n'
+                         'status\nquit\n')
+    assert stdout.count(
+        'Trial forced 1: row 1 col 6 -> 8 '
+        '(3 of 4 candidates excluded by immediate contradiction).') == 2
+    assert 'Trial forced 2: row 1 col 8 -> 1 ' in stdout
+    assert 'Trial forced 3: row 1 col 9 -> 2 ' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Batch placement of several logically forced values is a single
+    # validated Undo snapshot. Unrelated manual pencil notes are kept;
+    # notes in a newly filled cell are cleared and Undo restores them.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 6 26\nnotes set 1 3 19\n'
+                         'hint apply trial-forced 3\n'
+                         'notes 1 3\nnotes 1 6\nstatus\n'
+                         'undo\nnotes 1 6\nstatus\nredo\n'
+                         'notes 1 3\nstatus\nquit\n')
+    assert 'Applied 3 trial-forced placements in one undoable edit.' in stdout
+    assert 'Progress: 33/81 filled' in stdout
+    assert 'Progress: 30/81 filled' in stdout
+    assert stdout.count('Notes for row 1 col 3: 1 9\n') == 2
+    assert 'Notes for row 1 col 6: 2 6\n' in stdout
+    assert 'Notes for row 1 col 6:\n' in stdout
+    assert 'undo 3, redo 0' in stdout
+    assert 'undo 2, redo 1' in stdout and not stderr
+    checks += 1
+
+    # Ordinary naked singles are handled by 'hint' and are not duplicated
+    # as a trial-forced finding. A solved puzzle also has no trial hints.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'hint trial-forced\nhint apply trial-forced\n'
+                         'status\nquit\n')
+    assert stdout.count('No trial-forced placements found.') == 2
+    assert 'undo 0, redo 0' in stdout and not stderr
+    stdout, stderr = run(['--puzzle', solution],
+                         'hint trial-forced\nhint apply trial-forced\n'
+                         'status\nquit\n')
+    assert stdout.count('Puzzle already solved; no trial-forced hints needed.') == 2
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A locally legal but wrong placed digit must block preview and
+    # application; no fresh state should be committed.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 9 4\nhint trial-forced\n'
+                         'hint apply trial-forced\nstatus\nquit\n')
+    assert 'Cannot preview trial-forced hints: correct the existing mistakes first.' in stdout
+    assert 'Cannot apply trial-forced hints: correct the existing mistakes first.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Strict decimal bound 1..81 and argument count, without changing
+    # the board or making a spurious Undo entry for rejected commands.
+    bad_forced_args = [
+        'hint trial-forced 0', 'hint trial-forced 82',
+        'hint trial-forced -1', 'hint trial-forced nope',
+        'hint trial-forced 1 extra',
+        'hint apply trial-forced 0', 'hint apply trial-forced 82',
+        'hint apply trial-forced nope', 'hint apply trial-forced -1',
+        'hint apply trial-forced 1 extra',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(bad_forced_args) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(bad_forced_args)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'Trial forced 1:' not in stdout and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],
