@@ -287,6 +287,44 @@ static void history_hotspots(const SudokuGame *game,unsigned limit){
     if(total>rank)
         printf("%u more edited cells hidden (raise hotspots limit).\n",total-rank);
 }
+/* Read-only map of per-cell edit frequency in retained timeline snapshots.
+ * An edit of both a digit and its notes in one action counts only once. */
+static void history_heatmap(const SudokuGame *game,const char *scope){
+    unsigned counts[SUDOKU_CELL_COUNT]={0};
+    unsigned step,index,row,col,touched=0u,total=0u;
+    int only_done=strcmp(scope,"done")==0;
+    int only_redo=strcmp(scope,"redo")==0;
+    if(!history_valid(game))return;
+    for(step=1u;step<game->history_len;++step){
+        const SudokuGameSnapshot *before=&game->history[step-1u];
+        const SudokuGameSnapshot *after=&game->history[step];
+        if((only_done&&step>game->history_cursor)||
+           (only_redo&&step<=game->history_cursor))continue;
+        for(index=0u;index<SUDOKU_CELL_COUNT;++index){
+            if(before->board.cells[index]!=after->board.cells[index]||
+               before->notes[index]!=after->notes[index])
+                ++counts[index];
+        }
+    }
+    printf("History heatmap (%s): %u retained actions, %u DONE, %u REDO.\n",
+           scope,game->history_len-1u,game->history_cursor,
+           game->history_len-1u-game->history_cursor);
+    puts("         c1  c2  c3 |  c4  c5  c6 |  c7  c8  c9");
+    for(row=0u;row<9u;++row){
+        printf("r%u     ",row+1u);
+        for(col=0u;col<9u;++col){
+            unsigned n=counts[row*9u+col];
+            printf("%3u",n);
+            if(col==2u||col==5u)fputs(" | ",stdout);
+            else if(col!=8u)putchar(' ');
+            if(n){++touched;total+=n;}
+        }
+        putchar('\n');
+    }
+    printf("History heatmap totals (%s): %u edited cells, %u cell-edits.\n",
+           scope,touched,total);
+    puts("Each count is one retained action that changed a cell; evicted history is excluded.");
+}
 /* Per-cell change timeline across all retained snapshots. It includes
  * REDO steps after the live cursor and never fabricates command names. */
 static void history_cell(const SudokuGame *game,unsigned row,unsigned col){
@@ -337,7 +375,7 @@ static void commands(void){
     puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          undo [N], redo [N], history [N], history summary,");
-    puts("          history hotspots [N],");
+    puts("          history hotspots [N], history heatmap [all|done|redo],");
     puts("          history inspect STEP,");
     puts("          history goto STEP (0 = initial),");
     puts("          history diff FROM TO | history cell ROW COL,");
@@ -384,6 +422,7 @@ static void commands(void){
     puts("'history [N]' lists recent state changes and redoable steps (default 10).");
     puts("'history summary' totals applied and redoable snapshot changes.");
     puts("'history hotspots [N]' ranks most frequently edited cells (default 10).");
+    puts("'history heatmap [all|done|redo]' shows 9x9 edit counts.");
     puts("History views include redoable edits and never reveal the solution.");
     puts("'history inspect STEP' shows exact digit/note changes at that step.");
     puts("'history diff FROM TO' compares any retained snapshots (0..127).");
@@ -2986,6 +3025,9 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             else if(strcmp(a,"hotspots")==0&&
                     (!b||(!c&&!extra&&decimal(b,SUDOKU_CELL_COUNT,&requested)&&requested>=1u)))
                 history_hotspots(game,(unsigned)requested);
+            else if(strcmp(a,"heatmap")==0&&!c&&!extra&&
+                    (!b||strcmp(b,"all")==0||strcmp(b,"done")==0||strcmp(b,"redo")==0))
+                history_heatmap(game,b?b:"all");
             else if(strcmp(a,"inspect")==0&&b&&!c&&!extra&&
                     decimal(b,SUDOKU_GAME_HISTORY-1u,&requested)&&requested>=1u)
                 history_inspect(game,(unsigned)requested);

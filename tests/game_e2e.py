@@ -1945,6 +1945,61 @@ with tempfile.TemporaryDirectory() as directory:
     assert not stderr
     checks += 1
 
+    # Map exact per-cell edit frequencies, retaining both DONE and REDO.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'history heatmap\nset 1 3 4\nnotes set 1 4 19\n'
+                         'notes add 1 4 2\nundo\n'
+                         'history heatmap all\nhistory heatmap done\n'
+                         'history heatmap redo\nstatus\nquit\n')
+    assert 'History heatmap (all): 0 retained actions, 0 DONE, 0 REDO.' in stdout
+    assert 'History heatmap (all): 3 retained actions, 2 DONE, 1 REDO.' in stdout
+    assert 'History heatmap (done): 3 retained actions, 2 DONE, 1 REDO.' in stdout
+    assert 'History heatmap (redo): 3 retained actions, 2 DONE, 1 REDO.' in stdout
+    assert 'r1       0   0   1 |   2   0   0 |   0   0   0' in stdout
+    assert 'r1       0   0   1 |   1   0   0 |   0   0   0' in stdout
+    assert 'r1       0   0   0 |   1   0   0 |   0   0   0' in stdout
+    assert 'History heatmap totals (all): 2 edited cells, 3 cell-edits.' in stdout
+    assert 'History heatmap totals (done): 2 edited cells, 2 cell-edits.' in stdout
+    assert 'History heatmap totals (redo): 1 edited cells, 1 cell-edits.' in stdout
+    assert 'undo 2, redo 1' in stdout and not stderr
+    checks += 1
+
+    # An atomic three-cell move is one action and three edited cells.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint apply trial-forced 3\nhistory heatmap\n'
+                         'status\nquit\n')
+    assert 'History heatmap (all): 1 retained actions, 1 DONE, 0 REDO.' in stdout
+    assert 'r1       0   0   0 |   0   0   1 |   0   1   1' in stdout
+    assert 'History heatmap totals (all): 3 edited cells, 3 cell-edits.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # One combined digit-and-note edit counts once, never twice.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 3 19\nset 1 3 4\nundo\n'
+                         'history heatmap all\nhistory heatmap done\n'
+                         'history heatmap redo\nstatus\nquit\n')
+    assert 'History heatmap totals (all): 1 edited cells, 2 cell-edits.' in stdout
+    assert 'History heatmap totals (done): 1 edited cells, 1 cell-edits.' in stdout
+    assert 'History heatmap totals (redo): 1 edited cells, 1 cell-edits.' in stdout
+    assert 'undo 1, redo 1' in stdout and not stderr
+    checks += 1
+
+    # Invalid scope or extra arguments must not mutate Undo/Redo.
+    bad_heatmaps = [
+        'history heatmap invalid', 'history heatmap DONE',
+        'history heatmap all extra', 'history heatmap redo extra',
+        'history heatmap done extra more',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(bad_heatmaps) +
+                         '\nstatus\nhistory heatmap done\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(bad_heatmaps)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'History heatmap totals (done): 0 edited cells, 0 cell-edits.' in stdout
+    assert not stderr
+    checks += 1
+
     # A new move after Undo cuts the old Redo branch. The timeline must
     # describe the replacement state, never the abandoned pencil notes.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],
