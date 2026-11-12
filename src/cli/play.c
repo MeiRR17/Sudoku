@@ -233,6 +233,7 @@ static void history_cell(const SudokuGame *game,unsigned row,unsigned col){
 static void commands(void){
     puts("Commands: show [notes|candidates|heatmap|digit N],");
     puts("          set ROW COL DIGIT | set safe|proven ROW COL DIGIT,");
+    puts("          set batch r1c3=4,r1c4=6 (comma-separated, atomic),");
     puts("          erase ROW COL,");
     puts("          note ROW COL DIGIT,");
     puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
@@ -271,6 +272,9 @@ static void commands(void){
     puts("Invalid/duplicate digits are rejected; one replacement = one Undo.");
     puts("'candidates' lists legal digits without guessing.");
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
+    puts("'set batch r1c3=4,r1c4=6' places all digits in a single Undo step.");
+    puts("All selected cells must be blank/editable and mutually legal.");
+    puts("Invalid or duplicate placements reject the entire batch.");
     puts("'set proven ROW COL DIGIT' commits only if every other locally legal");
     puts("digit causes an immediate contradiction; existing mistakes block it.");
     puts("'set safe ROW COL DIGIT' places only after checking immediate");
@@ -560,6 +564,39 @@ static int position(const char *row,const char *col,unsigned *r,unsigned *c){
 /* Parse a compact user-selected set of distinct digits: "13579" or "-"
  * for no marks. Reject duplicates and all non-1..9 bytes rather than
  * partially applying an invalid request. Order is irrelevant. */
+/* Parse one whitespace-free list of player-selected placements:
+ * r1c3=4,r1c4=6. Every item is exactly six ASCII bytes; reject partial
+ * items, signs, zeroes, trailing commas and oversized lists. The core
+ * sudoku_game_set_many API remains responsible for detecting duplicate
+ * cells, occupied/given targets and cross-move Sudoku conflicts atomically.
+ * No game state is touched during parsing. */
+static int parse_batch_moves(const char *spec,
+                             SudokuGameMove moves[SUDOKU_CELL_COUNT],
+                             unsigned *count){
+    size_t len,i=0u;
+    unsigned n=0u;
+    if(!spec||!moves||!count)return 0;
+    len=strlen(spec);
+    if(len<6u||len>(size_t)SUDOKU_CELL_COUNT*7u-1u)return 0;
+    while(i<len){
+        if(n==SUDOKU_CELL_COUNT||len-i<6u)return 0;
+        if(spec[i]!='r'||spec[i+1u]<'1'||spec[i+1u]>'9'||
+           spec[i+2u]!='c'||spec[i+3u]<'1'||spec[i+3u]>'9'||
+           spec[i+4u]!='='||spec[i+5u]<'1'||spec[i+5u]>'9')
+            return 0;
+        moves[n].row=(unsigned)(spec[i+1u]-'0');
+        moves[n].col=(unsigned)(spec[i+3u]-'0');
+        moves[n].digit=(unsigned)(spec[i+5u]-'0');
+        ++n;
+        i+=6u;
+        if(i==len)break;
+        if(spec[i]!=',')return 0;
+        ++i;
+        if(i==len)return 0;
+    }
+    *count=n;
+    return n!=0u;
+}
 static int parse_note_digits(const char *digits,uint16_t *out){
     uint16_t mask=0u;
     size_t len;
@@ -2870,6 +2907,19 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         }
         else if(strcmp(command,"candidates")==0&&position(a,b,&r,&d)&&!c){
             print_candidates(game,r,d);continue;
+        }
+        else if(strcmp(command,"set")==0&&a&&strcmp(a,"batch")==0&&
+                b&&!c&&!extra){
+            SudokuGameMove moves[SUDOKU_CELL_COUNT];
+            unsigned count=0u,applied=0u;
+            if(!parse_batch_moves(b,moves,&count)){
+                puts("Error: malformed batch. Use set batch r1c3=4,r1c4=6.");
+                continue;
+            }
+            status=sudoku_game_set_many(game,moves,count,&applied);
+            if(status==SUDOKU_GAME_OK)
+                printf("Batch placed %u digit%s in one undoable edit.\n",
+                       applied,applied==1u?"":"s");
         }
         else if(strcmp(command,"set")==0&&a&&strcmp(a,"safe")==0&&
                 position(b,c,&r,&d)&&extra&&

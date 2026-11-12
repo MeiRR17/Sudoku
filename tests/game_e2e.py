@@ -2108,6 +2108,103 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 0, redo 0') == 2 and not stderr
     checks += 1
 
+    # CLI batch delegates to the validated core batch API: both digits
+    # become visible at once and can be undone/redone as ONE snapshot.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set batch r1c3=4,r1c4=6\nstatus\n'
+                         'history 1\nundo\nstatus\nredo\nstatus\nquit\n')
+    assert 'Batch placed 2 digits in one undoable edit.' in stdout
+    assert stdout.count('Progress: 32/81 filled') == 2
+    assert 'Progress: 30/81 filled' in stdout
+    assert 'History step 1 [DONE]: 2 placed, 0 erased, 0 replaced;' in stdout
+    assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # Notes at each filled cell are cleared; notes outside the batch
+    # are retained, and Undo restores all previous marks together.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 3 19\nnotes set 1 4 28\n'
+                         'notes set 2 2 9\n'
+                         'set batch r1c3=4,r1c4=6\n'
+                         'notes 1 3\nnotes 1 4\nnotes 2 2\n'
+                         'status\nundo\nnotes 1 3\nnotes 1 4\n'
+                         'notes 2 2\nstatus\nquit\n')
+    assert 'Batch placed 2 digits in one undoable edit.' in stdout
+    assert 'Notes for row 1 col 3:\n' in stdout
+    assert 'Notes for row 1 col 4:\n' in stdout
+    assert 'Notes for row 1 col 3: 1 9\n' in stdout
+    assert 'Notes for row 1 col 4: 2 8\n' in stdout
+    assert stdout.count('Notes for row 2 col 2: 9\n') == 2
+    assert 'undo 4, redo 0' in stdout and 'undo 3, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # Duplicate destinations and conflicting simultaneous values are
+    # rejected atomically: neither the first nor second placement commits.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set batch r1c3=4,r1c3=4\n'
+                         'set batch r1c3=4,r1c9=4\n'
+                         'set batch r1c3=4,r2c2=4\n'
+                         'status\nhistory\nquit\n')
+    assert stdout.count('Error: ') >= 3
+    assert 'Batch placed' not in stdout
+    assert 'Progress: 30/81 filled' in stdout
+    assert 'History: 0 recorded actions; cursor 0; undo 0; redo 0.' in stdout
+    assert not stderr
+    checks += 1
+
+    # Given cells and occupied editable cells cannot be replaced in a
+    # batch. Earlier successful moves and their history remain intact.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set batch r1c1=5,r1c4=6\n'
+                         'set 1 3 4\nset batch r1c3=4,r1c4=6\n'
+                         'status\nquit\n')
+    assert 'Batch placed' not in stdout
+    assert 'Progress: 31/81 filled' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A rejected batch after Undo must not discard redoable history.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nundo\n'
+                         'set batch r1c1=5,r1c4=6\n'
+                         'status\nredo\nstatus\nquit\n')
+    assert 'Batch placed' not in stdout
+    assert 'undo 0, redo 1' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A one-entry batch is still a standard single Undo step and can
+    # solve the last cell of a nearly completed Sudoku.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'set batch r1c1=5\nstatus\nquit\n')
+    assert 'Batch placed 1 digit in one undoable edit.' in stdout
+    assert 'SOLVED!' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Reject partial entries, zeroes, signs, repeated separators and
+    # surplus tokens before calling the core. No malformed prefix is applied.
+    bad_batches = [
+        'set batch', 'set batch ', 'set batch 134',
+        'set batch r1c3=', 'set batch r1c3=0',
+        'set batch r0c3=4', 'set batch r1c0=4',
+        'set batch r10c3=4', 'set batch R1C3=4',
+        'set batch r1c3=4,', 'set batch ,r1c3=4',
+        'set batch r1c3=4,,r1c4=6',
+        'set batch r1c3=4;r1c4=6', 'set batch r1c3=4,r1c4=x',
+        'set batch r1c3=4,r1c4=6extra',
+        'set batch r1c3=4 r1c4=6',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(bad_batches) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: ') == len(bad_batches)
+    assert 'Batch placed' not in stdout
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],
