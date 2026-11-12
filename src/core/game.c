@@ -285,6 +285,33 @@ SudokuGameStatus sudoku_game_remove_notes(SudokuGame *game,
                                         unsigned row,unsigned col,uint16_t mask) {
     return modify_notes(game,row,col,mask,0);
 }
+/* Refresh one cell from the live row/column/box constraints, never the
+ * cached solved grid. 'fill' replaces that cell's pencil marks with all
+ * currently legal candidates; 'prune' intersects existing marks with them.
+ * Verify public game state before computing or committing any new snapshot.
+ * Repeated identical operations retain both Undo and Redo history. */
+static SudokuGameStatus refresh_cell_notes(SudokuGame *game,
+                                            unsigned row,unsigned col,
+                                            int prune) {
+    int idx=cell_index(row,col);
+    uint16_t legal,mask;
+    if (!valid_game(game)) return SUDOKU_GAME_INVALID;
+    if (idx<0) return SUDOKU_GAME_RANGE;
+    if (!valid_live_state(game)) return SUDOKU_GAME_INVALID;
+    if (game->givens.cells[idx]) return SUDOKU_GAME_GIVEN;
+    if (game->state.board.cells[idx]) return SUDOKU_GAME_NOT_EMPTY;
+    legal=validated_candidates(&game->state.board,row,col);
+    mask=prune ? (uint16_t)(game->state.notes[idx]&legal) : legal;
+    return sudoku_game_set_notes(game,row,col,mask);
+}
+SudokuGameStatus sudoku_game_fill_cell_notes(SudokuGame *game,
+                                              unsigned row,unsigned col) {
+    return refresh_cell_notes(game,row,col,0);
+}
+SudokuGameStatus sudoku_game_prune_cell_notes(SudokuGame *game,
+                                               unsigned row,unsigned col) {
+    return refresh_cell_notes(game,row,col,1);
+}
 /* Validate the entire proposed elimination before changing one note bit.
  * This is a general-purpose, solution-blind pencil-mark operation. */
 SudokuGameStatus sudoku_game_eliminate_notes(

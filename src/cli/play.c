@@ -48,7 +48,7 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
-    puts("          notes clear ROW COL,");
+    puts("          notes clear ROW COL, notes fill ROW COL, notes prune ROW COL,");
     puts("          candidates ROW COL, focus [N], auto-notes, prune-notes,");
     puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
@@ -61,6 +61,8 @@ static void commands(void){
     puts("'notes set ROW COL -' or 'notes clear ROW COL' clears only that cell.");
     puts("'notes add ROW COL 135' adds marks; 'notes remove ROW COL 135' erases.");
     puts("Adding existing or removing absent marks leaves history unchanged.");
+    puts("'notes fill ROW COL' sets all locally legal marks for one cell.");
+    puts("'notes prune ROW COL' removes illegal marks from that cell only.");
     puts("Invalid/duplicate digits are rejected; one replacement = one Undo.");
     puts("'candidates' lists legal digits without guessing.");
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
@@ -1699,6 +1701,12 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         else if(strcmp(command,"notes")==0&&a&&strcmp(a,"clear")==0&&
                 position(b,c,&r,&d)&&!extra)
             status=sudoku_game_set_notes(game,r,d,0u);
+        else if(strcmp(command,"notes")==0&&a&&
+                (strcmp(a,"fill")==0||strcmp(a,"prune")==0)&&
+                position(b,c,&r,&d)&&!extra)
+            status=strcmp(a,"fill")==0 ?
+                   sudoku_game_fill_cell_notes(game,r,d) :
+                   sudoku_game_prune_cell_notes(game,r,d);
         else if(strcmp(command,"notes")==0&&position(a,b,&r,&d)&&!c&&!extra){
             print_notes(game,r,d);
             continue;

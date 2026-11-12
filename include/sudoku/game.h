@@ -67,6 +67,16 @@ SudokuGameStatus sudoku_game_add_notes(SudokuGame *game,
                                      unsigned row, unsigned col, uint16_t mask);
 SudokuGameStatus sudoku_game_remove_notes(SudokuGame *game,
                                         unsigned row, unsigned col, uint16_t mask);
+/* Cell-scoped, solution-blind candidate-note updates. Fill replaces only
+ * the selected empty editable cell's marks with all locally legal candidates;
+ * prune keeps only the selected cell's existing legal marks (adds none).
+ * Both reject corrupted public boards or notes and invalid/given/filled
+ * targets before changes. One Undo step on change, no history on no-op.
+ * Use global prune-notes/auto-notes to repair malformed public notes. */
+SudokuGameStatus sudoku_game_fill_cell_notes(SudokuGame *game,
+                                              unsigned row, unsigned col);
+SudokuGameStatus sudoku_game_prune_cell_notes(SudokuGame *game,
+                                               unsigned row, unsigned col);
 /* 1 << digit bitmask (digits 1..9), based only on the current board.
  * Returns 0 on invalid arguments or a filled cell. Observational. */
 uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned col);

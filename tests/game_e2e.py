@@ -911,6 +911,63 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'undo 2, redo 0' in stdout and not stderr
     checks += 1
 
+    # A single-cell candidate refresh is one Undo; repeating 'fill' is a
+    # no-op, unlike global auto-notes which changes all remaining cells.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'notes fill 1 1\nnotes 1 1\nstatus\n'
+                         'notes fill 1 1\nstatus\nundo\nnotes 1 1\n'
+                         'status\nredo\nnotes 1 1\nstatus\nquit\n')
+    assert stdout.count('Notes for row 1 col 1: 5\n') == 2, stdout
+    assert 'Notes for row 1 col 1:\n' in stdout
+    assert stdout.count('undo 1, redo 0') == 3
+    assert 'undo 0, redo 1' in stdout and not stderr
+    checks += 1
+
+    # Cell prune retains manually selected marks that are still legal,
+    # drops stale notes, and does not insert any missing candidate.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'notes set 1 1 159\nnotes prune 1 1\n'
+                         'notes 1 1\nstatus\nundo\nnotes 1 1\n'
+                         'status\nredo\nnotes 1 1\nstatus\n'
+                         'notes prune 1 1\nstatus\nquit\n')
+    assert 'Notes for row 1 col 1: 5\n' in stdout
+    assert 'Notes for row 1 col 1: 1 5 9\n' in stdout
+    assert stdout.count('undo 2, redo 0') == 3
+    assert 'undo 1, redo 1' in stdout and not stderr
+    checks += 1
+
+    # Fill after manual notes replaces just one cell with its legal
+    # candidates, not every other cell's handwritten notes.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 3 9\nnotes set 1 4 8\n'
+                         'notes fill 1 3\nnotes 1 3\nnotes 1 4\n'
+                         'status\nundo\nnotes 1 3\nnotes 1 4\nquit\n')
+    assert 'Notes for row 1 col 3: 1 2 4\n' in stdout
+    assert 'Notes for row 1 col 3: 9\n' in stdout
+    assert stdout.count('Notes for row 1 col 4: 8\n') == 2
+    assert 'undo 3, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Invalid coordinates, filled or immutable cells, and surplus tokens
+    # fail without history changes. Accept no candidates only as a legal
+    # empty-cell note set; never write digits to the board.
+    bad_cell_note_commands = [
+        'notes fill 0 1', 'notes prune 1 0', 'notes fill 10 1',
+        'notes fill 1 1 extra', 'notes prune 1 1 extra',
+        'notes fill 1', 'notes prune 1',
+    ]
+    stdout, stderr = run(['--puzzle', near_win],
+                         'status\n' + '\n'.join(bad_cell_note_commands) +
+                         '\nstatus\nnotes fill 1 2\nnotes prune 1 2\n'
+                         'status\nnotes fill 1 1\nset 1 1 5\n'
+                         'notes prune 1 1\nstatus\nquit\n')
+    assert stdout.count('Error:') >= len(bad_cell_note_commands)+3
+    assert stdout.count('undo 0, redo 0') == 3
+    assert 'Error: cannot modify an original clue' in stdout
+    assert 'Error: pencil notes only allowed in empty cells' in stdout
+    assert 'undo 2, redo 0' in stdout and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],

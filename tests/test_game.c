@@ -306,6 +306,62 @@ static int check_game(void){
         CHECK(sudoku_game_set_notes(game,1u,3u,0u)==SUDOKU_GAME_OK);
         CHECK(game->state.notes[2]==0u);
     }
+    /* Cell-scoped candidates: fill replaces pencil marks; prune only
+     * intersects them with legal candidates. Both group into one Undo,
+     * preserve Redo after no-ops, never read the cached solution, and
+     * refuse clues, filled cells, invalid bounds or malformed public data. */
+    {
+        SudokuGame *probe = malloc(sizeof *probe);
+        uint16_t legal=(uint16_t)((1u<<1)|(1u<<2)|(1u<<4));
+        unsigned cursor,length;
+        CHECK(probe!=NULL);
+        CHECK(sudoku_game_start(probe,&board)==SUDOKU_GAME_OK);
+        CHECK(sudoku_game_fill_cell_notes(probe,1u,3u)==SUDOKU_GAME_OK);
+        CHECK(probe->state.notes[2]==legal && probe->history_cursor==1u);
+        cursor=probe->history_cursor;
+        CHECK(sudoku_game_fill_cell_notes(probe,1u,3u)==SUDOKU_GAME_OK);
+        CHECK(probe->history_cursor==cursor);
+        CHECK(sudoku_game_set_notes(probe,1u,3u,
+              (uint16_t)((1u<<1)|(1u<<2)|(1u<<8)))==SUDOKU_GAME_OK);
+        CHECK(sudoku_game_prune_cell_notes(probe,1u,3u)==SUDOKU_GAME_OK);
+        CHECK(probe->state.notes[2]==((1u<<1)|(1u<<2)));
+        CHECK(sudoku_game_undo(probe)==SUDOKU_GAME_OK);
+        CHECK(probe->state.notes[2]==((1u<<1)|(1u<<2)|(1u<<8)));
+        CHECK(sudoku_game_redo(probe)==SUDOKU_GAME_OK);
+        CHECK(probe->state.notes[2]==((1u<<1)|(1u<<2)));
+        CHECK(sudoku_game_undo(probe)==SUDOKU_GAME_OK);
+        cursor=probe->history_cursor;
+        length=probe->history_len;
+        CHECK(sudoku_game_prune_cell_notes(probe,1u,3u)==SUDOKU_GAME_OK);
+        CHECK(probe->state.notes[2]==((1u<<1)|(1u<<2)));
+        CHECK(probe->history_cursor==cursor+1u);
+        CHECK(probe->history_len==cursor+2u); /* Redo branch discarded. */
+        CHECK(sudoku_game_prune_cell_notes(probe,1u,3u)==SUDOKU_GAME_OK);
+        CHECK(probe->history_cursor==cursor+1u);
+        CHECK(sudoku_game_fill_cell_notes(probe,0u,3u)==SUDOKU_GAME_RANGE);
+        CHECK(sudoku_game_prune_cell_notes(probe,1u,10u)==SUDOKU_GAME_RANGE);
+        CHECK(sudoku_game_fill_cell_notes(probe,1u,1u)==SUDOKU_GAME_GIVEN);
+        CHECK(sudoku_game_prune_cell_notes(probe,1u,1u)==SUDOKU_GAME_GIVEN);
+        CHECK(sudoku_game_fill_cell_notes(NULL,1u,3u)==SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_prune_cell_notes(NULL,1u,3u)==SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_set(probe,1u,3u,4u)==SUDOKU_GAME_OK);
+        cursor=probe->history_cursor;
+        CHECK(sudoku_game_fill_cell_notes(probe,1u,3u)==SUDOKU_GAME_NOT_EMPTY);
+        CHECK(sudoku_game_prune_cell_notes(probe,1u,3u)==SUDOKU_GAME_NOT_EMPTY);
+        CHECK(probe->history_cursor==cursor);
+        CHECK(sudoku_game_erase(probe,1u,3u)==SUDOKU_GAME_OK);
+        probe->state.board.cells[0]=0u; /* Clue corruption. */
+        cursor=probe->history_cursor;
+        CHECK(sudoku_game_fill_cell_notes(probe,1u,3u)==SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_prune_cell_notes(probe,1u,3u)==SUDOKU_GAME_INVALID);
+        CHECK(probe->history_cursor==cursor);
+        probe->state.board.cells[0]=probe->givens.cells[0];
+        probe->state.notes[0]=(uint16_t)(1u<<1); /* Marks on filled clue. */
+        CHECK(sudoku_game_fill_cell_notes(probe,1u,3u)==SUDOKU_GAME_INVALID);
+        CHECK(sudoku_game_prune_cell_notes(probe,1u,3u)==SUDOKU_GAME_INVALID);
+        CHECK(probe->history_cursor==cursor);
+        free(probe);
+    }
     /* Erase must clear pencil marks even when no digit is placed, while
      * preserving undo/redo history and avoiding phantom no-op edits. */
     CHECK(sudoku_game_note(game,1,3,4)==SUDOKU_GAME_OK);
