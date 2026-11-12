@@ -150,6 +150,86 @@ static void history_inspect(const SudokuGame *game,unsigned step){
     }
     if(!changed)puts("  No observable board or pencil-note changes.");
 }
+/* Compare any two retained snapshots, including the original state and
+ * redoable future. The direction is intentional: FROM -> TO. No game state,
+ * solution cache, history cursor, elapsed time or saved file is modified. */
+static void history_diff(const SudokuGame *game,unsigned from,unsigned to){
+    const SudokuGameSnapshot *before,*after;
+    unsigned index,changed=0u,placed=0u,erased=0u,replaced=0u;
+    unsigned notes_added=0u,notes_removed=0u;
+    if(!history_valid(game))return;
+    if(from>=game->history_len||to>=game->history_len){
+        printf("History diff unavailable: recorded steps are 0..%u.\n",
+               game->history_len-1u);
+        return;
+    }
+    before=&game->history[from];
+    after=&game->history[to];
+    printf("History diff %u -> %u:\n",from,to);
+    for(index=0u;index<SUDOKU_CELL_COUNT;++index){
+        unsigned old_digit=before->board.cells[index];
+        unsigned new_digit=after->board.cells[index];
+        uint16_t old_notes=before->notes[index];
+        uint16_t new_notes=after->notes[index];
+        if(old_digit==new_digit&&old_notes==new_notes)continue;
+        ++changed;
+        if(old_digit!=new_digit){
+            if(!old_digit)++placed;
+            else if(!new_digit)++erased;
+            else ++replaced;
+            printf("  Board r%uc%u: ",index/9u+1u,index%9u+1u);
+            if(old_digit)printf("%u",old_digit);else putchar('-');
+            fputs(" -> ",stdout);
+            if(new_digit)printf("%u",new_digit);else putchar('-');
+            putchar('\n');
+        }
+        if(old_notes!=new_notes){
+            notes_added+=history_bit_count((uint16_t)(new_notes&(uint16_t)~old_notes));
+            notes_removed+=history_bit_count((uint16_t)(old_notes&(uint16_t)~new_notes));
+            printf("  Notes r%uc%u: ",index/9u+1u,index%9u+1u);
+            history_mask(old_notes);
+            fputs(" -> ",stdout);
+            history_mask(new_notes);
+            putchar('\n');
+        }
+    }
+    printf("History diff summary: %u cells changed; %u placed, %u erased, "
+           "%u replaced; %u marks added, %u removed.\n",
+           changed,placed,erased,replaced,notes_added,notes_removed);
+    if(!changed)puts("  No observable differences between the snapshots.");
+}
+/* Per-cell change timeline across all retained snapshots. It includes
+ * REDO steps after the live cursor and never fabricates command names. */
+static void history_cell(const SudokuGame *game,unsigned row,unsigned col){
+    unsigned step,changed=0u,index=(row-1u)*9u+col-1u;
+    if(!history_valid(game))return;
+    printf("History cell r%uc%u:\n",row,col);
+    for(step=1u;step<game->history_len;++step){
+        const SudokuGameSnapshot *before=&game->history[step-1u];
+        const SudokuGameSnapshot *after=&game->history[step];
+        unsigned prior=before->board.cells[index],next=after->board.cells[index];
+        uint16_t old_notes=before->notes[index],new_notes=after->notes[index];
+        if(prior==next&&old_notes==new_notes)continue;
+        ++changed;
+        printf("  Step %u [%s]:",step,
+               step<=game->history_cursor?"DONE":"REDO");
+        if(prior!=next){
+            fputs(" board ",stdout);
+            if(prior)printf("%u",prior);else putchar('-');
+            fputs(" -> ",stdout);
+            if(next)printf("%u",next);else putchar('-');
+        }
+        if(old_notes!=new_notes){
+            fputs(" notes ",stdout);
+            history_mask(old_notes);
+            fputs(" -> ",stdout);
+            history_mask(new_notes);
+        }
+        putchar('\n');
+    }
+    printf("History cell summary: %u changed steps.\n",changed);
+    if(!changed)puts("  This cell has no recorded changes.");
+}
 static void commands(void){
     puts("Commands: show [notes|candidates|heatmap|digit N],");
     puts("          set ROW COL DIGIT | set safe|proven ROW COL DIGIT,");
@@ -167,6 +247,7 @@ static void commands(void){
     puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          undo [N], redo [N], history [N], history inspect STEP,");
     puts("          history goto STEP (0 = initial),");
+    puts("          history diff FROM TO | history cell ROW COL,");
     puts("          reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
@@ -203,6 +284,9 @@ static void commands(void){
     puts("position in a row/column/box, using no cached solved digits.");
     puts("'history [N]' lists recent state changes and redoable steps (default 10).");
     puts("'history inspect STEP' shows exact digit/note changes at that step.");
+    puts("'history diff FROM TO' compares any retained snapshots (0..127).");
+    puts("'history cell ROW COL' shows that cell's complete change timeline.");
+    puts("Both reports include redoable steps without editing the game.");
     puts("'history goto STEP' restores a retained snapshot; 0 is the initial");
     puts("board. No new Undo entry or loss of Redo. Invalid targets are rejected.");
     puts("History views are read-only and use retained Undo/Redo snapshots.");
@@ -2678,6 +2762,16 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                     display(game);
                 }
             }
+            else if(strcmp(a,"diff")==0&&b&&c&&!extra){
+                uint64_t to=0u;
+                if(decimal(b,SUDOKU_GAME_HISTORY-1u,&requested)&&
+                   decimal(c,SUDOKU_GAME_HISTORY-1u,&to))
+                    history_diff(game,(unsigned)requested,(unsigned)to);
+                else puts("Error: unknown command or invalid arguments. Type 'help'.");
+            }
+            else if(strcmp(a,"cell")==0&&b&&c&&!extra&&
+                    position(b,c,&r,&d))
+                history_cell(game,r,d);
             else if(!b&&!c&&!extra&&
                     decimal(a,SUDOKU_GAME_HISTORY-1u,&requested)&&requested>=1u)
                 history_list(game,(unsigned)requested);

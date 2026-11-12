@@ -2010,6 +2010,104 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 0, redo 0') == 2 and not stderr
     checks += 1
 
+    # Direct comparison of distant checkpoints includes real board and
+    # pencil changes, without adding an Undo entry.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nnotes set 1 4 19\n'
+                         'history diff 0 2\nhistory diff 2 0\n'
+                         'status\nquit\n')
+    assert 'History diff 0 -> 2:\n  Board r1c3: - -> 4' in stdout
+    assert '  Notes r1c4: - -> 1,9' in stdout
+    assert ('History diff summary: 2 cells changed; 1 placed, 0 erased, '
+            '0 replaced; 2 marks added, 0 removed.') in stdout
+    assert 'History diff 2 -> 0:\n  Board r1c3: 4 -> -' in stdout
+    assert '  Notes r1c4: 1,9 -> -' in stdout
+    assert ('History diff summary: 2 cells changed; 0 placed, 1 erased, '
+            '0 replaced; 0 marks added, 2 removed.') in stdout
+    assert 'undo 2, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Equal snapshots and a pristine history have no changes.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'history diff 0 0\nhistory cell 1 3\n'
+                         'status\nquit\n')
+    assert 'History diff 0 -> 0:' in stdout
+    assert ('History diff summary: 0 cells changed; 0 placed, 0 erased, '
+            '0 replaced; 0 marks added, 0 removed.') in stdout
+    assert 'No observable differences between the snapshots.' in stdout
+    assert 'History cell r1c3:' in stdout
+    assert 'History cell summary: 0 changed steps.' in stdout
+    assert 'This cell has no recorded changes.' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Per-cell timeline includes both board and pencil changes, including
+    # redoable steps above the current cursor.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 3 19\nnotes add 1 3 2\n'
+                         'set 1 3 4\nundo\n'
+                         'history cell 1 3\nhistory cell 1 4\n'
+                         'status\nquit\n')
+    assert 'History cell r1c3:' in stdout
+    assert 'Step 1 [DONE]: notes - -> 1,9' in stdout
+    assert 'Step 2 [DONE]: notes 1,9 -> 1,2,9' in stdout
+    assert 'Step 3 [REDO]: board - -> 4 notes 1,2,9 -> -' in stdout
+    assert 'History cell summary: 3 changed steps.' in stdout
+    assert 'History cell r1c4:' in stdout
+    assert 'This cell has no recorded changes.' in stdout
+    assert 'undo 2, redo 1' in stdout and not stderr
+    checks += 1
+
+    # Comparing two redoable snapshots is observational and keeps them
+    # available for an eventual history goto.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nnotes set 1 4 19\n'
+                         'history goto 0\nhistory diff 1 2\n'
+                         'history cell 1 4\nhistory goto 2\n'
+                         'status\nquit\n')
+    assert 'History diff 1 -> 2:' in stdout
+    assert 'Notes r1c4: - -> 1,9' in stdout
+    assert 'Step 2 [REDO]: notes - -> 1,9' in stdout
+    assert 'History goto 2: cursor 2; undo 2; redo 0.' in stdout
+    assert 'undo 2, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Group placement and reset are accurately compared as aggregate
+    # changes between distant checkpoints.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint apply trial-forced 3\n'
+                         'history diff 0 1\nhistory cell 1 6\n'
+                         'status\nquit\n')
+    assert 'History diff 0 -> 1:' in stdout
+    for placement in ['Board r1c6: - -> 8',
+                      'Board r1c8: - -> 1', 'Board r1c9: - -> 2']:
+        assert placement in stdout
+    assert ('History diff summary: 3 cells changed; 3 placed, 0 erased, '
+            '0 replaced; 0 marks added, 0 removed.') in stdout
+    assert 'Step 1 [DONE]: board - -> 8' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Both commands reject malformed arguments; a syntactically valid
+    # nonexistent snapshot gets a clear read-only unavailable report.
+    invalid_history_queries = [
+        'history diff', 'history diff 0', 'history diff -1 0',
+        'history diff 128 0', 'history diff 0 128',
+        'history diff x 0', 'history diff 0 x',
+        'history diff 0 0 extra', 'history cell',
+        'history cell 1', 'history cell 0 1',
+        'history cell 10 1', 'history cell 1 0',
+        'history cell 1 10', 'history cell x 2',
+        'history cell 1 2 extra'
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n'+'\n'.join(invalid_history_queries)+
+                         '\nhistory diff 0 1\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_history_queries)
+    assert 'History diff unavailable: recorded steps are 0..0.' in stdout
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],
