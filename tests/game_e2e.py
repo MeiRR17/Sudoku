@@ -1472,6 +1472,90 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Trial 1:' not in stdout and not stderr
     checks += 1
 
+    # Compare all three live candidates in r1c3 without trying any real
+    # move. Candidate 1 is immediately contradictory, but 2 and 4 remain
+    # undetermined; none are pulled from the saved Sudoku solution.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'probe compare 1 3\nstatus\nquit\n')
+    assert 'Compare row 1 col 3: 3 legal candidates.' in stdout
+    assert ('Candidate 1: EXCLUDED (digit 1 would have no place in column 8); '
+            '7 peer candidates removed.') in stdout
+    assert 'Candidate 2: UNDETERMINED; 11 peer candidates removed.' in stdout
+    assert 'Candidate 4: UNDETERMINED; 8 peer candidates removed.' in stdout
+    assert ('Compare summary: 3 legal candidates; 1 provable exclusion; '
+            '2 undetermined.') in stdout
+    assert 'No immediate contradiction does not prove a candidate correct.' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A different cell exercises a zero-candidate witness and a separate
+    # missing-digit witness alongside an undetermined hypothetical move.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'probe compare 1 9\nstatus\nquit\n')
+    assert 'Compare row 1 col 9: 3 legal candidates.' in stdout
+    assert 'Candidate 2: UNDETERMINED; 7 peer candidates removed.' in stdout
+    assert ('Candidate 4: EXCLUDED (r7c9 would have no legal digits); '
+            '10 peer candidates removed.') in stdout
+    assert ('Candidate 8: EXCLUDED (digit 8 would have no place in row 2); '
+            '4 peer candidates removed.') in stdout
+    assert ('Compare summary: 3 legal candidates; 2 provable exclusions; '
+            '1 undetermined.') in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # One open square has exactly one legal candidate, but comparison
+    # must remain a preview and never automatically win the game.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'probe compare 1 1\nstatus\nquit\n')
+    assert 'Compare row 1 col 1: 1 legal candidate.' in stdout
+    assert 'Candidate 5: UNDETERMINED; 0 peer candidates removed.' in stdout
+    assert ('Compare summary: 1 legal candidate; 0 provable exclusions; '
+            '1 undetermined.') in stdout
+    assert 'Progress: 80/81 filled' in stdout and 'SOLVED!' not in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Comparison neither edits handwritten pencil notes nor inserts
+    # history snapshots; existing Undo and Redo still work afterward.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 3 19\nprobe compare 1 3\n'
+                         'notes 1 3\nstatus\nundo\nnotes 1 3\n'
+                         'status\nredo\nnotes 1 3\nstatus\nquit\n')
+    assert 'Candidate 1: EXCLUDED' in stdout
+    assert stdout.count('Notes for row 1 col 3: 1 9\n') == 2
+    assert 'Notes for row 1 col 3:\n' in stdout
+    assert stdout.count('undo 1, redo 0') == 2
+    assert 'undo 0, redo 1' in stdout and not stderr
+    checks += 1
+
+    # Do not make new deductions if the current puzzle already contains
+    # an immediate contradiction. Refuse clues and occupied squares too.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'probe compare 1 1\nset 1 9 4\n'
+                         'probe compare 1 3\nprobe compare 1 9\n'
+                         'status\nquit\n')
+    assert 'Cannot compare row 1 col 1: immutable original clue.' in stdout
+    assert 'Cannot compare: current candidates already contain a contradiction.' in stdout
+    assert 'Cannot compare row 1 col 9: cell already contains 4.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Coordinate parser must reject malformed/partial commands and
+    # trailing tokens without accidentally launching a normal probe.
+    invalid_comparisons = [
+        'probe compare', 'probe compare 1', 'probe compare 0 3',
+        'probe compare 1 0', 'probe compare 10 3', 'probe compare 1 10',
+        'probe compare nope 3', 'probe compare 1 -1',
+        'probe compare 1 3 extra', 'probe compare 1 3 extra extra'
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(invalid_comparisons) +
+                         '\nstatus\nprobe compare 1 3\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_comparisons)
+    assert stdout.count('Compare row 1 col 3: 3 legal candidates.') == 1
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],

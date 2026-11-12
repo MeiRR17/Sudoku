@@ -53,7 +53,8 @@ static void commands(void){
     puts("          notes audit [N] | notes audit row|column|box N,");
     puts("          notes clear ROW COL, notes fill|prune ROW COL,");
     puts("          notes fill|prune row|column|box N (unit 1..9),");
-    puts("          candidates ROW COL, probe ROW COL DIGIT, focus [N],");
+    puts("          candidates ROW COL, probe ROW COL DIGIT,");
+    puts("          probe compare ROW COL, focus [N],");
     puts("          analyze [N], auto-notes,");
     puts("          prune-notes,");
     puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|triples [N]|hidden-triples [N]|chain [N]],");
@@ -82,6 +83,8 @@ static void commands(void){
     puts("'candidates' lists legal digits without guessing.");
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
     puts("'probe ROW COL DIGIT' previews one locally legal move without applying.");
+    puts("'probe compare ROW COL' tests all local digits and reports which");
+    puts("produce a provable immediate contradiction; survivors are unproven.");
     puts("It lists newly impossible cells/digits, but does not prove correctness.");
     puts("'analyze [N]' reports candidate counts and contradictions (default 10).");
     puts("It detects zero-candidate cells and digits missing from every possible");
@@ -868,6 +871,81 @@ static int trial_baseline_consistent(const SudokuBoard *board,
             if(!possible)return 0;
         }
     return 1;
+}
+/* Compare every locally legal digit for one empty cell by performing
+ * independent, read-only one-ply hypotheses. A resulting dead-end proves
+ * exclusion, whereas absence of an immediate dead-end proves nothing.
+ * This never reads the stored solved grid or modifies the live SudokuGame. */
+static void probe_compare(const SudokuGame *game,unsigned row,unsigned col){
+    uint16_t before[SUDOKU_CELL_COUNT]={0};
+    unsigned target=(row-1u)*9u+col-1u;
+    unsigned i,d,choices=0u,excluded=0u,undetermined=0u;
+    if(sudoku_board_validate(&game->givens,NULL)!=SUDOKU_OK||
+       sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot compare: invalid puzzle or current board.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        if(game->givens.cells[i]&&
+           game->state.board.cells[i]!=game->givens.cells[i]){
+            puts("Cannot compare: immutable clues were altered.");
+            return;
+        }
+    if(game->givens.cells[target]){
+        printf("Cannot compare row %u col %u: immutable original clue.\n",
+               row,col);
+        return;
+    }
+    if(game->state.board.cells[target]){
+        printf("Cannot compare row %u col %u: cell already contains %u.\n",
+               row,col,(unsigned)game->state.board.cells[target]);
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        before[i]=probe_candidates(&game->state.board,i);
+    if(!trial_baseline_consistent(&game->state.board,before)){
+        puts("Cannot compare: current candidates already contain a contradiction.");
+        return;
+    }
+    choices=probe_count_bits(before[target]);
+    printf("Compare row %u col %u: %u legal candidate%s.\n",
+           row,col,choices,choices==1u?"":"s");
+    for(d=1u;d<=9u;++d){
+        SudokuBoard hypothesis;
+        TrialWitness witness;
+        unsigned removed=0u;
+        if(!(before[target]&(uint16_t)(1u<<d)))continue;
+        witness=trial_witness(&game->state.board,before,target,d);
+        hypothesis=game->state.board;
+        hypothesis.cells[target]=(uint8_t)d;
+        for(i=0u;i<SUDOKU_CELL_COUNT;++i){
+            if(i==target||game->state.board.cells[i])continue;
+            removed+=probe_count_bits(
+                (uint16_t)(before[i]&
+                (uint16_t)~probe_candidates(&hypothesis,i)));
+        }
+        if(witness.kind==1u){
+            ++excluded;
+            printf("Candidate %u: EXCLUDED (r%uc%u would have no legal digits); ",
+                   d,witness.index/9u+1u,witness.index%9u+1u);
+        }else if(witness.kind==2u){
+            const char *kind=witness.index<9u?"row":
+                             witness.index<18u?"column":"box";
+            ++excluded;
+            printf("Candidate %u: EXCLUDED (digit %u would have no place in %s %u); ",
+                   d,witness.digit,kind,witness.index%9u+1u);
+        }else{
+            ++undetermined;
+            printf("Candidate %u: UNDETERMINED; ",d);
+        }
+        printf("%u peer candidate%s removed.\n",
+               removed,removed==1u?"":"s");
+    }
+    printf("Compare summary: %u legal candidate%s; %u provable exclusion%s; "
+           "%u undetermined.\n",choices,choices==1u?"":"s",
+           excluded,excluded==1u?"":"s",undetermined);
+    puts("No immediate contradiction does not prove a candidate correct.");
+    puts("Compare is read-only; use 'set' to make a move.");
 }
 static void hint_trial(SudokuGame *game,unsigned limit,int apply){
     uint16_t before[SUDOKU_CELL_COUNT]={0};
@@ -2201,8 +2279,11 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             continue;
         }
         if(strcmp(command,"probe")==0){
-            if(position(a,b,&r,&d)&&c&&!extra&&
-               decimal(c,9u,&digit)&&digit>=1u)
+            if(a&&strcmp(a,"compare")==0&&
+               position(b,c,&r,&d)&&!extra)
+                probe_compare(game,r,d);
+            else if(position(a,b,&r,&d)&&c&&!extra&&
+                    decimal(c,9u,&digit)&&digit>=1u)
                 probe_placement(game,r,d,(unsigned)digit);
             else puts("Error: unknown command or invalid arguments. Type 'help'.");
             continue;
