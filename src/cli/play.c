@@ -48,8 +48,8 @@ static int use(const char *message){
 static void commands(void){
     puts("Commands: show, set ROW COL DIGIT, erase ROW COL, note ROW COL DIGIT,");
     puts("          notes ROW COL, candidates ROW COL, focus [N], auto-notes, prune-notes,");
-    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|chain [N]],");
-    puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|chain [N]],");
+    puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
+    puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          undo [N], redo [N], reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
@@ -63,6 +63,8 @@ static void commands(void){
     puts("'hint apply pairs [N]' removes matching pencil marks in one undo.");
     puts("'hint triples [N]' previews actionable naked triples (default 5).");
     puts("'hint apply triples [N]' removes their pencil marks in one undo.");
+    puts("'hint hidden-triples [N]' previews three-digit hidden subsets.");
+    puts("'hint apply hidden-triples [N]' prunes extra marks in one undo.");
     puts("'hint hidden-pairs [N]' previews pairs hidden among more candidates.");
     puts("'hint apply hidden-pairs [N]' prunes those extra notes in one undo.");
     puts("'hint locked [N]' previews pointing/claiming candidate eliminations.");
@@ -557,6 +559,115 @@ done_triples:
                    removed,removed==1u?"":"s");
         else
             puts("No matching triple pencil notes to remove; history unchanged.");
+    }
+}
+/* Hidden triple: three candidate digits may appear only in the same three
+ * cells of one row/column/box, even when those cells have extra candidates.
+ * Restrict each digit to 2-3 locations and each source cell to at least
+ * two of the three digits; singles and already-resolved pairs are handled
+ * by simpler hints. Only the three cells' OTHER candidates are eliminated.
+ * No cached solution values are read, and preview never modifies history. */
+static void hidden_triples(SudokuGame *game,unsigned limit,int apply){
+    uint16_t masks[SUDOKU_CELL_COUNT]={0};
+    uint16_t eliminations[SUDOKU_CELL_COUNT]={0};
+    unsigned unit,d,e,f,slot,i,k,total=0u;
+    if(sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Cannot inspect hidden triples: invalid current board.");
+        return;
+    }
+    if(sudoku_game_won(game)){
+        puts("Puzzle already solved; no hidden triple hint needed.");
+        return;
+    }
+    if(sudoku_game_mistakes(game)){
+        puts(apply?"Cannot apply hidden triples: correct the existing mistakes first.":
+                   "Cannot preview hidden triples: correct the existing mistakes first.");
+        return;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        masks[i]=candidate_mask(game,i);
+    for(unit=0u;unit<27u;++unit){
+        uint16_t places[10]={0};
+        const char *kind=unit<9u?"row":unit<18u?"column":"box";
+        for(slot=0u;slot<9u;++slot){
+            uint16_t possible=masks[pair_unit_cell(unit,slot)];
+            for(d=1u;d<=9u;++d)
+                if(possible&(uint16_t)(1u<<d))
+                    places[d]=(uint16_t)(places[d]|(uint16_t)(1u<<slot));
+        }
+        for(d=1u;d<=7u;++d){
+            if(triple_bit_count(places[d])<2u||
+               triple_bit_count(places[d])>3u)continue;
+            for(e=d+1u;e<=8u;++e){
+                if(triple_bit_count(places[e])<2u||
+                   triple_bit_count(places[e])>3u)continue;
+                for(f=e+1u;f<=9u;++f){
+                    uint16_t cells,chosen;
+                    unsigned actionable=0u,valid=1u;
+                    if(triple_bit_count(places[f])<2u||
+                       triple_bit_count(places[f])>3u)continue;
+                    cells=(uint16_t)(places[d]|places[e]|places[f]);
+                    if(triple_bit_count(cells)!=3u)continue;
+                    chosen=(uint16_t)((1u<<d)|(1u<<e)|(1u<<f));
+                    for(slot=0u;slot<9u;++slot){
+                        uint16_t source;
+                        if(!(cells&(uint16_t)(1u<<slot)))continue;
+                        source=masks[pair_unit_cell(unit,slot)];
+                        if(triple_bit_count((uint16_t)(source&chosen))<2u){
+                            valid=0u;
+                            break;
+                        }
+                        if(source&(uint16_t)~chosen)++actionable;
+                    }
+                    if(!valid||!actionable)continue;
+                    printf("Hidden triple %u in %s %u: ",
+                           total+1u,kind,unit%9u+1u);
+                    {
+                        unsigned sep=0u;
+                        for(slot=0u;slot<9u;++slot){
+                            i=pair_unit_cell(unit,slot);
+                            if(cells&(uint16_t)(1u<<slot)){
+                                printf("%sr%uc%u",sep++?" + ":"",i/9u+1u,i%9u+1u);
+                            }
+                        }
+                    }
+                    printf(" reserve %u,%u,%u; remove extras",d,e,f);
+                    for(slot=0u;slot<9u;++slot){
+                        uint16_t excluded;
+                        unsigned sep=0u;
+                        if(!(cells&(uint16_t)(1u<<slot)))continue;
+                        i=pair_unit_cell(unit,slot);
+                        excluded=(uint16_t)(masks[i]&(uint16_t)~chosen);
+                        if(!excluded)continue;
+                        if(apply)
+                            eliminations[i]=(uint16_t)(eliminations[i]|excluded);
+                        printf(" r%uc%u(",i/9u+1u,i%9u+1u);
+                        for(k=1u;k<=9u;++k)
+                            if(excluded&(uint16_t)(1u<<k))
+                                printf("%s%u",sep++?",":"",k);
+                        putchar(')');
+                    }
+                    putchar('\n');
+                    if(++total==limit)goto done_hidden_triples;
+                }
+            }
+        }
+    }
+done_hidden_triples:
+    if(!total){
+        puts("No actionable hidden triples found.");
+        return;
+    }
+    if(apply){
+        unsigned removed=0u;
+        SudokuGameStatus status=sudoku_game_eliminate_notes(game,eliminations,&removed);
+        if(status!=SUDOKU_GAME_OK)
+            printf("Error: %s\n",sudoku_game_status_text(status));
+        else if(removed)
+            printf("Removed %u hidden-triple pencil candidate%s in one undoable edit.\n",
+                   removed,removed==1u?"":"s");
+        else
+            puts("No matching hidden-triple pencil notes to remove; history unchanged.");
     }
 }
 /* A hidden pair is two digits whose only possible locations within a
@@ -1428,6 +1539,9 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             else if(strcmp(a,"triples")==0&&
                     (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
                 naked_triples(game,(unsigned)(b?limit:5u),0);
+            else if(strcmp(a,"hidden-triples")==0&&
+                    (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
+                hidden_triples(game,(unsigned)(b?limit:5u),0);
             else if(strcmp(a,"hidden-pairs")==0&&
                     (!b||(!c&&!extra&&decimal(b,81u,&limit)&&limit>=1u)))
                 hidden_pairs(game,(unsigned)(b?limit:5u),0);
@@ -1455,6 +1569,10 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                     strcmp(b,"triples")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
                 naked_triples(game,(unsigned)(c?limit:5u),1);
+            else if(strcmp(a,"apply")==0&&b&&
+                    strcmp(b,"hidden-triples")==0&&
+                    (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))
+                hidden_triples(game,(unsigned)(c?limit:5u),1);
             else if(strcmp(a,"apply")==0&&b&&
                     strcmp(b,"hidden-pairs")==0&&
                     (!c||(!extra&&decimal(c,81u,&limit)&&limit>=1u)))

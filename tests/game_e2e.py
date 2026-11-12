@@ -302,6 +302,73 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Swordfish 1 ' not in stdout and not stderr
     checks += 1
 
+    # Hidden triple: column 9 contains digit 2/7/8 only in rows 1,2,3;
+    # unlike a naked triple these cells have additional candidates (digit 4).
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint hidden-triples\nhint hidden-triples 1\nstatus\nquit\n')
+    first_hidden_triple = (
+        'Hidden triple 1 in column 9: r1c9 + r2c9 + r3c9 '
+        'reserve 2,7,8; remove extras r1c9(4) r2c9(4) r3c9(4)'
+    )
+    assert stdout.count(first_hidden_triple) == 2, stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'note 1 9 4\nnote 2 9 4\nnote 3 9 4\n'
+                         'note 1 9 1\nstatus\nhint apply hidden-triples 1\n'
+                         'notes 1 9\nnotes 2 9\nnotes 3 9\nstatus\n'
+                         'undo\nnotes 1 9\nstatus\nredo\n'
+                         'hint apply hidden-triples 1\nstatus\nquit\n')
+    assert 'Removed 3 hidden-triple pencil candidates in one undoable edit.' in stdout
+    assert 'Notes for row 1 col 9: 1\n' in stdout
+    assert 'Notes for row 2 col 9:\n' in stdout
+    assert 'Notes for row 3 col 9:\n' in stdout
+    assert 'Notes for row 1 col 9: 1 4\n' in stdout
+    assert stdout.count('undo 5, redo 0') == 2, stdout
+    assert 'undo 4, redo 1' in stdout
+    assert 'No matching hidden-triple pencil notes to remove; history unchanged.' in stdout
+    assert not stderr
+    checks += 1
+
+    # No matching marks means no new snapshot, and no solution insertion.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint apply hidden-triples\nstatus\nundo\nquit\n')
+    assert 'No matching hidden-triple pencil notes to remove; history unchanged.' in stdout
+    assert 'undo 0, redo 0' in stdout
+    assert 'Error: no action to undo or redo' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--puzzle', solution],
+                         'hint hidden-triples\nhint apply hidden-triples\nstatus\nquit\n')
+    assert stdout.count('Puzzle already solved; no hidden triple hint needed.') == 2
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 9 4\nhint hidden-triples\n'
+                         'hint apply hidden-triples\nstatus\nquit\n')
+    assert 'Cannot preview hidden triples: correct the existing mistakes first.' in stdout
+    assert 'Cannot apply hidden triples: correct the existing mistakes first.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    invalid_hidden_triples = [
+        'hint hidden-triples 0', 'hint hidden-triples 82',
+        'hint hidden-triples -1', 'hint hidden-triples nope',
+        'hint hidden-triples 1 extra',
+        'hint apply hidden-triples 0', 'hint apply hidden-triples 82',
+        'hint apply hidden-triples -1', 'hint apply hidden-triples nope',
+        'hint apply hidden-triples 1 extra',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(invalid_hidden_triples) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_hidden_triples)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'Hidden triple 1 ' not in stdout and not stderr
+    checks += 1
+
     # Naked triple in the classic unique puzzle: r3c4, r3c5 and r3c6
     # reserve digits 2,3,4. The preview is deterministic and read-only.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],
