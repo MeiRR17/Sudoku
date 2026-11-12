@@ -47,7 +47,7 @@ static int use(const char *message){
 }
 static void commands(void){
     puts("Commands: show [notes|candidates|heatmap|digit N],");
-    puts("          set ROW COL DIGIT, erase ROW COL,");
+    puts("          set ROW COL DIGIT | set safe ROW COL DIGIT, erase ROW COL,");
     puts("          note ROW COL DIGIT,");
     puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
     puts("          notes audit [N] | notes audit row|column|box N,");
@@ -82,6 +82,8 @@ static void commands(void){
     puts("Invalid/duplicate digits are rejected; one replacement = one Undo.");
     puts("'candidates' lists legal digits without guessing.");
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
+    puts("'set safe ROW COL DIGIT' places only after checking immediate");
+    puts("candidate contradictions; no such contradiction is NOT proof of correctness.");
     puts("'probe ROW COL DIGIT' previews one locally legal move without applying.");
     puts("'probe compare ROW COL' tests all local digits and reports which");
     puts("produce a provable immediate contradiction; survivors are unproven.");
@@ -955,6 +957,70 @@ static void probe_compare(const SudokuGame *game,unsigned row,unsigned col){
  * contradiction. Use only live row/column/box constraints, never the
  * stored solution to select a digit. Preview is read-only; explicit apply
  * commits all chosen forced cells in one validated Undo transaction. */
+/* Guarded user placement: verify that the current board has no immediate
+ * candidate contradictions and test the requested digit on a PRIVATE
+ * hypothesis before asking the atomic engine to commit. This is a guard
+ * against a class of errors, never a solved-grid lookup or proof that a
+ * candidate belongs in the final Sudoku solution. */
+static SudokuGameStatus set_safe(SudokuGame *game,
+                                  unsigned row,unsigned col,unsigned digit){
+    uint16_t before[SUDOKU_CELL_COUNT]={0};
+    unsigned target,i;
+    TrialWitness witness;
+    SudokuGameStatus status;
+    if(!game)return SUDOKU_GAME_INVALID;
+    if(row<1u||row>9u||col<1u||col>9u||digit<1u||digit>9u)
+        return SUDOKU_GAME_RANGE;
+    target=(row-1u)*9u+col-1u;
+    if(sudoku_board_validate(&game->givens,NULL)!=SUDOKU_OK||
+       sudoku_board_validate(&game->state.board,NULL)!=SUDOKU_OK){
+        puts("Safe set refused: invalid current board.");
+        return SUDOKU_GAME_INVALID;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        if(game->givens.cells[i]&&
+           game->givens.cells[i]!=game->state.board.cells[i]){
+            puts("Safe set refused: an original clue was altered.");
+            return SUDOKU_GAME_INVALID;
+        }
+    if(game->givens.cells[target]){
+        printf("Safe set refused: row %u col %u is an original clue.\n",row,col);
+        return SUDOKU_GAME_GIVEN;
+    }
+    if(game->state.board.cells[target]){
+        printf("Safe set refused: row %u col %u is already filled.\n",row,col);
+        return SUDOKU_GAME_NOT_EMPTY;
+    }
+    for(i=0u;i<SUDOKU_CELL_COUNT;++i)
+        before[i]=probe_candidates(&game->state.board,i);
+    if(!trial_baseline_consistent(&game->state.board,before)){
+        puts("Safe set refused: current board already has an immediate candidate contradiction.");
+        return SUDOKU_GAME_CONFLICT;
+    }
+    if(!(before[target]&(uint16_t)(1u<<digit))){
+        printf("Safe set refused: %u is not locally legal at row %u col %u.\n",
+               digit,row,col);
+        return SUDOKU_GAME_CONFLICT;
+    }
+    witness=trial_witness(&game->state.board,before,target,digit);
+    if(witness.kind==1u){
+        printf("Safe set refused: r%uc%u would have no legal candidates.\n",
+               witness.index/9u+1u,witness.index%9u+1u);
+        return SUDOKU_GAME_CONFLICT;
+    }
+    if(witness.kind==2u){
+        const char *kind=witness.index<9u?"row":
+                         witness.index<18u?"column":"box";
+        printf("Safe set refused: digit %u would have no place in %s %u.\n",
+               witness.digit,kind,witness.index%9u+1u);
+        return SUDOKU_GAME_CONFLICT;
+    }
+    status=sudoku_game_set(game,row,col,digit);
+    if(status==SUDOKU_GAME_OK)
+        printf("Safe set row %u col %u = %u: no immediate contradiction; "
+               "this does NOT prove correctness.\n",row,col,digit);
+    return status;
+}
 static void hint_trial_forced(SudokuGame *game,unsigned limit,int apply){
     uint16_t before[SUDOKU_CELL_COUNT]={0};
     SudokuGameMove moves[SUDOKU_CELL_COUNT];
@@ -2487,7 +2553,12 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         else if(strcmp(command,"candidates")==0&&position(a,b,&r,&d)&&!c){
             print_candidates(game,r,d);continue;
         }
-        else if(strcmp(command,"set")==0&&position(a,b,&r,&d)&&c&&!extra&&decimal(c,9,&digit)&&digit>=1u)
+        else if(strcmp(command,"set")==0&&a&&strcmp(a,"safe")==0&&
+                position(b,c,&r,&d)&&extra&&
+                decimal(extra,9u,&digit)&&digit>=1u)
+            status=set_safe(game,r,d,(unsigned)digit);
+        else if(strcmp(command,"set")==0&&position(a,b,&r,&d)&&c&&!extra&&
+                decimal(c,9u,&digit)&&digit>=1u)
             status=sudoku_game_set(game,r,d,(unsigned)digit);
         else if(strcmp(command,"erase")==0&&position(a,b,&r,&d)&&!c)
             status=sudoku_game_erase(game,r,d);

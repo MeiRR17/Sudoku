@@ -1631,6 +1631,102 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'Trial forced 1:' not in stdout and not stderr
     checks += 1
 
+    # Guarded placement rejects a locally legal move that would empty
+    # another cell's candidate set; no notes or history are modified.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set safe 1 9 4\nstatus\nquit\n')
+    assert 'Safe set refused: r7c9 would have no legal candidates.' in stdout
+    assert 'Progress: 30/81 filled' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A different locally legal hypothesis is rejected because it leaves
+    # a required digit without any position in another column.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set safe 1 3 1\nstatus\nquit\n')
+    assert 'Safe set refused: digit 1 would have no place in column 8.' in stdout
+    assert 'Progress: 30/81 filled' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A noncontradictory placement is actually committed as one Undo,
+    # can be undone/redone, and explicitly is not certified correct.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set safe 1 3 4\nstatus\nundo\nstatus\n'
+                         'redo\nstatus\nquit\n')
+    assert ('Safe set row 1 col 3 = 4: no immediate contradiction; '
+            'this does NOT prove correctness.') in stdout
+    assert stdout.count('Progress: 31/81 filled') == 2
+    assert 'Progress: 30/81 filled' in stdout
+    assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # Noncontradictory is NOT the same as correct: this locally legal
+    # but globally wrong digit is allowed with the explicit disclaimer.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set safe 1 3 2\nstatus\nquit\n')
+    assert ('Safe set row 1 col 3 = 2: no immediate contradiction; '
+            'this does NOT prove correctness.') in stdout
+    assert 'Progress: 31/81 filled, 1 mistakes' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Guarded set preserves unrelated notes and clears pencil marks
+    # in exactly the newly filled cell, consistent with regular set.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 3 19\nnotes set 2 2 9\n'
+                         'set safe 1 3 4\nnotes 1 3\nnotes 2 2\n'
+                         'status\nundo\nnotes 1 3\nnotes 2 2\n'
+                         'status\nquit\n')
+    assert 'Notes for row 1 col 3:\n' in stdout
+    assert 'Notes for row 1 col 3: 1 9\n' in stdout
+    assert stdout.count('Notes for row 2 col 2: 9\n') == 2
+    assert 'undo 3, redo 0' in stdout and 'undo 2, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # Refuse immutable/filled targets, locally illegal moves and a
+    # baseline board which already has a local contradiction.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set safe 1 1 5\nset safe 1 3 5\n'
+                         'set 1 9 4\nset safe 1 9 4\n'
+                         'set safe 1 3 4\nstatus\nquit\n')
+    assert 'Safe set refused: row 1 col 1 is an original clue.' in stdout
+    assert 'Safe set refused: 5 is not locally legal at row 1 col 3.' in stdout
+    assert 'Safe set refused: row 1 col 9 is already filled.' in stdout
+    assert ('Safe set refused: current board already has an immediate '
+            'candidate contradiction.') in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Final cell can still win the game, but the guard's correctness
+    # disclaimer does not depend on the cached solved grid.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'set safe 1 1 5\nstatus\nquit\n')
+    assert 'Safe set row 1 col 1 = 5: no immediate contradiction;' in stdout
+    assert 'SOLVED!' in stdout and 'undo 1, redo 0' in stdout
+    assert not stderr
+    checks += 1
+
+    # Strict parser: missing arguments, zero/out-of-range coordinates,
+    # malformed digits and any surplus tokens fail before evaluation.
+    bad_safe = [
+        'set safe', 'set safe 1', 'set safe 1 3',
+        'set safe 0 3 4', 'set safe 10 3 4',
+        'set safe 1 0 4', 'set safe 1 10 4',
+        'set safe 1 3 0', 'set safe 1 3 10',
+        'set safe 1 3 -1', 'set safe 1 3 nope',
+        'set safe 1 3 4 extra', 'set safe 1 3 4 extra more'
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(bad_safe) +
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(bad_safe)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert 'Safe set row 1 col 3 = ' not in stdout and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],
