@@ -124,6 +124,14 @@ SudokuGameStatus sudoku_game_clear_mistakes(SudokuGame *game);
  * No new history entries are created; zero/out-of-range counts are RANGE. */
 SudokuGameStatus sudoku_game_undo_steps(SudokuGame *game, unsigned steps);
 SudokuGameStatus sudoku_game_redo_steps(SudokuGame *game, unsigned steps);
+/* Jump to an existing zero-based snapshot index (0 = initial state,
+ * history_len-1 = newest, at most 127). Validate the destination before
+ * touching the current board or cursor. Missing steps return NO_HISTORY;
+ * indices >= 128 return RANGE. A move to the current snapshot is valid
+ * and does not create a new step. Redo snapshots are preserved.
+ * Like Undo/Redo, this can recover from corrupted current live state
+ * when the destination is intact. Never consult the solved board. */
+SudokuGameStatus sudoku_game_history_goto(SudokuGame *game,unsigned step);
 SudokuGameStatus sudoku_game_undo(SudokuGame *game);
 SudokuGameStatus sudoku_game_redo(SudokuGame *game);
 /* Restore immutable clues and clear editable digits/notes in one Undo step.

@@ -479,6 +479,21 @@ SudokuGameStatus sudoku_game_redo_steps(SudokuGame *game, unsigned steps) {
     game->state = game->history[target];
     return SUDOKU_GAME_OK;
 }
+/* Seek a retained history snapshot by its absolute zero-based step.
+ * Unlike a sequence of Undo/Redo calls, validate the destination before
+ * changing either cursor or state; preserve the entire redo branch.
+ * A corrupted current live board may be recovered from a valid target.
+ * Re-seeking the current step is a history-neutral validated no-op. */
+SudokuGameStatus sudoku_game_history_goto(SudokuGame *game,unsigned step) {
+    if (!valid_game(game)) return SUDOKU_GAME_INVALID;
+    if (step >= SUDOKU_GAME_HISTORY) return SUDOKU_GAME_RANGE;
+    if (step >= game->history_len) return SUDOKU_GAME_NO_HISTORY;
+    if (!valid_history_target(game,&game->history[step]))
+        return SUDOKU_GAME_INVALID;
+    game->history_cursor=step;
+    game->state=game->history[step];
+    return SUDOKU_GAME_OK;
+}
 SudokuGameStatus sudoku_game_undo(SudokuGame *game) {
     return sudoku_game_undo_steps(game, 1u);
 }

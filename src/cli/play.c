@@ -166,6 +166,7 @@ static void commands(void){
     puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          undo [N], redo [N], history [N], history inspect STEP,");
+    puts("          history goto STEP (0 = initial),");
     puts("          reset, check [details|clear],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
@@ -202,6 +203,8 @@ static void commands(void){
     puts("position in a row/column/box, using no cached solved digits.");
     puts("'history [N]' lists recent state changes and redoable steps (default 10).");
     puts("'history inspect STEP' shows exact digit/note changes at that step.");
+    puts("'history goto STEP' restores a retained snapshot; 0 is the initial");
+    puts("board. No new Undo entry or loss of Redo. Invalid targets are rejected.");
     puts("History views are read-only and use retained Undo/Redo snapshots.");
     puts("'auto-notes' fills all legal marks; 'prune-notes' removes only illegal marks.");
     puts("'hint' shows one forced single; 'hint all' lists each distinct forced cell.");
@@ -2662,6 +2665,19 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             else if(strcmp(a,"inspect")==0&&b&&!c&&!extra&&
                     decimal(b,SUDOKU_GAME_HISTORY-1u,&requested)&&requested>=1u)
                 history_inspect(game,(unsigned)requested);
+            else if(strcmp(a,"goto")==0&&b&&!c&&!extra&&
+                    decimal(b,SUDOKU_GAME_HISTORY-1u,&requested)){
+                SudokuGameStatus jumped=sudoku_game_history_goto(game,(unsigned)requested);
+                if(jumped!=SUDOKU_GAME_OK)
+                    printf("Error: %s\n",sudoku_game_status_text(jumped));
+                else{
+                    printf("History goto %u: cursor %u; undo %u; redo %u.\n",
+                           (unsigned)requested,game->history_cursor,
+                           game->history_cursor,
+                           game->history_len-1u-game->history_cursor);
+                    display(game);
+                }
+            }
             else if(!b&&!c&&!extra&&
                     decimal(a,SUDOKU_GAME_HISTORY-1u,&requested)&&requested>=1u)
                 history_list(game,(unsigned)requested);

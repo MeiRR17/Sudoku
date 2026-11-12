@@ -1925,6 +1925,91 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 0, redo 0') == 3 and not stderr
     checks += 1
 
+    # Absolute history navigation restores already-recorded states
+    # without adding an action or deleting the redo branch.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nnotes set 1 4 19\n'
+                         'history goto 0\nnotes 1 4\nstatus\n'
+                         'history goto 2\nnotes 1 4\nstatus\n'
+                         'history goto 1\nnotes 1 4\n'
+                         'history\nstatus\nquit\n')
+    assert 'History goto 0: cursor 0; undo 0; redo 2.' in stdout
+    assert 'History goto 2: cursor 2; undo 2; redo 0.' in stdout
+    assert 'History goto 1: cursor 1; undo 1; redo 1.' in stdout
+    assert 'Notes for row 1 col 4: 1 9\n' in stdout
+    assert stdout.count('Notes for row 1 col 4:\n') == 2
+    assert 'History: 2 recorded actions; cursor 1; undo 1; redo 1.' in stdout
+    assert 'History step 2 [REDO]:' in stdout
+    assert 'undo 1, redo 1' in stdout and not stderr
+    checks += 1
+
+    # Seeking to the current step is a no-op; the next normal Undo/Redo
+    # action must still traverse existing snapshots as before.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nhistory goto 1\nhistory goto 1\n'
+                         'history\nundo\nhistory\nredo\n'
+                         'history\nstatus\nquit\n')
+    assert stdout.count('History goto 1: cursor 1; undo 1; redo 0.') == 2
+    assert stdout.count('History: 1 recorded actions; cursor 1; undo 1; redo 0.') == 2
+    assert 'History: 1 recorded actions; cursor 0; undo 0; redo 1.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A normal edit after seeking backwards discards the old Redo branch,
+    # exactly as when editing after a conventional Undo.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nnotes set 1 4 19\n'
+                         'history goto 1\nset 1 4 6\n'
+                         'history inspect 2\nhistory\n'
+                         'history goto 2\nstatus\nquit\n')
+    assert 'History goto 1: cursor 1; undo 1; redo 1.' in stdout
+    assert 'History inspect step 2 [DONE]:\n  Board r1c4: - -> 6' in stdout
+    assert 'Notes r1c4: - -> 1,9' not in stdout
+    assert 'History: 2 recorded actions; cursor 2; undo 2; redo 0.' in stdout
+    assert 'History goto 2: cursor 2; undo 2; redo 0.' in stdout
+    assert 'undo 2, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Missing snapshot index is not an editing command and cannot move
+    # the cursor or implicitly create a new history record.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nhistory goto 2\n'
+                         'history\nstatus\nquit\n')
+    assert 'Error: ' in stdout
+    assert 'History: 1 recorded actions; cursor 1; undo 1; redo 0.' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Bulk trial-forced placement is a single snapshot. Absolute seek
+    # restores the entire group atomically with no extra Undo entry.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'hint apply trial-forced 3\n'
+                         'history goto 0\nstatus\n'
+                         'history goto 1\nstatus\nquit\n')
+    assert 'Applied 3 trial-forced placements in one undoable edit.' in stdout
+    assert 'History goto 0: cursor 0; undo 0; redo 1.' in stdout
+    assert 'History goto 1: cursor 1; undo 1; redo 0.' in stdout
+    assert 'Progress: 30/81 filled' in stdout
+    assert 'Progress: 33/81 filled' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Strict CLI parser: missing, negative, too-large and excess
+    # arguments are rejected before history navigation.
+    bad_history_goto = [
+        'history goto', 'history goto -1', 'history goto 128',
+        'history goto 4294967295', 'history goto nope',
+        'history goto 0 extra', 'history goto 0 extra more',
+        'history goto 1.0'
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n' + '\n'.join(bad_history_goto) +
+                         '\nstatus\nhistory goto 0\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(bad_history_goto)
+    assert 'History goto 0: cursor 0; undo 0; redo 0.' in stdout
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
     # Navigate multiple undo states atomically: excessive requests must
     # leave notes, cursor and redo history untouched.
     stdout, stderr = run(['--puzzle', near_win],

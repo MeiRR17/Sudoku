@@ -918,6 +918,65 @@ static int check_note_elimination(void){
     free(game);
     return 0;
 }
+/* Absolute history navigation is atomic, validates the destination,
+ * preserves redo, and can recover from a malformed current public board. */
+static int check_history_goto(void){
+    SudokuBoard board;
+    SudokuGame *game=(SudokuGame *)malloc(sizeof *game);
+    unsigned cursor,length;
+    CHECK(game!=NULL);
+    CHECK(sudoku_board_parse(&board,(const unsigned char *)classic,81u,NULL)==SUDOKU_OK);
+    CHECK(sudoku_game_start(game,&board)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_history_goto(game,0u)==SUDOKU_GAME_OK);
+    CHECK(game->history_cursor==0u&&game->history_len==1u);
+    CHECK(sudoku_game_history_goto(game,1u)==SUDOKU_GAME_NO_HISTORY);
+    CHECK(sudoku_game_history_goto(game,128u)==SUDOKU_GAME_RANGE);
+    CHECK(sudoku_game_history_goto(game,UINT32_MAX)==SUDOKU_GAME_RANGE);
+    CHECK(sudoku_game_history_goto(NULL,0u)==SUDOKU_GAME_INVALID);
+    CHECK(sudoku_game_set(game,1u,3u,4u)==SUDOKU_GAME_OK);
+    CHECK(sudoku_game_set_notes(game,1u,4u,
+          (uint16_t)((1u<<1)|(1u<<9)))==SUDOKU_GAME_OK);
+    CHECK(game->history_len==3u&&game->history_cursor==2u);
+    CHECK(game->state.board.cells[2]==4u);
+    CHECK(game->state.notes[3]==((1u<<1)|(1u<<9)));
+    CHECK(sudoku_game_history_goto(game,0u)==SUDOKU_GAME_OK);
+    CHECK(game->history_len==3u&&game->history_cursor==0u);
+    CHECK(game->state.board.cells[2]==0u&&game->state.notes[3]==0u);
+    CHECK(sudoku_game_history_goto(game,2u)==SUDOKU_GAME_OK);
+    CHECK(game->state.board.cells[2]==4u);
+    CHECK(game->state.notes[3]==((1u<<1)|(1u<<9)));
+    CHECK(sudoku_game_history_goto(game,1u)==SUDOKU_GAME_OK);
+    CHECK(game->state.board.cells[2]==4u&&game->state.notes[3]==0u);
+    cursor=game->history_cursor;
+    length=game->history_len;
+    CHECK(sudoku_game_history_goto(game,1u)==SUDOKU_GAME_OK);
+    CHECK(game->history_cursor==cursor&&game->history_len==length);
+    CHECK(sudoku_game_history_goto(game,3u)==SUDOKU_GAME_NO_HISTORY);
+    CHECK(game->history_cursor==cursor&&game->history_len==length);
+    /* Invalid target clue and note masks must reject atomically. */
+    game->history[0].board.cells[0]=0u;
+    CHECK(sudoku_game_history_goto(game,0u)==SUDOKU_GAME_INVALID);
+    CHECK(game->history_cursor==cursor&&game->state.board.cells[2]==4u);
+    game->history[0].board.cells[0]=5u;
+    game->history[0].notes[2]=1u;
+    CHECK(sudoku_game_history_goto(game,0u)==SUDOKU_GAME_INVALID);
+    CHECK(game->history_cursor==cursor&&game->state.board.cells[2]==4u);
+    game->history[0].notes[2]=0u;
+    /* A valid snapshot is a recovery point for corrupted live state. */
+    game->state.board.cells[2]=10u;
+    CHECK(sudoku_game_history_goto(game,0u)==SUDOKU_GAME_OK);
+    CHECK(game->history_cursor==0u&&game->state.board.cells[2]==0u);
+    CHECK(sudoku_game_history_goto(game,1u)==SUDOKU_GAME_OK);
+    /* Editing after seeking to the middle discards prior redo branch. */
+    CHECK(sudoku_game_set(game,1u,4u,6u)==SUDOKU_GAME_OK);
+    CHECK(game->history_cursor==2u&&game->history_len==3u);
+    CHECK(game->state.board.cells[3]==6u&&game->state.notes[3]==0u);
+    CHECK(sudoku_game_history_goto(game,3u)==SUDOKU_GAME_NO_HISTORY);
+    CHECK(sudoku_game_history_goto(game,2u)==SUDOKU_GAME_OK);
+    CHECK(game->state.board.cells[3]==6u);
+    free(game);
+    return 0;
+}
 int main(void){
     int result=check_game();
     if(result)return result;
@@ -926,6 +985,8 @@ int main(void){
     result=check_batch_set();
     if(result)return result;
     result=check_history_steps();
+    if(result)return result;
+    result=check_history_goto();
     if(result)return result;
     result=check_note_elimination();
     if(!result)puts("GAME ENGINE PASS: unique, givens, notes, history, reset, save/load/corruption, win, check-clear, batch-set, multi-step undo/redo, selective note elimination");
