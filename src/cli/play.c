@@ -361,8 +361,9 @@ static void commands(void){
     puts("Commands: show [notes|candidates|heatmap|digit N],");
     puts("          set ROW COL DIGIT | set safe|proven ROW COL DIGIT,");
     puts("          set batch r1c3=4,r1c4=6 (comma-separated, atomic),");
-    puts("          set batch check|safe r1c3=4,r1c4=6,");
+    puts("          set batch check|safe|preview r1c3=4,r1c4=6,");
     puts("          erase ROW COL | erase batch r1c3,r1c4,");
+    puts("          erase batch preview r1c3,r1c4 (read-only),");
     puts("          erase row|column|box N (unit 1..9, one Undo),");
     puts("          note ROW COL DIGIT,");
     puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
@@ -400,6 +401,8 @@ static void commands(void){
     puts("'notes batch add|remove|toggle' keeps unmentioned pencil marks.");
     puts("Toggle flips each specified mark, also in one Undo step.");
     puts("'notes batch preview' reports exact mask changes without editing.");
+    puts("'set batch preview' and 'erase batch preview' show proposed changes.");
+    puts("All previews validate atomically without altering Undo/Redo or saves.");
     puts("Previews validate the entire list and preserve Undo/Redo.");
     puts("Adding existing or removing absent marks leaves history unchanged.");
     puts("'notes audit [N]' lists stale and unmarked legal digits (default 10).");
@@ -940,6 +943,66 @@ static void preview_notes_batch(const SudokuGame *game,
         unsigned index=(edits[i].row-1u)*9u+edits[i].col-1u;
         if(game->state.notes[index]==trial->state.notes[index])continue;
         printf("  r%uc%u: ",edits[i].row,edits[i].col);
+        audit_mask_digits(game->state.notes[index]);
+        fputs(" -> ",stdout);
+        audit_mask_digits(trial->state.notes[index]);
+        putchar('\n');
+    }
+    free(trial);
+}
+/* Preview the exact same atomic transaction on a private game snapshot.
+ * Neither the board, pencil marks, timer nor Undo/Redo can change. */
+static void preview_set_batch(const SudokuGame *game,
+                              const SudokuGameMove *moves,unsigned count){
+    SudokuGame *trial=malloc(sizeof *trial);
+    SudokuGameStatus status;
+    unsigned applied=0u,i;
+    if(!trial){puts("Error: out of memory");return;}
+    *trial=*game;
+    status=sudoku_game_set_many(trial,moves,count,&applied);
+    if(status!=SUDOKU_GAME_OK){
+        printf("Error: %s\n",sudoku_game_status_text(status));
+        free(trial);
+        return;
+    }
+    printf("Placement batch preview: %u selected, %u placed; no edits applied.\n",
+           count,applied);
+    for(i=0u;i<count;++i){
+        unsigned index=(moves[i].row-1u)*9u+moves[i].col-1u;
+        printf("  r%uc%u: %u -> %u; notes ",moves[i].row,moves[i].col,
+               (unsigned)game->state.board.cells[index],
+               (unsigned)trial->state.board.cells[index]);
+        audit_mask_digits(game->state.notes[index]);
+        fputs(" -> ",stdout);
+        audit_mask_digits(trial->state.notes[index]);
+        putchar('\n');
+    }
+    free(trial);
+}
+/* Erasure can remove digits and independent pencil notes. Show only cells
+ * whose meaningful contents differ, and never create an Undo record. */
+static void preview_erase_batch(const SudokuGame *game,
+                                const SudokuGameCell *cells,unsigned count){
+    SudokuGame *trial=malloc(sizeof *trial);
+    SudokuGameStatus status;
+    unsigned cleared=0u,i;
+    if(!trial){puts("Error: out of memory");return;}
+    *trial=*game;
+    status=sudoku_game_erase_many(trial,cells,count,&cleared);
+    if(status!=SUDOKU_GAME_OK){
+        printf("Error: %s\n",sudoku_game_status_text(status));
+        free(trial);
+        return;
+    }
+    printf("Erase batch preview: %u selected, %u changed; no edits applied.\n",
+           count,cleared);
+    for(i=0u;i<count;++i){
+        unsigned index=(cells[i].row-1u)*9u+cells[i].col-1u;
+        if(game->state.board.cells[index]==trial->state.board.cells[index] &&
+           game->state.notes[index]==trial->state.notes[index])continue;
+        printf("  r%uc%u: %u -> %u; notes ",cells[i].row,cells[i].col,
+               (unsigned)game->state.board.cells[index],
+               (unsigned)trial->state.board.cells[index]);
         audit_mask_digits(game->state.notes[index]);
         fputs(" -> ",stdout);
         audit_mask_digits(trial->state.notes[index]);
@@ -3337,6 +3400,17 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             print_candidates(game,r,d);continue;
         }
         else if(strcmp(command,"set")==0&&a&&strcmp(a,"batch")==0&&
+                b&&strcmp(b,"preview")==0&&c&&!extra){
+            SudokuGameMove moves[SUDOKU_CELL_COUNT];
+            unsigned count=0u;
+            if(!parse_batch_moves(c,moves,&count)){
+                puts("Error: malformed placement preview. Use set batch preview r1c3=4,r1c4=6.");
+                continue;
+            }
+            preview_set_batch(game,moves,count);
+            continue;
+        }
+        else if(strcmp(command,"set")==0&&a&&strcmp(a,"batch")==0&&
                 b&&c&&!extra&&
                 (strcmp(b,"check")==0||strcmp(b,"safe")==0)){
             SudokuGameMove moves[SUDOKU_CELL_COUNT];
@@ -3382,6 +3456,17 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         else if(strcmp(command,"set")==0&&position(a,b,&r,&d)&&c&&!extra&&
                 decimal(c,9u,&digit)&&digit>=1u)
             status=sudoku_game_set(game,r,d,(unsigned)digit);
+        else if(strcmp(command,"erase")==0&&a&&
+                strcmp(a,"batch")==0&&b&&strcmp(b,"preview")==0&&c&&!extra){
+            SudokuGameCell cells[SUDOKU_CELL_COUNT];
+            unsigned count=0u;
+            if(!parse_erase_batch(c,cells,&count)){
+                puts("Error: malformed erase preview. Use erase batch preview r1c3,r1c4.");
+                continue;
+            }
+            preview_erase_batch(game,cells,count);
+            continue;
+        }
         else if(strcmp(command,"erase")==0&&a&&
                 strcmp(a,"batch")==0&&b&&!c&&!extra){
             SudokuGameCell cells[SUDOKU_CELL_COUNT];

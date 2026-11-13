@@ -2480,6 +2480,78 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 0, redo 0') == 2 and not stderr
     checks += 1
 
+    # Read-only placement preview uses the exact atomic batch setter on a
+    # cloned game. It displays prospective note clearing but changes nothing.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 3 19\nnotes set 1 4 2\n'
+                         'set batch preview r1c3=4,r1c4=6\n'
+                         'notes 1 3\nnotes 1 4\nstatus\n'
+                         'set batch r1c3=4,r1c4=6\nstatus\nquit\n')
+    assert 'Placement batch preview: 2 selected, 2 placed; no edits applied.' in stdout
+    assert '  r1c3: 0 -> 4; notes 1,9 -> -\n' in stdout
+    assert '  r1c4: 0 -> 6; notes 2 -> -\n' in stdout
+    assert 'Notes for row 1 col 3: 1 9\n' in stdout
+    assert 'Notes for row 1 col 4: 2\n' in stdout
+    assert 'undo 2, redo 0' in stdout and 'undo 3, redo 0' in stdout
+    assert 'Batch placed 2 digits in one undoable edit.' in stdout and not stderr
+    checks += 1
+
+    # Erasure preview reports digit and pencil changes without touching
+    # either target. The subsequent committed erase is still a single Undo.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nnotes set 1 4 19\n'
+                         'erase batch preview r1c3,r1c4\n'
+                         'notes 1 4\nstatus\n'
+                         'erase batch r1c3,r1c4\nstatus\nquit\n')
+    assert 'Erase batch preview: 2 selected, 2 changed; no edits applied.' in stdout
+    assert '  r1c3: 4 -> 0; notes - -> -\n' in stdout
+    assert '  r1c4: 0 -> 0; notes 1,9 -> -\n' in stdout
+    assert 'Notes for row 1 col 4: 1 9\n' in stdout
+    assert 'undo 2, redo 0' in stdout and 'undo 3, redo 0' in stdout
+    assert 'Batch erased 2 cells in one undoable edit.' in stdout and not stderr
+    checks += 1
+
+    # A no-op erase preview after Undo does not discard pending Redo;
+    # all originally recorded steps and cells remain available.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nundo\n'
+                         'erase batch preview r1c3,r1c4\n'
+                         'status\nredo\nstatus\nquit\n')
+    assert 'Erase batch preview: 2 selected, 0 changed; no edits applied.' in stdout
+    assert 'undo 0, redo 1' in stdout and 'undo 1, redo 0' in stdout
+    assert not stderr
+    checks += 1
+
+    # Preview failures must be all-or-nothing and not consume Redo,
+    # including a conflict late in a placement batch.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nundo\n'
+                         'set batch preview r1c3=4,r1c9=4\n'
+                         'set batch preview r1c3=4,r1c3=6\n'
+                         'set batch preview r1c3=4,r1c1=5\n'
+                         'erase batch preview r1c3,r1c1\n'
+                         'status\nredo\nstatus\nquit\n')
+    assert stdout.count('Error: ') == 4
+    assert 'Placement batch preview:' not in stdout
+    assert 'Erase batch preview:' not in stdout
+    assert 'undo 0, redo 1' in stdout and 'undo 1, redo 0' in stdout
+    assert not stderr
+    checks += 1
+
+    # Malformed dry-runs never execute an accepted prefix of a batch.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set batch preview r1c3=4,\n'
+                         'erase batch preview r1c3,\n'
+                         'set batch preview r1c3=4 extra\n'
+                         'erase batch preview r1c3 extra\n'
+                         'status\nquit\n')
+    assert stdout.count('Error: ') == 4
+    assert 'undo 0, redo 0' in stdout
+    assert 'Placement batch preview:' not in stdout
+    assert 'Erase batch preview:' not in stdout
+    assert not stderr
+    checks += 1
+
     # CLI batch delegates to the validated core batch API: both digits
     # become visible at once and can be undone/redone as ONE snapshot.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],
