@@ -2649,6 +2649,55 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 0, redo 0') == 2 and not stderr
     checks += 1
 
+    # A whole-row preview shows the same deletions as the actual region
+    # erase, without modifying handwritten marks or Undo history.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nnotes set 1 4 19\n'
+                         'erase preview row 1\nnotes 1 4\nstatus\n'
+                         'erase row 1\nstatus\nquit\n')
+    assert 'Erase row 1 preview (editable cells only):' in stdout
+    assert 'Erase batch preview: 6 selected, 2 changed; no edits applied.' in stdout
+    assert '  r1c3: 4 -> 0; notes - -> -\n' in stdout
+    assert '  r1c4: 0 -> 0; notes 1,9 -> -\n' in stdout
+    assert 'Notes for row 1 col 4: 1 9\n' in stdout
+    assert 'undo 2, redo 0' in stdout and 'undo 3, redo 0' in stdout
+    assert 'Erased 2 cells from row 1 in one undoable edit.' in stdout
+    assert not stderr
+    checks += 1
+
+    # Column and box previews are also read-only on an untouched board.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'erase preview column 3\n'
+                         'erase preview box 1\nstatus\nquit\n')
+    assert 'Erase column 3 preview (editable cells only):' in stdout
+    assert 'Erase box 1 preview (editable cells only):' in stdout
+    assert stdout.count('0 changed; no edits applied.') == 2
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A preview must leave pending Redo intact.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nundo\n'
+                         'erase preview row 1\nstatus\nredo\nstatus\nquit\n')
+    assert 'Erase row 1 preview (editable cells only):' in stdout
+    assert '0 changed; no edits applied.' in stdout
+    assert 'undo 0, redo 1' in stdout and 'undo 1, redo 0' in stdout
+    assert not stderr
+    checks += 1
+
+    # Invalid scope, index, missing argument or extra tokens are rejected.
+    invalid_region_previews = [
+        'erase preview row 0', 'erase preview column 10',
+        'erase preview box x', 'erase preview square 1',
+        'erase preview row', 'erase preview row 1 extra',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         '\n'.join(invalid_region_previews)+'\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_region_previews)
+    assert 'Erase row 1 preview' not in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
     # Batch erase clears both placed digits and pencil marks as one Undo
     # operation, restoring both atomically on Undo/Redo.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],

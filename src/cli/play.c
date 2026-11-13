@@ -365,6 +365,7 @@ static void commands(void){
     puts("          erase ROW COL | erase batch r1c3,r1c4,");
     puts("          erase batch preview r1c3,r1c4 (read-only),");
     puts("          erase row|column|box N (unit 1..9, one Undo),");
+    puts("          erase preview row|column|box N (read-only),");
     puts("          note ROW COL DIGIT,");
     puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
     puts("          notes batch r1c3=19,r1c4=- (atomic pencil edits),");
@@ -416,6 +417,8 @@ static void commands(void){
     puts("'erase batch' clears multiple editable cells and notes in one Undo.");
     puts("Any given/duplicate target rejects the entire erase batch.");
     puts("'erase row|column|box N' clears editable digits and notes only.");
+    puts("'erase preview row|column|box N' shows targets without deleting.");
+    puts("Region previews preserve the game and pending Redo.");
     puts("Boxes are numbered left-to-right, top-to-bottom (1..9).");
     puts("'candidates' lists legal digits without guessing.");
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
@@ -1009,6 +1012,16 @@ static void preview_erase_batch(const SudokuGame *game,
         putchar('\n');
     }
     free(trial);
+}
+/* Preview erasing an entire unit with the same target enumeration and
+ * atomic clone/validation as an ordinary whole-row/column/box erase.
+ * Given cells are not included and the caller is never mutated. */
+static void preview_erase_unit(const SudokuGame *game,
+                               const char *scope,unsigned number){
+    SudokuGameCell cells[9];
+    unsigned count=erase_unit_targets(game,scope,number,cells);
+    printf("Erase %s %u preview (editable cells only):\n",scope,number);
+    preview_erase_batch(game,cells,count);
 }
 static void audit_notes(const SudokuGame *game,unsigned limit,
                         unsigned scope,unsigned number){
@@ -3456,6 +3469,14 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         else if(strcmp(command,"set")==0&&position(a,b,&r,&d)&&c&&!extra&&
                 decimal(c,9u,&digit)&&digit>=1u)
             status=sudoku_game_set(game,r,d,(unsigned)digit);
+        else if(strcmp(command,"erase")==0&&a&&
+                strcmp(a,"preview")==0&&b&&c&&!extra&&
+                (strcmp(b,"row")==0||strcmp(b,"column")==0||
+                 strcmp(b,"box")==0)&&
+                decimal(c,9u,&digit)&&digit>=1u){
+            preview_erase_unit(game,b,(unsigned)digit);
+            continue;
+        }
         else if(strcmp(command,"erase")==0&&a&&
                 strcmp(a,"batch")==0&&b&&strcmp(b,"preview")==0&&c&&!extra){
             SudokuGameCell cells[SUDOKU_CELL_COUNT];
