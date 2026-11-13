@@ -835,7 +835,7 @@ static int open_parent_directory(const char *path) {
 static int sync_parent_directory(const char *path, int original_fd) {
     int current_fd = open_parent_directory(path);
     int ok = 0;
-    struct stat original, current;
+    struct stat original, current, after;
     if (current_fd >= 0) {
         ok = original_fd >= 0 &&
              fstat(original_fd, &original) == 0 &&
@@ -843,6 +843,17 @@ static int sync_parent_directory(const char *path, int original_fd) {
              original.st_dev == current.st_dev &&
              original.st_ino == current.st_ino;
         if (ok) ok = fsync(current_fd) == 0;
+        /* fsync may race with another rename of the parent pathname.
+         * Reopen after synchronization so a disappeared/replaced directory
+         * is never reported as a durable save at the requested path. */
+        if (ok) {
+            int final_fd = open_parent_directory(path);
+            ok = final_fd >= 0 &&
+                 fstat(final_fd, &after) == 0 &&
+                 original.st_dev == after.st_dev &&
+                 original.st_ino == after.st_ino;
+            if (final_fd >= 0 && close(final_fd) != 0) ok = 0;
+        }
         if (close(current_fd) != 0) ok = 0;
     }
     if (original_fd >= 0 && close(original_fd) != 0) ok = 0;

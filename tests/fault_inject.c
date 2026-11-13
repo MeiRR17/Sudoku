@@ -26,13 +26,34 @@ int mkstemp(char *pattern) {
 int fsync(int fd) {
     const char *fault = getenv("SUDOKU_TEST_FAULT");
     struct stat st;
+    int result;
     if (fault != NULL && fstat(fd, &st) == 0 &&
         ((strcmp(fault, "file-sync") == 0 && S_ISREG(st.st_mode)) ||
          (strcmp(fault, "dir-sync") == 0 && S_ISDIR(st.st_mode)))) {
         errno = EIO;
         return -1;
     }
-    return (int)syscall(SYS_fsync, fd);
+    result = (int)syscall(SYS_fsync, fd);
+    /* A separate race is possible after a successful directory fsync but
+     * before the public save operation returns. Swap the pathname only at
+     * that precise point so the final identity check can be tested. */
+    if (result == 0 && fault != NULL &&
+        strcmp(fault, "parent-directory-after-fsync") == 0 &&
+        fstat(fd, &st) == 0 && S_ISDIR(st.st_mode)) {
+        const char *parent = getenv("SUDOKU_TEST_PARENT");
+        char displaced[4192];
+        int written;
+        if (!parent || parent[0] != '/') { errno = EINVAL; return -1; }
+        written = snprintf(displaced, sizeof displaced, "%s.displaced", parent);
+        if (written < 0 || (size_t)written >= sizeof displaced) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        if (renameat(AT_FDCWD, parent, AT_FDCWD, displaced) != 0)
+            return -1;
+        if (mkdir(parent, 0700) != 0) return -1;
+    }
+    return result;
 }
 
 int rename(const char *source, const char *target) {

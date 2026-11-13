@@ -31,6 +31,8 @@ def play(target, commands, fault=None, library=None):
     if fault is not None:
         env['LD_PRELOAD'] = str(library)
         env['SUDOKU_TEST_FAULT'] = fault
+        if fault == 'parent-directory-after-fsync':
+            env['SUDOKU_TEST_PARENT'] = str(Path(target).parent)
     else:
         env.pop('SUDOKU_TEST_FAULT', None)
     result = subprocess.run([str(EXE), 'play', '--puzzle', PUZZLE, '--save', str(target)],
@@ -120,6 +122,26 @@ with tempfile.TemporaryDirectory(prefix='sudoku-fault-') as directory:
     displaced_directory.rename(raced_directory)
     assert raced_save.read_bytes().startswith(b'SUDOKU_SAVE_V1\n')
     assert not list(raced_directory.glob('*.tmp.*'))
+    checks += 1
+
+    # A directory may be replaced only *after* its fd was fsynced.
+    # The final pathname check must not misreport the old fsync as success
+    # for an unrelated directory now occupying the requested path.
+    post_fsync_parent = root / 'parent-after-fsync'
+    post_fsync_parent.mkdir()
+    post_fsync_save = post_fsync_parent / 'installed.save'
+    post_fsync_output = play(post_fsync_save, 'save\nquit\n',
+                             'parent-directory-after-fsync', library)
+    assert 'Warning: save replaced target, but parent directory sync failed' in post_fsync_output
+    assert 'Error: file operation failed' not in post_fsync_output
+    old_parent = root / 'parent-after-fsync.displaced'
+    assert post_fsync_parent.is_dir() and old_parent.is_dir()
+    assert not (post_fsync_parent / post_fsync_save.name).exists()
+    assert (old_parent / post_fsync_save.name).is_file()
+    post_fsync_parent.rmdir()
+    old_parent.rename(post_fsync_parent)
+    assert post_fsync_save.read_bytes().startswith(b'SUDOKU_SAVE_V1\n')
+    assert not list(post_fsync_parent.glob('*.tmp.*'))
     checks += 1
 
     # Verify the staging inode is already 0600 *before* its fchmod call,
