@@ -380,7 +380,8 @@ static void commands(void){
     puts("          prune-notes,");
     puts("          clear-notes, hint [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
     puts("          hint apply [all|pairs [N]|hidden-pairs [N]|locked [N]|x-wing [N]|swordfish [N]|trial [N]|trial-forced [N]|triples [N]|hidden-triples [N]|chain [N]],");
-    puts("          undo [N], redo [N], history [N], history summary,");
+    puts("          undo [N] | undo preview [N], redo [N] | redo preview [N],");
+    puts("          history [N], history summary,");
     puts("          history hotspots [N], history heatmap [all|done|redo],");
     puts("          history inspect STEP,");
     puts("          history goto STEP (0 = initial),");
@@ -479,6 +480,8 @@ static void commands(void){
     puts("'hint apply' places one; 'hint apply all' batches current forced cells.");
     puts("'hint apply chain [N]' commits at most N singles in one undo.");
     puts("'undo [N]' and 'redo [N]' move 1..127 history steps, all or nothing.");
+    puts("'undo preview [N]' and 'redo preview [N]' show that step range.");
+    puts("Previews retain the current cursor and pending redo; no answer is shown.");
     puts("'check details' locates wrong entries; 'check clear' erases them (undoable).");
     puts("No color, network or special keys required.");
 }
@@ -1063,6 +1066,29 @@ static void preview_bulk_clear(const SudokuGame *game,int reset){
         audit_mask_digits(trial->state.notes[index]);
         putchar('\n');
     }
+    free(trial);
+}
+/* Inspect an Undo/Redo operation on a private snapshot before deciding to
+ * move the real cursor. Reuse the same core validation and history diff that
+ * the explicit command uses; never reveal the cached solution or save. */
+static void preview_history_move(const SudokuGame *game,unsigned steps,int redo){
+    SudokuGame *trial=malloc(sizeof *trial);
+    SudokuGameStatus status;
+    unsigned origin;
+    if(!trial){puts("Error: out of memory");return;}
+    *trial=*game;
+    origin=trial->history_cursor;
+    status=redo?sudoku_game_redo_steps(trial,steps):
+                sudoku_game_undo_steps(trial,steps);
+    if(status!=SUDOKU_GAME_OK){
+        printf("Error: %s\n",sudoku_game_status_text(status));
+        free(trial);
+        return;
+    }
+    printf("%s preview: %u step%s, cursor %u -> %u; no edits applied.\n",
+           redo?"Redo":"Undo",steps,steps==1u?"":"s",
+           origin,trial->history_cursor);
+    history_diff(trial,origin,trial->history_cursor);
     free(trial);
 }
 static void audit_notes(const SudokuGame *game,unsigned limit,
@@ -3334,6 +3360,18 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         if(strcmp(command,"auto-notes")==0&&!a)status=sudoku_game_auto_notes(game);
         else if(strcmp(command,"prune-notes")==0&&!a)status=sudoku_game_prune_notes(game);
         else if(strcmp(command,"clear-notes")==0&&!a)status=sudoku_game_clear_notes(game);
+        else if(strcmp(command,"undo")==0&&a&&
+                strcmp(a,"preview")==0&&!c&&!extra&&
+                (!b||(decimal(b,SUDOKU_GAME_HISTORY-1u,&digit)&&digit>=1u))){
+            preview_history_move(game,b?(unsigned)digit:1u,0);
+            continue;
+        }
+        else if(strcmp(command,"redo")==0&&a&&
+                strcmp(a,"preview")==0&&!c&&!extra&&
+                (!b||(decimal(b,SUDOKU_GAME_HISTORY-1u,&digit)&&digit>=1u))){
+            preview_history_move(game,b?(unsigned)digit:1u,1);
+            continue;
+        }
         else if(strcmp(command,"undo")==0&&
                 (!a||(!b&&decimal(a,SUDOKU_GAME_HISTORY-1u,&digit)&&digit>=1u)))
             status=sudoku_game_undo_steps(game,a?(unsigned)digit:1u);

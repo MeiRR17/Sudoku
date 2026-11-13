@@ -2348,6 +2348,65 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 0, redo 0') == 3 and not stderr
     checks += 1
 
+    # Undo/redo previews reuse the validated core history navigation on a
+    # private clone, and show the same diff as the future explicit action.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nnotes set 1 4 19\n'
+                         'undo preview 2\nstatus\nundo 2\nstatus\n'
+                         'redo preview 2\nstatus\nredo 2\nstatus\nquit\n')
+    assert 'Undo preview: 2 steps, cursor 2 -> 0; no edits applied.' in stdout
+    assert 'History diff 2 -> 0:' in stdout
+    assert '  Board r1c3: 4 -> -\n' in stdout
+    assert '  Notes r1c4: 1,9 -> -\n' in stdout
+    assert 'Redo preview: 2 steps, cursor 0 -> 2; no edits applied.' in stdout
+    assert 'History diff 0 -> 2:' in stdout
+    assert '  Board r1c3: - -> 4\n' in stdout
+    assert '  Notes r1c4: - -> 1,9\n' in stdout
+    assert stdout.count('undo 2, redo 0') == 2
+    assert stdout.count('undo 0, redo 2') == 2 and not stderr
+    checks += 1
+
+    # Default one-step previews can inspect either direction while a
+    # pending Redo still exists; preview never moves the live cursor.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nnotes set 1 4 19\n'
+                         'undo\nundo preview\nredo preview\n'
+                         'status\nredo\nstatus\nquit\n')
+    assert 'Undo preview: 1 step, cursor 1 -> 0; no edits applied.' in stdout
+    assert 'Redo preview: 1 step, cursor 1 -> 2; no edits applied.' in stdout
+    assert 'History diff 1 -> 0:' in stdout
+    assert 'History diff 1 -> 2:' in stdout
+    assert 'undo 1, redo 1' in stdout
+    assert 'undo 2, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A preview of unavailable history fails like the real atomic action,
+    # but does not print a successful diff or create an Undo snapshot.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'undo preview\nredo preview\nundo preview 2\n'
+                         'status\nquit\n')
+    assert stdout.count('Error: no action to undo or redo') == 3
+    assert 'Undo preview:' not in stdout and 'Redo preview:' not in stdout
+    assert 'History diff' not in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Strict syntax: invalid counts and surplus arguments must not be
+    # interpreted as a valid prefix that changes the history cursor.
+    invalid_step_previews = [
+        'undo preview 0', 'redo preview 128', 'undo preview -1',
+        'redo preview x', 'undo preview 1 extra', 'redo preview 2 extra',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\n'
+                         + '\n'.join(invalid_step_previews)
+                         + '\nstatus\nundo\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_step_previews)
+    assert 'Undo preview:' not in stdout and 'Redo preview:' not in stdout
+    assert 'undo 1, redo 0' in stdout
+    assert 'undo 0, redo 1' in stdout and not stderr
+    checks += 1
+
     # Absolute history navigation restores already-recorded states
     # without adding an action or deleting the redo branch.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],
