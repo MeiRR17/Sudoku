@@ -96,6 +96,22 @@ def verify_checkout(required_sha=None):
 
 
 
+def fresh_acceptance_build_root(sha, parent=None):
+    """Use an empty, private build tree for every native acceptance attempt.
+
+    Reusing a deterministic SHA-keyed CMake directory could accidentally
+    preserve stale configuration, objects, or CTest artifacts after failure.
+    Never delete an existing attempt or certify it as a fresh compilation.
+    """
+    if not re.fullmatch(r'[0-9a-f]{40}', sha):
+        raise ValueError('invalid acceptance commit SHA')
+    base = parent if parent is not None else ROOT / '.quality-build'
+    base.mkdir(parents=True, exist_ok=True)
+    if base.is_symlink() or not base.is_dir():
+        raise ValueError('unsafe acceptance build parent')
+    return Path(tempfile.mkdtemp(prefix='acceptance-' + sha[:12] + '-', dir=base))
+
+
 def workflow_identity_from_env(environ):
     """Bind optional Actions receipts to a run ID and attempt (unsigned claims).
 
@@ -245,7 +261,7 @@ def main():
          '--expected', args.expected)
     sha = verify_checkout(args.require_sha or os.environ.get('GITHUB_SHA'))
 
-    build_root = ROOT / '.quality-build' / ('acceptance-' + sha[:12])
+    build_root = fresh_acceptance_build_root(sha)
     call(sys.executable, ROOT / 'scripts/quality_gate.py', '--mode', args.mode,
          '--build-root', build_root)
     build = build_root / ('clang' if args.mode == 'full' else 'native')

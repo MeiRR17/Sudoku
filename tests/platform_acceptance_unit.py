@@ -29,6 +29,62 @@ SHA = 'a' * 40
 OTHER_SHA = 'b' * 40
 
 
+class FreshBuildWorkspaceTests(unittest.TestCase):
+    def test_two_attempts_same_sha_use_private_empty_directories(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            first = acceptance.fresh_acceptance_build_root(SHA, base)
+            second = acceptance.fresh_acceptance_build_root(SHA, base)
+            self.assertNotEqual(first, second)
+            for path in (first, second):
+                self.assertEqual(path.parent, base)
+                self.assertTrue(path.name.startswith('acceptance-' + SHA[:12] + '-'))
+                self.assertTrue(path.is_dir())
+                self.assertEqual(list(path.iterdir()), [])
+
+    def test_stale_same_sha_cmake_cache_not_reused_or_deleted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            old_build = base / ('acceptance-' + SHA[:12])
+            old_build.mkdir()
+            (old_build / 'CMakeCache.txt').write_text('stale', encoding='utf-8')
+            fresh = acceptance.fresh_acceptance_build_root(SHA, base)
+            self.assertNotEqual(fresh, old_build)
+            self.assertEqual(list(fresh.iterdir()), [])
+            self.assertEqual((old_build / 'CMakeCache.txt').read_text(encoding='utf-8'), 'stale')
+
+    def test_invalid_commit_sha_rejected_before_creating_build(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            for bad in ('', 'master', 'F' * 40, '0' * 39, 'z' * 40):
+                with self.subTest(bad=bad):
+                    with self.assertRaisesRegex(ValueError, 'invalid acceptance commit SHA'):
+                        acceptance.fresh_acceptance_build_root(bad, base)
+            self.assertEqual(list(base.iterdir()), [])
+
+    def test_missing_build_parent_created(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder) / 'nested' / 'builds'
+            fresh = acceptance.fresh_acceptance_build_root(SHA, base)
+            self.assertTrue(base.is_dir())
+            self.assertEqual(fresh.parent, base)
+
+    @unittest.skipUnless(hasattr(os, 'symlink'), 'symlinks unavailable')
+    def test_symlinked_build_parent_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            real = base / 'target'
+            real.mkdir()
+            alias = base / 'alias'
+            try:
+                alias.symlink_to(real, target_is_directory=True)
+            except OSError:
+                self.skipTest('creating symlinks is not permitted on this host')
+            with self.assertRaisesRegex(ValueError, 'unsafe acceptance build parent'):
+                acceptance.fresh_acceptance_build_root(SHA, alias)
+            self.assertEqual(list(real.iterdir()), [])
+
+
 class CheckoutGuardTests(unittest.TestCase):
     def fake_git(self, status='', head=SHA):
         def call(*args, capture=False):

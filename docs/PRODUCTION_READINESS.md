@@ -30,6 +30,7 @@
 - [ ] Debug sanitizer run (ASan + UBSan where available) passes with no findings.
 - [ ] Release build and high-warning compiler builds pass; zero release-blocking compiler diagnostics.
 - [ ] Reproducible local one-command test script is documented and run with exact toolchain versions.
+- [ ] Every exact-SHA native platform acceptance attempt uses a **fresh empty private CMake build directory**, including retries at the same commit; earlier caches/objects/CTest results must never be reused as evidence. Prior build directories are retained for troubleshooting, not certified as fresh.
 - [ ] CI matrix is enabled when quota allows. If hosted CI is unavailable, record the local evidence, machines and SHAs; do not silently claim CI passed.
 - [ ] Benchmarks include a named dataset, CPU/OS, sample sizes and p50/p95 runtime for solve and generation.
 - [ ] Denial-of-service limits for worst-case search and generation are documented and verified.
