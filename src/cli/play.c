@@ -385,7 +385,7 @@ static void commands(void){
     puts("          history inspect STEP,");
     puts("          history goto STEP (0 = initial),");
     puts("          history diff FROM TO | history cell ROW COL,");
-    puts("          reset, check [details|clear],");
+    puts("          reset [preview], check [details|clear [preview]],");
     puts("          export [givens|current|both], status, save [PATH], help, quit");
     puts("'export' prints copyable 81-digit original clues; 'export current'");
     puts("prints entered digits too; neither is a full save or stored solution.");
@@ -418,6 +418,8 @@ static void commands(void){
     puts("Any given/duplicate target rejects the entire erase batch.");
     puts("'erase row|column|box N' clears editable digits and notes only.");
     puts("'erase preview row|column|box N' shows targets without deleting.");
+    puts("'reset preview' and 'check clear preview' show proposed cleanup.");
+    puts("Previewing cleanup never changes the board, history or save.");
     puts("Region previews preserve the game and pending Redo.");
     puts("Boxes are numbered left-to-right, top-to-bottom (1..9).");
     puts("'candidates' lists legal digits without guessing.");
@@ -1022,6 +1024,46 @@ static void preview_erase_unit(const SudokuGame *game,
     unsigned count=erase_unit_targets(game,scope,number,cells);
     printf("Erase %s %u preview (editable cells only):\n",scope,number);
     preview_erase_batch(game,cells,count);
+}
+/* Read-only preview of the two broad cleanup commands. Use the real
+ * validators and mutators on an isolated copy, including their no-op rules.
+ * Neither action may alter the live Undo/Redo branch or saved game. */
+static void preview_bulk_clear(const SudokuGame *game,int reset){
+    SudokuGame *trial=malloc(sizeof *trial);
+    SudokuGameStatus status;
+    unsigned index,changed=0u,digits=0u,note_cells=0u;
+    if(!trial){puts("Error: out of memory");return;}
+    *trial=*game;
+    status=reset?sudoku_game_reset(trial):sudoku_game_clear_mistakes(trial);
+    if(status!=SUDOKU_GAME_OK){
+        printf("Error: %s\n",sudoku_game_status_text(status));
+        free(trial);
+        return;
+    }
+    for(index=0u;index<SUDOKU_CELL_COUNT;++index){
+        if(game->state.board.cells[index]!=trial->state.board.cells[index] ||
+           game->state.notes[index]!=trial->state.notes[index]){
+            ++changed;
+            if(game->state.board.cells[index]!=trial->state.board.cells[index])
+                ++digits;
+            if(game->state.notes[index]!=trial->state.notes[index])
+                ++note_cells;
+        }
+    }
+    printf("%s preview: %u changed cells, %u digit changes, %u note cells changed; no edits applied.\n",
+           reset?"Reset":"Mistake clear",changed,digits,note_cells);
+    for(index=0u;index<SUDOKU_CELL_COUNT;++index){
+        if(game->state.board.cells[index]==trial->state.board.cells[index] &&
+           game->state.notes[index]==trial->state.notes[index])continue;
+        printf("  r%uc%u: %u -> %u; notes ",index/9u+1u,index%9u+1u,
+               (unsigned)game->state.board.cells[index],
+               (unsigned)trial->state.board.cells[index]);
+        audit_mask_digits(game->state.notes[index]);
+        fputs(" -> ",stdout);
+        audit_mask_digits(trial->state.notes[index]);
+        putchar('\n');
+    }
+    free(trial);
 }
 static void audit_notes(const SudokuGame *game,unsigned limit,
                         unsigned scope,unsigned number){
@@ -3298,7 +3340,18 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         else if(strcmp(command,"redo")==0&&
                 (!a||(!b&&decimal(a,SUDOKU_GAME_HISTORY-1u,&digit)&&digit>=1u)))
             status=sudoku_game_redo_steps(game,a?(unsigned)digit:1u);
+        else if(strcmp(command,"reset")==0&&a&&
+                strcmp(a,"preview")==0&&!b){
+            preview_bulk_clear(game,1);
+            continue;
+        }
         else if(strcmp(command,"reset")==0&&!a)status=sudoku_game_reset(game);
+        else if(strcmp(command,"check")==0&&a&&
+                strcmp(a,"clear")==0&&b&&
+                strcmp(b,"preview")==0&&!c&&!extra){
+            preview_bulk_clear(game,0);
+            continue;
+        }
         else if(strcmp(command,"check")==0&&a&&
                 strcmp(a,"clear")==0&&!b){
             unsigned incorrect=sudoku_game_mistakes(game);

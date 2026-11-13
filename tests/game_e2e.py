@@ -2253,6 +2253,57 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'undo 1, redo 0' in stdout and not stderr
     checks += 1
 
+    # Reset preview shows all digit and pencil changes from the exact reset
+    # engine on a clone; live game, undo history and notes remain intact.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nnotes set 1 4 19\n'
+                         'reset preview\nnotes 1 4\nstatus\n'
+                         'reset\nstatus\nundo\nnotes 1 4\nquit\n')
+    assert 'Reset preview: 2 changed cells, 1 digit changes, 1 note cells changed; no edits applied.' in stdout
+    assert '  r1c3: 4 -> 0; notes - -> -\n' in stdout
+    assert '  r1c4: 0 -> 0; notes 1,9 -> -\n' in stdout
+    assert stdout.count('Notes for row 1 col 4: 1 9\n') == 2
+    assert 'undo 2, redo 0' in stdout and 'undo 3, redo 0' in stdout
+    assert not stderr
+    checks += 1
+
+    # Mistake clear preview lists only entered digits that would disappear;
+    # it never displays the cached solution or removes unrelated notes.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 1\nset 1 4 2\nnotes set 2 2 5\n'
+                         'check clear preview\nnotes 2 2\nstatus\n'
+                         'check clear\nstatus\nquit\n')
+    assert 'Mistake clear preview: 2 changed cells, 2 digit changes, 0 note cells changed; no edits applied.' in stdout
+    assert '  r1c3: 1 -> 0; notes - -> -\n' in stdout
+    assert '  r1c4: 2 -> 0; notes - -> -\n' in stdout
+    assert 'Notes for row 2 col 2: 5\n' in stdout
+    assert 'undo 3, redo 0' in stdout and 'undo 4, redo 0' in stdout
+    assert 'Cleared 2 incorrect entries (undoable).' in stdout and not stderr
+    checks += 1
+
+    # Both cleanup previews are real no-ops after Undo and preserve Redo.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nundo\n'
+                         'reset preview\ncheck clear preview\n'
+                         'status\nredo\nstatus\nquit\n')
+    assert 'Reset preview: 0 changed cells, 0 digit changes, 0 note cells changed; no edits applied.' in stdout
+    assert 'Mistake clear preview: 0 changed cells, 0 digit changes, 0 note cells changed; no edits applied.' in stdout
+    assert 'undo 0, redo 1' in stdout and 'undo 1, redo 0' in stdout
+    assert not stderr
+    checks += 1
+
+    # Do not silently execute a reset/clear if the preview syntax is invalid.
+    invalid_cleanup_previews = [
+        'reset preview now', 'reset previews',
+        'check clear preview extra', 'check clear unknown',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         '\n'.join(invalid_cleanup_previews)+'\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(invalid_cleanup_previews)
+    assert 'Reset preview:' not in stdout and 'Mistake clear preview:' not in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
     # Reset is accurately represented as one combined erasure of digits
     # and notes, with correct counts rather than struct-padding memcmp.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],
