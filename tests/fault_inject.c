@@ -44,7 +44,8 @@ int rename(const char *source, const char *target) {
     }
     result = renameat(AT_FDCWD, source, AT_FDCWD, target);
     if (result == 0 && fault != NULL &&
-        strcmp(fault, "parent-fifo-after-rename") == 0) {
+        (strcmp(fault, "parent-fifo-after-rename") == 0 ||
+         strcmp(fault, "parent-directory-after-rename") == 0)) {
         /* Simulate a concurrent path replacement after the save was installed
          * but before the game opens its parent for metadata fsync. This
          * intentionally leaves the old directory under .displaced so the
@@ -65,8 +66,11 @@ int rename(const char *source, const char *target) {
         }
         if (renameat(AT_FDCWD, parent, AT_FDCWD, displaced) != 0)
             return -1;
-        if (mkfifo(parent, 0600) != 0)
+        if (strcmp(fault, "parent-directory-after-rename") == 0) {
+            if (mkdir(parent, 0700) != 0) return -1;
+        } else if (mkfifo(parent, 0600) != 0) {
             return -1;
+        }
     }
     return result;
 }

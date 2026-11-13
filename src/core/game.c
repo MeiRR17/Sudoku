@@ -799,19 +799,16 @@ static int parse_save(SudokuGame *out, const char *data, size_t size) {
     return 1;
 }
 #if !defined(_WIN32)
-/* A successful rename is not necessarily durable across power loss until the
- * parent directory metadata has also been synced. This is a best-effort
- * POSIX durability step, not an across-filesystem or hardware guarantee.
- * O_NONBLOCK + O_DIRECTORY guard against a parent switched to a FIFO or
- * ordinary file between the rename and this call. Such a race reports
- * DURABILITY_UNCERTAIN without blocking the game after committing its save. */
-static int sync_parent_directory(const char *path) {
+/* Hold an identity for the parent directory *before* the file rename. An
+ * independent reopen after rename must refer to the same directory inode,
+ * not merely another directory occupying the same pathname. */
+static int open_parent_directory(const char *path) {
     const char *slash = strrchr(path, '/');
     size_t length = slash == NULL ? 1u : (slash == path ? 1u : (size_t)(slash - path));
     char *parent = malloc(length + 1u);
-    int fd, ok, flags = O_RDONLY | O_NONBLOCK;
+    int fd, flags = O_RDONLY | O_NONBLOCK;
     struct stat metadata;
-    if (parent == NULL) return 0;
+    if (parent == NULL) return -1;
     if (slash == NULL) parent[0] = '.';
     else if (slash == path) parent[0] = '/';
     else memcpy(parent, path, length);
@@ -824,10 +821,31 @@ static int sync_parent_directory(const char *path) {
 #endif
     fd = open(parent, flags);
     free(parent);
-    if (fd < 0) return 0;
-    ok = fstat(fd, &metadata) == 0 && S_ISDIR(metadata.st_mode);
-    if (ok) ok = fsync(fd) == 0;
-    if (close(fd) != 0) ok = 0;
+    if (fd < 0) return -1;
+    if (fstat(fd, &metadata) != 0 || !S_ISDIR(metadata.st_mode)) {
+        (void)close(fd);
+        return -1;
+    }
+    return fd;
+}
+/* A post-rename path may refer to an unrelated directory if it has been
+ * atomically replaced. Syncing that replacement is NOT evidence that the
+ * directory containing the saved file reached durable storage. Close both
+ * descriptors whether verification succeeds or fails. */
+static int sync_parent_directory(const char *path, int original_fd) {
+    int current_fd = open_parent_directory(path);
+    int ok = 0;
+    struct stat original, current;
+    if (current_fd >= 0) {
+        ok = original_fd >= 0 &&
+             fstat(original_fd, &original) == 0 &&
+             fstat(current_fd, &current) == 0 &&
+             original.st_dev == current.st_dev &&
+             original.st_ino == current.st_ino;
+        if (ok) ok = fsync(current_fd) == 0;
+        if (close(current_fd) != 0) ok = 0;
+    }
+    if (original_fd >= 0 && close(original_fd) != 0) ok = 0;
     return ok;
 }
 #endif
@@ -845,6 +863,8 @@ SudokuGameStatus sudoku_game_save(const SudokuGame *game, const char *path) {
     FILE *file=NULL;
 #if defined(_WIN32)
     unsigned attempt;
+#else
+    int parent_fd = -1;
 #endif
     int ok;
     if(!valid_game(game)||!path||!*path)return SUDOKU_GAME_INVALID;
@@ -896,6 +916,14 @@ SudokuGameStatus sudoku_game_save(const SudokuGame *game, const char *path) {
     if(ok)ok=fsync(fileno(file))==0;
 #endif
     if(fclose(file)!=0)ok=0;
+#if !defined(_WIN32)
+    /* Pin the parent identity before publishing the staged save. If the
+     * pathname resolves elsewhere afterward, never sync an unrelated dir. */
+    if(ok){
+        parent_fd=open_parent_directory(path);
+        if(parent_fd<0)ok=0;
+    }
+#endif
     if(ok){
 #if defined(_WIN32)
         ok=MoveFileExA(temp,path,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
@@ -903,13 +931,17 @@ SudokuGameStatus sudoku_game_save(const SudokuGame *game, const char *path) {
         ok=rename(temp,path)==0;
 #endif
     }
+#if !defined(_WIN32)
+    if(!ok && parent_fd>=0)(void)close(parent_fd);
+#endif
     if(!ok)(void)remove(temp);
     free(temp);
     if(!ok)return SUDOKU_GAME_IO;
 #if !defined(_WIN32)
-    /* This can fail *after* the replacement occurred; do not tell the caller
-     * the previous save was preserved. Distinct status avoids false claims. */
-    if(!sync_parent_directory(path))return SUDOKU_GAME_DURABILITY_UNCERTAIN;
+    /* A parent pathname that resolves to a different inode AFTER the
+     * replacement cannot establish directory-metadata durability. */
+    if(!sync_parent_directory(path,parent_fd))
+        return SUDOKU_GAME_DURABILITY_UNCERTAIN;
 #endif
     return SUDOKU_GAME_OK;
 }

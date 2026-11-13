@@ -103,6 +103,25 @@ with tempfile.TemporaryDirectory(prefix='sudoku-fault-') as directory:
     assert not list(raced_parent.glob('*.tmp.*'))
     checks += 1
 
+    # A real directory swapped into the same parent pathname after rename
+    # must not make an unrelated directory fsync count as save durability.
+    raced_directory = root / 'parent-dir-raced'
+    raced_directory.mkdir()
+    raced_save = raced_directory / 'installed.save'
+    raced_output = play(raced_save, 'save\nquit\n',
+                        'parent-directory-after-rename', library)
+    assert 'Warning: save replaced target, but parent directory sync failed' in raced_output
+    assert 'Error: file operation failed' not in raced_output
+    displaced_directory = root / 'parent-dir-raced.displaced'
+    assert raced_directory.is_dir() and displaced_directory.is_dir()
+    assert not (raced_directory / raced_save.name).exists()
+    assert (displaced_directory / raced_save.name).is_file()
+    raced_directory.rmdir()
+    displaced_directory.rename(raced_directory)
+    assert raced_save.read_bytes().startswith(b'SUDOKU_SAVE_V1\n')
+    assert not list(raced_directory.glob('*.tmp.*'))
+    checks += 1
+
     # Verify the staging inode is already 0600 *before* its fchmod call,
     # including under umask(000). This catches the old fopen("wbx") race.
     born_private = root / 'private from birth.save'
