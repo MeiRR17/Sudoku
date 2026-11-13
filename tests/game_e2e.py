@@ -3215,6 +3215,36 @@ with tempfile.TemporaryDirectory() as directory:
     stdout, stderr = run(['--resume', damaged], exit_code=3)
     assert 'corrupted save file' in stderr and not stdout
     checks += 1
+    # POSIX save publication must never replace a FIFO or symbolic link.
+    if os.name == 'posix' and hasattr(os, 'mkfifo'):
+        pipe = folder / 'existing-save-target.fifo'
+        os.mkfifo(pipe)
+        stdout, stderr = run(['--puzzle', near_win],
+                             f'save {pipe}\nquit\n', timeout=3)
+        assert 'Error: file operation failed' in stdout and not stderr
+        assert stat.S_ISFIFO(pipe.lstat().st_mode)
+        assert not list(folder.glob(pipe.name + '.tmp.*'))
+        checks += 1
+
+        original = folder / 'protected-original.save'
+        original.write_bytes(b'unchanged')
+        link = folder / 'existing-save-link'
+        link.symlink_to(original)
+        stdout, stderr = run(['--puzzle', near_win],
+                             f'save {link}\nquit\n')
+        assert 'Error: file operation failed' in stdout and not stderr
+        assert link.is_symlink() and original.read_bytes() == b'unchanged'
+        assert not list(folder.glob(link.name + '.tmp.*'))
+        checks += 1
+
+        dangling = folder / 'dangling-save-link'
+        dangling.symlink_to(folder / 'missing-original.save')
+        stdout, stderr = run(['--puzzle', near_win],
+                             f'save {dangling}\nquit\n')
+        assert 'Error: file operation failed' in stdout and not stderr
+        assert dangling.is_symlink() and not (folder / 'missing-original.save').exists()
+        checks += 1
+
     # A failed attempted save cannot overwrite the existing game.
     stdout, stderr = run(['--puzzle', near_win], f'save {folder}\nquit\n')
     assert 'file operation failed' in stdout and not stderr

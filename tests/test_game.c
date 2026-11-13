@@ -794,6 +794,35 @@ static int check_game(void){
     CHECK(game->state.board.cells[2]==0);
     CHECK(sudoku_game_note(game,1,3,7)==SUDOKU_GAME_OK);
     CHECK(sudoku_game_save(game,"game-unit.save")==SUDOKU_GAME_OK);
+#if !defined(_WIN32)
+    /* An existing symlink, FIFO or directory is not a save file. Atomic
+     * replacement must not remove it; regular saves remain replaceable. */
+    {
+        struct stat before, after;
+        (void)remove("game-unit-special.fifo");
+        (void)remove("game-unit-special.link");
+        (void)remove("game-unit-special.dangling");
+        CHECK(stat("game-unit.save",&before)==0);
+        CHECK(mkfifo("game-unit-special.fifo",0600)==0);
+        CHECK(sudoku_game_save(game,"game-unit-special.fifo")==SUDOKU_GAME_IO);
+        CHECK(lstat("game-unit-special.fifo",&after)==0 &&
+              S_ISFIFO(after.st_mode));
+        CHECK(remove("game-unit-special.fifo")==0);
+        CHECK(symlink("game-unit.save","game-unit-special.link")==0);
+        CHECK(sudoku_game_save(game,"game-unit-special.link")==SUDOKU_GAME_IO);
+        CHECK(lstat("game-unit-special.link",&after)==0 &&
+              S_ISLNK(after.st_mode));
+        CHECK(remove("game-unit-special.link")==0);
+        CHECK(symlink("game-unit-not-present","game-unit-special.dangling")==0);
+        CHECK(sudoku_game_save(game,"game-unit-special.dangling")==SUDOKU_GAME_IO);
+        CHECK(lstat("game-unit-special.dangling",&after)==0 &&
+              S_ISLNK(after.st_mode));
+        CHECK(remove("game-unit-special.dangling")==0);
+        CHECK(sudoku_game_save(game,".")==SUDOKU_GAME_IO);
+        CHECK(stat("game-unit.save",&after)==0);
+        CHECK(before.st_dev==after.st_dev && before.st_ino==after.st_ino);
+    }
+#endif
     /* Public C structs may be modified without going through the safe
      * mutators. Never replace a valid save with a checksummed record
      * that the loader must reject. */

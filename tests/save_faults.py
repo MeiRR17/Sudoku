@@ -33,6 +33,8 @@ def play(target, commands, fault=None, library=None):
         env['SUDOKU_TEST_FAULT'] = fault
         if fault == 'parent-directory-after-fsync':
             env['SUDOKU_TEST_PARENT'] = str(Path(target).parent)
+        if fault == 'target-fifo-after-file-sync':
+            env['SUDOKU_TEST_TARGET'] = str(target)
     else:
         env.pop('SUDOKU_TEST_FAULT', None)
     result = subprocess.run([str(EXE), 'play', '--puzzle', PUZZLE, '--save', str(target)],
@@ -61,6 +63,18 @@ with tempfile.TemporaryDirectory(prefix='sudoku-fault-') as directory:
         assert save.read_bytes() == before, 'previous valid game was modified on pre-rename failure'
         assert not list(root.glob(save.name + '.tmp.*')), 'temporary file leaked'
         checks += 1
+
+    # A destination FIFO may appear while the staged file is being synced.
+    # Publication must fail and clean the temporary file, not replace it.
+    during_sync = root / 'fifo-installed-during-save.fifo'
+    output = play(during_sync, 'save\nquit\n',
+                  'target-fifo-after-file-sync', library)
+    assert 'Error: file operation failed' in output
+    assert 'Saved to' not in output and 'Warning: save replaced' not in output
+    assert during_sync.is_fifo()
+    assert not list(root.glob(during_sync.name + '.tmp.*'))
+    during_sync.unlink()
+    checks += 1
 
     # The target is replaced before the parent-directory fsync; if fsync fails,
     # distinguish this from a failed rename rather than promising old data.

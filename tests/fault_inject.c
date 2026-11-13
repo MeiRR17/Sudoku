@@ -34,6 +34,17 @@ int fsync(int fd) {
         return -1;
     }
     result = (int)syscall(SYS_fsync, fd);
+    /* Inject a FIFO destination after the regular staged file is synced;
+     * the second lstat guard must refuse to replace this new pipe. */
+    if (result == 0 && fault != NULL &&
+        strcmp(fault, "target-fifo-after-file-sync") == 0 &&
+        fstat(fd, &st) == 0 && S_ISREG(st.st_mode)) {
+        const char *target = getenv("SUDOKU_TEST_TARGET");
+        if (!target || mkfifo(target, 0600) != 0) {
+            errno = EIO;
+            return -1;
+        }
+    }
     /* A separate race is possible after a successful directory fsync but
      * before the public save operation returns. Swap the pathname only at
      * that precise point so the final identity check can be tested. */

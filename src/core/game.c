@@ -799,6 +799,17 @@ static int parse_save(SudokuGame *out, const char *data, size_t size) {
     return 1;
 }
 #if !defined(_WIN32)
+/* Never overwrite a nonregular directory entry with an atomic game save.
+ * lstat deliberately does not follow symlinks (even those to regular files),
+ * because rename would replace the link itself, not its target. The check is
+ * repeated just before rename to narrow accidental path-replacement races;
+ * it is not an atomic security guarantee against hostile concurrent writers. */
+static int save_target_is_regular_or_absent(const char *path) {
+    struct stat metadata;
+    if (lstat(path, &metadata) == 0)
+        return S_ISREG(metadata.st_mode);
+    return errno == ENOENT;
+}
 /* Hold an identity for the parent directory *before* the file rename. An
  * independent reopen after rename must refer to the same directory inode,
  * not merely another directory occupying the same pathname. */
@@ -882,6 +893,10 @@ SudokuGameStatus sudoku_game_save(const SudokuGame *game, const char *path) {
     if(!render_save(game,bytes,&n))return SUDOKU_GAME_INVALID;
     len=strlen(path);
     if(len>4096u)return SUDOKU_GAME_IO;
+#if !defined(_WIN32)
+    /* Do not stage a save destined to replace a special filesystem entry. */
+    if(!save_target_is_regular_or_absent(path))return SUDOKU_GAME_IO;
+#endif
     temp=malloc(len+64u);
     if(!temp)return SUDOKU_GAME_IO;
 #if defined(_WIN32)
@@ -934,6 +949,9 @@ SudokuGameStatus sudoku_game_save(const SudokuGame *game, const char *path) {
         parent_fd=open_parent_directory(path);
         if(parent_fd<0)ok=0;
     }
+    /* Catch special files installed while the staged save was being synced.
+     * This narrows, but cannot eliminate, concurrent pathname races. */
+    if(ok&&!save_target_is_regular_or_absent(path))ok=0;
 #endif
     if(ok){
 #if defined(_WIN32)
