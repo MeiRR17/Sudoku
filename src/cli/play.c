@@ -368,6 +368,7 @@ static void commands(void){
     puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
     puts("          notes batch r1c3=19,r1c4=- (atomic pencil edits),");
     puts("          notes batch add|remove|toggle r1c3=12,r1c4=9,");
+    puts("          notes batch preview [add|remove|toggle] r1c3=12,r1c4=9,");
     puts("          notes audit [N] | notes audit row|column|box N,");
     puts("          notes clear ROW COL, notes fill|prune ROW COL,");
     puts("          notes fill|prune row|column|box N (unit 1..9),");
@@ -398,6 +399,8 @@ static void commands(void){
     puts("A rejected or unchanged notes batch preserves Redo.");
     puts("'notes batch add|remove|toggle' keeps unmentioned pencil marks.");
     puts("Toggle flips each specified mark, also in one Undo step.");
+    puts("'notes batch preview' reports exact mask changes without editing.");
+    puts("Previews validate the entire list and preserve Undo/Redo.");
     puts("Adding existing or removing absent marks leaves history unchanged.");
     puts("'notes audit [N]' lists stale and unmarked legal digits (default 10).");
     puts("'notes audit row|column|box N' limits the report to one unit.");
@@ -850,6 +853,20 @@ static int parse_notes_batch(const char *spec,
     *count=n;
     return n!=0u;
 }
+/* Dispatch a parsed handwritten-note list through the same atomic engine
+ * for both an actual edit and its read-only preview. */
+static SudokuGameStatus apply_notes_batch(SudokuGame *game,
+                                           const SudokuGameNoteEdit *edits,
+                                           unsigned count,const char *mode,
+                                           unsigned *changed){
+    if(strcmp(mode,"add")==0)
+        return sudoku_game_add_notes_many(game,edits,count,changed);
+    if(strcmp(mode,"remove")==0)
+        return sudoku_game_remove_notes_many(game,edits,count,changed);
+    if(strcmp(mode,"toggle")==0)
+        return sudoku_game_toggle_notes_many(game,edits,count,changed);
+    return sudoku_game_set_notes_many(game,edits,count,changed);
+}
 static void print_notes(const SudokuGame *game,unsigned r,unsigned c){
     unsigned i=(r-1u)*9u+c-1u,d;
     printf("Notes for row %u col %u:",r,c);
@@ -899,6 +916,36 @@ static void audit_mask_digits(uint16_t mask){
         if(mask&(uint16_t)(1u<<digit))
             printf("%s%u",shown++?",":"",digit);
     if(!shown)putchar('-');
+}
+/* Preview the exact same validated transaction on a private game clone.
+ * No state, history, timer or save destination belonging to the caller is
+ * changed, even if an invalid target is detected late in the list. */
+static void preview_notes_batch(const SudokuGame *game,
+                                const SudokuGameNoteEdit *edits,
+                                unsigned count,const char *mode){
+    SudokuGame *trial=malloc(sizeof *trial);
+    unsigned changed=0u,i;
+    SudokuGameStatus status;
+    if(!trial){puts("Error: out of memory");return;}
+    *trial=*game;
+    status=apply_notes_batch(trial,edits,count,mode,&changed);
+    if(status!=SUDOKU_GAME_OK){
+        printf("Error: %s\n",sudoku_game_status_text(status));
+        free(trial);
+        return;
+    }
+    printf("Notes batch preview (%s): %u selected, %u changed; no edits applied.\n",
+           mode,count,changed);
+    for(i=0u;i<count;++i){
+        unsigned index=(edits[i].row-1u)*9u+edits[i].col-1u;
+        if(game->state.notes[index]==trial->state.notes[index])continue;
+        printf("  r%uc%u: ",edits[i].row,edits[i].col);
+        audit_mask_digits(game->state.notes[index]);
+        fputs(" -> ",stdout);
+        audit_mask_digits(trial->state.notes[index]);
+        putchar('\n');
+    }
+    free(trial);
 }
 static void audit_notes(const SudokuGame *game,unsigned limit,
                         unsigned scope,unsigned number){
@@ -3211,6 +3258,21 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
             continue;
         }
         else if(strcmp(command,"notes")==0&&a&&
+                strcmp(a,"batch")==0&&b&&strcmp(b,"preview")==0&&c&&
+                (!extra||strcmp(c,"add")==0||strcmp(c,"remove")==0||
+                 strcmp(c,"toggle")==0)){
+            SudokuGameNoteEdit edits[SUDOKU_CELL_COUNT];
+            unsigned count=0u;
+            const char *spec=extra?extra:c;
+            const char *mode=extra?c:"set";
+            if(!parse_notes_batch(spec,edits,&count)){
+                puts("Error: malformed notes batch. Use notes batch preview r1c3=19,r1c4=-.");
+                continue;
+            }
+            preview_notes_batch(game,edits,count,mode);
+            continue;
+        }
+        else if(strcmp(command,"notes")==0&&a&&
                 strcmp(a,"batch")==0&&b&&!extra&&
                 ((!c)||(c&&(strcmp(b,"add")==0||strcmp(b,"remove")==0||
                             strcmp(b,"toggle")==0)))){
@@ -3222,14 +3284,7 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                 puts("Error: malformed notes batch. Use notes batch r1c3=19,r1c4=-.");
                 continue;
             }
-            if(strcmp(mode,"add")==0)
-                status=sudoku_game_add_notes_many(game,edits,count,&changed);
-            else if(strcmp(mode,"remove")==0)
-                status=sudoku_game_remove_notes_many(game,edits,count,&changed);
-            else if(strcmp(mode,"toggle")==0)
-                status=sudoku_game_toggle_notes_many(game,edits,count,&changed);
-            else
-                status=sudoku_game_set_notes_many(game,edits,count,&changed);
+            status=apply_notes_batch(game,edits,count,mode,&changed);
             if(status==SUDOKU_GAME_OK){
                 if(changed)
                     printf("Batch %s notes in %u cell%s in one undoable edit.\n",

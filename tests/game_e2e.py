@@ -2000,6 +2000,72 @@ with tempfile.TemporaryDirectory() as directory:
     assert not stderr
     checks += 1
 
+    # Preview uses an isolated clone: the reported note transition is
+    # exact but the original board and history are unchanged.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes batch preview r1c3=19,r1c4=2\n'
+                         'notes 1 3\nnotes 1 4\nstatus\n'
+                         'notes batch r1c3=19,r1c4=2\n'
+                         'notes 1 3\nstatus\nquit\n')
+    assert 'Notes batch preview (set): 2 selected, 2 changed; no edits applied.' in stdout
+    assert '  r1c3: - -> 1,9\n' in stdout
+    assert '  r1c4: - -> 2\n' in stdout
+    assert 'Notes for row 1 col 3:\n' in stdout
+    assert 'Notes for row 1 col 4:\n' in stdout
+    assert 'Batch updated notes in 2 cells in one undoable edit.' in stdout
+    assert 'Notes for row 1 col 3: 1 9\n' in stdout
+    assert 'undo 0, redo 0' in stdout and 'undo 1, redo 0' in stdout
+    assert not stderr
+    checks += 1
+
+    # All edit modes use the same engine on a clone; previewing several
+    # operations cannot create extra history or corrupt handwritten masks.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes batch r1c3=19,r1c4=2\n'
+                         'notes batch preview add r1c3=2,r1c4=4\n'
+                         'notes batch preview remove r1c3=1,r1c4=2\n'
+                         'notes batch preview toggle r1c3=12,r1c4=24\n'
+                         'notes 1 3\nnotes 1 4\nstatus\nquit\n')
+    assert 'Notes batch preview (add): 2 selected, 2 changed; no edits applied.' in stdout
+    assert 'Notes batch preview (remove): 2 selected, 2 changed; no edits applied.' in stdout
+    assert 'Notes batch preview (toggle): 2 selected, 2 changed; no edits applied.' in stdout
+    assert '  r1c3: 1,9 -> 1,2,9\n' in stdout
+    assert '  r1c3: 1,9 -> 9\n' in stdout
+    assert '  r1c3: 1,9 -> 2,9\n' in stdout
+    assert 'Notes for row 1 col 3: 1 9\n' in stdout
+    assert 'Notes for row 1 col 4: 2\n' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A zero-change preview after Undo leaves the redoable move intact.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes batch r1c3=19\nundo\n'
+                         'notes batch preview r1c3=-,r1c4=-\n'
+                         'notes batch preview add r1c3=-\n'
+                         'status\nredo\nnotes 1 3\nstatus\nquit\n')
+    assert 'Notes batch preview (set): 2 selected, 0 changed; no edits applied.' in stdout
+    assert 'Notes batch preview (add): 1 selected, 0 changed; no edits applied.' in stdout
+    assert 'undo 0, redo 1' in stdout and 'undo 1, redo 0' in stdout
+    assert 'Notes for row 1 col 3: 1 9\n' in stdout and not stderr
+    checks += 1
+
+    # A preview rejected by atomic validation must neither mutate the
+    # board nor eat Redo; malformed mode syntax is rejected before parsing.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes batch r1c3=19\nundo\n'
+                         'notes batch preview r1c3=19,r1c3=2\n'
+                         'notes batch preview toggle r1c3=1,r1c1=2\n'
+                         'notes batch preview remove r1c3=1,invalid\n'
+                         'notes batch preview erase r1c3=1\n'
+                         'notes batch preview toggle r1c3=1 extra\n'
+                         'status\nredo\nstatus\nquit\n')
+    assert 'Error: invalid puzzle or game' in stdout
+    assert 'Error: cannot modify an original clue' in stdout
+    assert stdout.count('Error: ') == 5
+    assert 'undo 0, redo 1' in stdout and 'undo 1, redo 0' in stdout
+    assert not stderr
+    checks += 1
+
     # Toggle multiple handwritten masks with one Undo step. Existing
     # unmentioned pencil digits remain intact; Undo restores both cells.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],
