@@ -152,6 +152,40 @@ SudokuGameStatus sudoku_game_erase(SudokuGame *game, unsigned row, unsigned col)
     remember(game);
     return SUDOKU_GAME_OK;
 }
+/* Erase a validated list as one transaction, including handwritten notes on
+ * blank cells. The state is replaced only after every target has passed;
+ * a wholly unchanged batch preserves even an existing Redo branch. */
+SudokuGameStatus sudoku_game_erase_many(SudokuGame *game,
+                                         const SudokuGameCell *cells,
+                                         unsigned count, unsigned *cleared) {
+    SudokuGameSnapshot proposed;
+    unsigned char seen[SUDOKU_CELL_COUNT] = {0};
+    unsigned i, changed = 0u;
+    if (cleared) *cleared = 0u;
+    if (!valid_game(game) || count > SUDOKU_CELL_COUNT ||
+        (count != 0u && cells == NULL))
+        return SUDOKU_GAME_INVALID;
+    if (!valid_live_state(game)) return SUDOKU_GAME_INVALID;
+    if (count == 0u) return SUDOKU_GAME_OK;
+    proposed = game->state;
+    for (i = 0u; i < count; ++i) {
+        int index = cell_index(cells[i].row, cells[i].col);
+        if (index < 0) return SUDOKU_GAME_RANGE;
+        if (seen[index]) return SUDOKU_GAME_INVALID;
+        seen[index] = 1u;
+        if (game->givens.cells[index]) return SUDOKU_GAME_GIVEN;
+        if (proposed.board.cells[index] || proposed.notes[index]) {
+            proposed.board.cells[index] = 0u;
+            proposed.notes[index] = 0u;
+            ++changed;
+        }
+    }
+    if (changed == 0u) return SUDOKU_GAME_OK;
+    game->state = proposed;
+    remember(game);
+    if (cleared) *cleared = changed;
+    return SUDOKU_GAME_OK;
+}
 /* Current-board row/column/box candidates. Never consult game->solution.
  * Returns 0 for a filled cell, invalid coordinates or an invalid game. */
 /* Requires a previously validated SudokuBoard, with row and column in 1..9.

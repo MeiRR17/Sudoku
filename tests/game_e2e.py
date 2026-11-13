@@ -2352,6 +2352,63 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 0, redo 0') == 2 and not stderr
     checks += 1
 
+    # Batch erase clears both placed digits and pencil marks as one Undo
+    # operation, restoring both atomically on Undo/Redo.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nnotes set 1 4 19\n'
+                         'erase batch r1c3,r1c4\nstatus\n'
+                         'undo\nnotes 1 4\nstatus\nredo\nnotes 1 4\nstatus\nquit\n')
+    assert 'Batch erased 2 cells in one undoable edit.' in stdout
+    assert stdout.count('Progress: 30/81 filled') == 2
+    assert 'Progress: 31/81 filled' in stdout
+    assert 'Notes for row 1 col 4: 1 9\n' in stdout
+    assert 'Notes for row 1 col 4:\n' in stdout
+    assert 'undo 3, redo 0' in stdout and 'undo 2, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # Deleting already-empty, note-free cells does not create an Undo
+    # snapshot; a duplicate/given target rejects the entire batch.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'erase batch r1c3,r1c4\n'
+                         'set 1 3 4\nundo\n'
+                         'erase batch r1c3,r1c3\n'
+                         'erase batch r1c3,r1c1\n'
+                         'status\nredo\nstatus\nquit\n')
+    assert 'No cells to erase; history unchanged.' in stdout
+    assert 'Error: invalid game state' in stdout
+    assert 'Error: original clue cannot be changed' in stdout
+    assert 'undo 0, redo 1' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # A single-cell batch can erase the last player move and undo restores
+    # completion, with no automatic save.
+    stdout, stderr = run(['--puzzle', near_win],
+                         'set 1 1 5\nerase batch r1c1\n'
+                         'status\nundo\nstatus\nquit\n')
+    assert 'Batch erased 1 cell in one undoable edit.' in stdout
+    assert 'Progress: 80/81 filled' in stdout
+    assert 'SOLVED!' in stdout and 'undo 1, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    bad_erase_batches = [
+        'erase batch', 'erase batch r1c3,', 'erase batch ,r1c3',
+        'erase batch r1c3,,r1c4', 'erase batch r0c3',
+        'erase batch r1c0', 'erase batch R1C3',
+        'erase batch r10c3', 'erase batch r1c3=4',
+        'erase batch r1c3 r1c4', 'erase batch r1c3, r1c4',
+        'erase batch r1c3extra', 'erase batch r1c3 extra',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n'+'\n'.join(bad_erase_batches)+
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: ') == len(bad_erase_batches)
+    assert 'Batch erased' not in stdout
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
     # Read-only check of a complete batch: no board, notes, or Undo/Redo
     # changes; safe application then commits the same batch in one action.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],

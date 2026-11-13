@@ -362,7 +362,7 @@ static void commands(void){
     puts("          set ROW COL DIGIT | set safe|proven ROW COL DIGIT,");
     puts("          set batch r1c3=4,r1c4=6 (comma-separated, atomic),");
     puts("          set batch check|safe r1c3=4,r1c4=6,");
-    puts("          erase ROW COL,");
+    puts("          erase ROW COL | erase batch r1c3,r1c4,");
     puts("          note ROW COL DIGIT,");
     puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
     puts("          notes audit [N] | notes audit row|column|box N,");
@@ -400,6 +400,8 @@ static void commands(void){
     puts("'notes fill row 1' updates all blank cells in that row in one undo.");
     puts("Use 'column' or 'box' instead of 'row', and 'prune' to remove only.");
     puts("Invalid/duplicate digits are rejected; one replacement = one Undo.");
+    puts("'erase batch' clears multiple editable cells and notes in one Undo.");
+    puts("Any given/duplicate target rejects the entire erase batch.");
     puts("'candidates' lists legal digits without guessing.");
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
     puts("'set batch r1c3=4,r1c4=6' places all digits in a single Undo step.");
@@ -730,6 +732,34 @@ static int parse_batch_moves(const char *spec,
         if(spec[i]!=',')return 0;
         ++i;
         if(i==len)return 0;
+    }
+    *count=n;
+    return n!=0u;
+}
+/* A strict comma-separated list of 1..81 rNcM coordinates.
+ * No whitespace, optional digits, partial tokens or trailing comma accepted.
+ * Duplicate coordinates reach the transactional engine's duplicate guard. */
+static int parse_erase_batch(const char *spec,
+                             SudokuGameCell cells[SUDOKU_CELL_COUNT],
+                             unsigned *count) {
+    size_t len,i=0u;
+    unsigned n=0u;
+    if (!spec || !cells || !count) return 0;
+    len=strlen(spec);
+    if (len<4u || len>(size_t)SUDOKU_CELL_COUNT*5u-1u) return 0;
+    while (i<len) {
+        if (n==SUDOKU_CELL_COUNT || len-i<4u) return 0;
+        if (spec[i]!='r' || spec[i+1u]<'1' || spec[i+1u]>'9' ||
+            spec[i+2u]!='c' || spec[i+3u]<'1' || spec[i+3u]>'9')
+            return 0;
+        cells[n].row=(unsigned)(spec[i+1u]-'0');
+        cells[n].col=(unsigned)(spec[i+3u]-'0');
+        ++n;
+        i+=4u;
+        if (i==len) break;
+        if (spec[i]!=',') return 0;
+        ++i;
+        if (i==len) return 0;
     }
     *count=n;
     return n!=0u;
@@ -3199,6 +3229,23 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         else if(strcmp(command,"set")==0&&position(a,b,&r,&d)&&c&&!extra&&
                 decimal(c,9u,&digit)&&digit>=1u)
             status=sudoku_game_set(game,r,d,(unsigned)digit);
+        else if(strcmp(command,"erase")==0&&a&&
+                strcmp(a,"batch")==0&&b&&!c&&!extra){
+            SudokuGameCell cells[SUDOKU_CELL_COUNT];
+            unsigned count=0u,cleared=0u;
+            if(!parse_erase_batch(b,cells,&count)){
+                puts("Error: malformed erase batch. Use erase batch r1c3,r1c4.");
+                continue;
+            }
+            status=sudoku_game_erase_many(game,cells,count,&cleared);
+            if(status==SUDOKU_GAME_OK){
+                if(cleared)
+                    printf("Batch erased %u cell%s in one undoable edit.\n",
+                           cleared,cleared==1u?"":"s");
+                else
+                    puts("No cells to erase; history unchanged.");
+            }
+        }
         else if(strcmp(command,"erase")==0&&position(a,b,&r,&d)&&!c)
             status=sudoku_game_erase(game,r,d);
         else if(strcmp(command,"note")==0&&position(a,b,&r,&d)&&c&&!extra&&decimal(c,9,&digit)&&digit>=1u)

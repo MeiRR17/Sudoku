@@ -38,6 +38,7 @@ sequences.
 | `export both` | Print the original clues and current board on two separate lines without touching saves or history. |
 | `set ROW COL DIGIT` | Fill an editable cell, coordinates and digit 1–9. Sudoku rule conflicts are rejected. |
 | `erase ROW COL` | Clear the placed digit **and all pencil notes** from an editable cell. Erasing a blank cell with notes is undoable; repeating erase on a blank note-free cell is a no-op. |
+| `erase batch r1c3,r1c4` | Clear a comma-separated list of 1–81 distinct editable cells, **including digit and notes**, as one Undo action. Strict lowercase `rNcM` coordinates, no spaces within the list. All targets are validated before commit: a clue, duplicate, invalid coordinate or corrupted live state rejects the whole batch without changing any cell or Redo. A batch whose cells were already blank and note-free is a no-op and preserves Redo. No solution lookup or implicit save. |
 | `note ROW COL DIGIT` | Toggle a pencil note 1–9 on an empty editable cell. |
 | `notes ROW COL` | List the pencil notes for one cell. |
 | `candidates ROW COL` | Show digits currently legal under Sudoku row/column/box rules in an **empty** cell, without consulting the hidden solution or changing notes/history. A filled cell reports its current digit. |

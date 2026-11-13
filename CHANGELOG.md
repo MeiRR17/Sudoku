@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-13 atomic multi-cell erase:** Added public C11 `sudoku_game_erase_many` and terminal `erase batch r1c3,r1c4`. Clear both digits and pencil marks in all selected editable cells as one Undo action. Strict list parser, duplicate/given/range and corrupt-state rejection before mutation; no-op batches preserve Redo. Added core C and scripted end-to-end regressions, updated command help/gameplay documentation. Full native CMake/CTest and Windows/macOS release acceptance remain HOLD.
+
 - **2026-11-12 history edit heatmap:** Added read-only `history heatmap [all|done|redo]` showing 9x9 per-cell edit frequencies, separate applied/redoable views and totals. A single action changing both number and notes counts once. Four CLI E2E cases added; exact-function isolated GCC/Clang C11 UBSan harness passed 8 focused assertions. Full CMake/CTest, native Windows/macOS and license/package gates remain HOLD.
 
 - **2026-11-12 retained-history hotspots:** Add `history hotspots [N]` (default 10, N=1..81) to rank the most frequently edited cells with deterministic tie-breaking. Show distinct applied versus redoable edit counts and separate board/note transitions; explicitly exclude evicted history. Four end-to-end gameplay regression scenarios are committed for pristine and edited games, single and atomic multi-cell actions, redo, note clearing and malformed commands. An isolated C11 GCC/Clang UBSan harness passed; full native CTest, OS packaging, release and license approvals remain HOLD.

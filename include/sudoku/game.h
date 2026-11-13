@@ -52,6 +52,16 @@ SudokuGameStatus sudoku_game_set_many(SudokuGame *game,
                                       const SudokuGameMove *moves,
                                       unsigned count, unsigned *applied);
 SudokuGameStatus sudoku_game_erase(SudokuGame *game, unsigned row, unsigned col);
+/* Atomically erase 0..81 unique editable cells in one Undo step.
+ * Clear both digits and notes. Invalid/duplicate/given targets fail without
+ * changing any cell or dropping Redo. A wholly empty batch is history-neutral.
+ * When supplied, cleared is the number of cells actually changed. */
+typedef struct SudokuGameCell {
+    unsigned row, col;
+} SudokuGameCell;
+SudokuGameStatus sudoku_game_erase_many(SudokuGame *game,
+                                         const SudokuGameCell *cells,
+                                         unsigned count, unsigned *cleared);
 SudokuGameStatus sudoku_game_note(SudokuGame *game, unsigned row, unsigned col, unsigned digit);
 /* Atomically replace the pencil-note bitmask (bits 1..9, or 0 to clear) in
  * one editable empty cell. Reject invalid game/board/mask/coordinates and

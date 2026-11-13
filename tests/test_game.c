@@ -44,6 +44,63 @@ static int check_game(void){
     CHECK(game->history_len==1u && game->history_cursor==0u);
     CHECK(sudoku_game_reset(game)==SUDOKU_GAME_OK);
     CHECK(game->history_len==1u && game->history_cursor==0u);
+    /* Transactional erase batch: all targets are checked before any write.
+     * A blank cell with notes is cleared, an occupied cell loses its digit,
+     * and either invalid target preserves all state and Redo. */
+    {
+        SudokuGame *probe=malloc(sizeof *probe);
+        SudokuGameCell pair[]={{1u,3u},{1u,4u}};
+        SudokuGameCell repeated[]={{1u,3u},{1u,3u}};
+        SudokuGameCell given[]={{1u,3u},{1u,1u}};
+        SudokuGameCell out_of_range[]={{1u,3u},{10u,1u}};
+        unsigned changed=77u,cursor,len;
+        SudokuGameSnapshot original;
+        CHECK(probe!=NULL);
+        CHECK(sudoku_game_start(probe,&board)==SUDOKU_GAME_OK);
+        CHECK(sudoku_game_note(probe,1u,3u,1u)==SUDOKU_GAME_OK);
+        CHECK(sudoku_game_set(probe,1u,4u,6u)==SUDOKU_GAME_OK);
+        CHECK(probe->history_cursor==2u);
+        CHECK(sudoku_game_erase_many(probe,pair,2u,&changed)==SUDOKU_GAME_OK);
+        CHECK(changed==2u);
+        CHECK(probe->state.board.cells[3]==0u && probe->state.notes[2]==0u);
+        CHECK(probe->history_cursor==3u);
+        CHECK(sudoku_game_undo(probe)==SUDOKU_GAME_OK);
+        CHECK(probe->state.board.cells[3]==6u && probe->state.notes[2]==(1u<<1));
+        CHECK(sudoku_game_redo(probe)==SUDOKU_GAME_OK);
+        CHECK(probe->state.board.cells[3]==0u && probe->state.notes[2]==0u);
+        CHECK(sudoku_game_undo(probe)==SUDOKU_GAME_OK);
+        cursor=probe->history_cursor;len=probe->history_len;
+        original=probe->state;
+        CHECK(sudoku_game_erase_many(probe,repeated,2u,&changed)==SUDOKU_GAME_INVALID);
+        CHECK(changed==0u);
+        CHECK(sudoku_game_erase_many(probe,given,2u,&changed)==SUDOKU_GAME_GIVEN);
+        CHECK(changed==0u);
+        CHECK(sudoku_game_erase_many(probe,out_of_range,2u,&changed)==SUDOKU_GAME_RANGE);
+        CHECK(changed==0u);
+        CHECK(sudoku_game_erase_many(probe,NULL,2u,&changed)==SUDOKU_GAME_INVALID);
+        CHECK(changed==0u);
+        CHECK(sudoku_game_erase_many(probe,pair,82u,&changed)==SUDOKU_GAME_INVALID);
+        CHECK(changed==0u);
+        CHECK(probe->history_cursor==cursor && probe->history_len==len);
+        CHECK(memcmp(probe->state.board.cells,original.board.cells,
+                     sizeof original.board.cells)==0);
+        CHECK(memcmp(probe->state.notes,original.notes,
+                     sizeof original.notes)==0);
+        CHECK(sudoku_game_erase_many(probe,NULL,0u,&changed)==SUDOKU_GAME_OK);
+        CHECK(changed==0u);
+        CHECK(probe->history_cursor==cursor && probe->history_len==len);
+        CHECK(sudoku_game_redo(probe)==SUDOKU_GAME_OK);
+        CHECK(sudoku_game_erase_many(probe,pair,2u,&changed)==SUDOKU_GAME_OK);
+        CHECK(changed==0u); /* Already blank and note-free. */
+        CHECK(probe->history_cursor==cursor+1u);
+        CHECK(sudoku_game_undo(probe)==SUDOKU_GAME_OK);
+        probe->state.notes[0]=(uint16_t)(1u<<2); /* Tampered given. */
+        CHECK(sudoku_game_erase_many(probe,pair,2u,&changed)==SUDOKU_GAME_INVALID);
+        CHECK(changed==0u);
+        probe->state.notes[0]=0u;
+        free(probe);
+    }
+
     CHECK(sudoku_game_empty(game)>0u);
     CHECK(sudoku_game_set(game,1,1,4)==SUDOKU_GAME_GIVEN);
     CHECK(sudoku_game_erase(game,1,1)==SUDOKU_GAME_GIVEN);
