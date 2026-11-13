@@ -1,3 +1,6 @@
+#if !defined(_WIN32)
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "sudoku/board.h"
 #include "sudoku/solver.h"
 #include "sudoku/generator.h"
@@ -8,6 +11,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#if defined(_WIN32)
+#include <windows.h>
+#include <io.h>
+#else
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#endif
 
 typedef enum Command { CMD_VALIDATE, CMD_SOLVE, CMD_COUNT, CMD_GENERATE } Command;
 typedef enum Format { FMT_TEXT, FMT_COMPACT, FMT_JSON } Format;
@@ -38,7 +50,7 @@ static const char demo[] =
     "030100700000296871600000340190700006";
 
 static void help(FILE *output) {
-    fputs("Sudoku 0.8.3 (experimental): offline exact solver\n"
+    fputs("Sudoku 0.8.4 (experimental): offline exact solver\n"
           "Usage: sudoku {validate|solve|count} (--puzzle DIGITS | --file PATH | --stdin) [OPTIONS]\n"
           "       sudoku generate --seed UINT32 --difficulty easy|medium|hard [OPTIONS]\n"
           "       sudoku play (--puzzle DIGITS | --file PATH | --resume SAVE | --seed UINT32 --difficulty easy|medium|hard) [--save PATH]\n"
@@ -200,8 +212,42 @@ static int read_all(FILE *stream, unsigned char **out, size_t *length) {
 
 /* Keep ownership of a newly opened stream inside a dedicated helper.
  * fclose runs on both successful and failed reads; stdin is not closed. */
+/* POSIX --file is a regular on-disk puzzle, not an interactive pipe.
+ * O_NONBLOCK prevents a writer-less FIFO from trapping the CLI at open;
+ * fstat validates the already-open descriptor rather than a racy pathname.
+ * Keep symlinks to regular files supported. Windows retains fopen. */
+static FILE *open_regular_puzzle(const char *path) {
+#if defined(_WIN32)
+    return fopen(path, "rb");
+#else
+    int fd = open(path, O_RDONLY | O_NONBLOCK);
+    struct stat metadata;
+    FILE *input;
+    int saved_errno;
+    if (fd < 0) return NULL;
+    if (fstat(fd, &metadata) != 0) {
+        saved_errno = errno;
+        (void)close(fd);
+        errno = saved_errno;
+        return NULL;
+    }
+    if (!S_ISREG(metadata.st_mode)) {
+        (void)close(fd);
+        errno = EINVAL;
+        return NULL;
+    }
+    input = fdopen(fd, "rb");
+    if (input == NULL) {
+        saved_errno = errno;
+        (void)close(fd);
+        errno = saved_errno;
+    }
+    return input;
+#endif
+}
+
 static int read_from_path(const char *path, unsigned char **out, size_t *length) {
-    FILE *input = fopen(path, "rb");
+    FILE *input = open_regular_puzzle(path);
     int result, close_result;
     int read_errno;
     if (input == NULL) {
@@ -347,28 +393,193 @@ static void print_result(FILE *stream, const Options *opt, const Result *result)
     }
 }
 
-/* Refuse to overwrite an existing file; only publish results after the command succeeds.
- * C11 'x' mode creates exclusively, including failure for an existing symlink.
- * Delete newly created file if an output write/close fails. */
+/* Stage complete CLI output before an atomic, no-overwrite publication.
+ * POSIX mkstemp creates a mode-0600 sibling; link refuses any existing
+ * destination including symlinks. Windows MoveFileEx without REPLACE_EXISTING
+ * similarly rejects an existing destination. A crash before publication can
+ * leave an orphaned temp file, but never a partial final output. */
+static FILE *open_result_stage(const char *path, char *stage, size_t capacity) {
+#if defined(_WIN32)
+    static unsigned serial = 0;
+    unsigned attempt;
+    for (attempt = 0; attempt < 64u; ++attempt) {
+        FILE *file;
+        (void)snprintf(stage, capacity, "%s.tmp.%08lX.%08X",
+                       path, (unsigned long)time(NULL), ++serial);
+        file = fopen(stage, "wbx");
+        if (file != NULL) return file;
+        if (errno != EEXIST) return NULL;
+    }
+    errno = EEXIST;
+    return NULL;
+#else
+    int fd;
+    FILE *file;
+    (void)snprintf(stage, capacity, "%s.tmp.XXXXXX", path);
+    fd = mkstemp(stage);
+    if (fd < 0) return NULL;
+    file = fdopen(fd, "wb");
+    if (file == NULL) {
+        int reason = errno;
+        (void)close(fd);
+        (void)remove(stage);
+        errno = reason;
+        return NULL;
+    }
+    /* mkstemp creates an owner-only inode; reassert mode 0600 even
+     * if umask removed the owner's access, before writing result bytes. */
+    if (fchmod(fileno(file), S_IRUSR | S_IWUSR) != 0) {
+        int reason = errno;
+        (void)fclose(file);
+        (void)remove(stage);
+        errno = reason;
+        return NULL;
+    }
+    return file;
+#endif
+}
+
+#if !defined(_WIN32)
+/* Pin the destination directory before publishing a new --output file.
+ * Nonblocking directory-only opens avoid trapping the CLI on a FIFO parent. */
+static int open_result_parent(const char *path) {
+    const char *slash = strrchr(path, '/');
+    size_t length = slash == NULL ? 1u :
+                    slash == path ? 1u : (size_t)(slash - path);
+    char parent[4098];
+    struct stat info;
+    int fd, flags = O_RDONLY | O_NONBLOCK;
+    if (length >= sizeof parent) return -1;
+    if (slash == NULL) parent[0] = '.';
+    else if (slash == path) parent[0] = '/';
+    else memcpy(parent, path, length);
+    parent[length] = '\0';
+#ifdef O_DIRECTORY
+    flags |= O_DIRECTORY;
+#endif
+#ifdef O_CLOEXEC
+    flags |= O_CLOEXEC;
+#endif
+    fd = open(parent, flags);
+    if (fd < 0) return -1;
+    if (fstat(fd, &info) != 0 || !S_ISDIR(info.st_mode)) {
+        (void)close(fd);
+        return -1;
+    }
+    return fd;
+}
+/* After link(stage,target) and unlink(stage), confirm that the original
+ * directory, not a concurrently substituted one, was fsynced. This is
+ * best effort: it cannot guarantee durability on all filesystems. */
+static int sync_result_parent(const char *path, int original_fd) {
+    struct stat original, current, final;
+    int first_fd = open_result_parent(path), last_fd = -1;
+    int ok = original_fd >= 0 && first_fd >= 0;
+    if (ok) {
+        ok = fstat(original_fd, &original) == 0 &&
+             fstat(first_fd, &current) == 0 &&
+             original.st_dev == current.st_dev &&
+             original.st_ino == current.st_ino;
+        if (ok) ok = fsync(original_fd) == 0;
+        if (ok) {
+            last_fd = open_result_parent(path);
+            ok = last_fd >= 0 && fstat(last_fd, &final) == 0 &&
+                 original.st_dev == final.st_dev &&
+                 original.st_ino == final.st_ino;
+        }
+    }
+    if (last_fd >= 0 && close(last_fd) != 0) ok = 0;
+    if (first_fd >= 0 && close(first_fd) != 0) ok = 0;
+    if (original_fd >= 0 && close(original_fd) != 0) ok = 0;
+    return ok;
+}
+#endif
+
 static int publish_result(const Options *opt, const Result *result) {
     FILE *output = stdout;
-    int failure;
-    int new_file = 0;
-    if (opt->output_path != NULL && strcmp(opt->output_path, "-") != 0) {
-        output = fopen(opt->output_path, "wbx");
-        if (output == NULL) {
-            fprintf(stderr, "Output create failed (existing files are never overwritten): %s\n", strerror(errno));
+    char *stage = NULL;
+    int failure, publish_failed = 0;
+#if !defined(_WIN32)
+    int parent_fd = -1, post_publish_uncertain = 0;
+#endif
+    int new_file = opt->output_path != NULL && strcmp(opt->output_path, "-") != 0;
+    if (new_file) {
+        size_t length = strlen(opt->output_path);
+        if (length > 4096u) {
+            fputs("Output create failed: path too long\n", stderr);
             return 4;
         }
-        new_file = 1;
+        stage = malloc(length + 64u);
+        if (stage == NULL) {
+            fputs("Output create failed: out of memory\n", stderr);
+            return 4;
+        }
+        output = open_result_stage(opt->output_path, stage, length + 64u);
+        if (output == NULL) {
+            fprintf(stderr, "Output create failed (existing files are never overwritten): %s\n",
+                    strerror(errno));
+            free(stage);
+            return 4;
+        }
     }
     print_result(output, opt, result);
     failure = ferror(output) != 0;
     if (new_file) {
+        if (!failure && fflush(output) != 0) failure = 1;
+#if defined(_WIN32)
+        if (!failure && _commit(_fileno(output)) != 0) failure = 1;
+#else
+        if (!failure && fsync(fileno(output)) != 0) failure = 1;
+#endif
         if (fclose(output) != 0) failure = 1;
-        if (failure) (void)remove(opt->output_path);
-    } else if (fflush(output) != 0) failure = 1;
+#if !defined(_WIN32)
+        /* Pin the original parent before publishing. A directory path may
+         * be replaced while a link and subsequent metadata fsync execute. */
+        if (!failure) {
+            parent_fd = open_result_parent(opt->output_path);
+            if (parent_fd < 0) failure = 1;
+        }
+#endif
+        if (!failure) {
+#if defined(_WIN32)
+            /* No MOVEFILE_REPLACE_EXISTING: never clobber a concurrent writer. */
+            publish_failed = MoveFileExA(stage, opt->output_path,
+                                        MOVEFILE_WRITE_THROUGH) == 0;
+#else
+            /* An atomic link cannot replace a concurrent destination. */
+            publish_failed = link(stage, opt->output_path) != 0;
+#endif
+        }
+#if defined(_WIN32)
+        (void)remove(stage);
+#else
+        /* POSIX link adds the published name and unlink removes the staged
+         * one. Sync BOTH metadata changes before reporting durable success.
+         * Failure after publication must not claim no file was created. */
+        if (remove(stage) != 0 && !failure && !publish_failed)
+            post_publish_uncertain = 1;
+        if (!failure && !publish_failed) {
+            if (!sync_result_parent(opt->output_path, parent_fd))
+                post_publish_uncertain = 1;
+            parent_fd = -1; /* consumed and closed by sync_result_parent */
+        }
+        if (parent_fd >= 0) (void)close(parent_fd);
+#endif
+        free(stage);
+    } else if (fflush(output) != 0) {
+        failure = 1;
+    }
+    if (publish_failed) {
+        fputs("Output create failed (existing files are never overwritten)\n", stderr);
+        return 4;
+    }
     if (failure) { fputs("Output write failed\n", stderr); return 4; }
+#if !defined(_WIN32)
+    if (post_publish_uncertain) {
+        fputs("Output published but directory synchronization or staging cleanup failed; durability uncertain\n", stderr);
+        return 4;
+    }
+#endif
     return 0;
 }
 
@@ -379,7 +590,7 @@ int main(int argc, char **argv) {
     if (argc >= 2 && strcmp(argv[1], "play") == 0) return sudoku_play_main(argc,argv);
     if (argc == 2 && strcmp(argv[1], "--help") == 0) { help(stdout); return 0; }
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-        puts("Sudoku 0.8.3 (experimental)"); return 0;
+        puts("Sudoku 0.8.4 (experimental)"); return 0;
     }
     if (argc == 2 && strcmp(argv[1], "--demo") == 0) {
         SudokuBoard example, solution;

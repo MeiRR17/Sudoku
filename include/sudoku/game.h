@@ -34,11 +34,148 @@ typedef struct SudokuGame {
 
 /* Unique-solution puzzles only; transactional on error. */
 SudokuGameStatus sudoku_game_start(SudokuGame *game, const SudokuBoard *givens);
+/* Ordinary placement, erase, pencil-note and bulk edit operations validate
+ * the live board, immutable clues and canonical note masks before making a
+ * new history snapshot. Rejected edits are atomic. Explicit auto-notes,
+ * prune-notes, clear-notes and reset can repair malformed public notes;
+ * read-only candidate lookup accepts independently valid boards. */
 SudokuGameStatus sudoku_game_set(SudokuGame *game, unsigned row, unsigned col, unsigned digit);
+/* Apply 0..81 distinct placements as one atomic, undoable edit.
+ * Every target must be an empty non-given cell; malformed/duplicate/conflicting
+ * batches fail without changing state or history. A zero count is a no-op.
+ * Does NOT consult the cached solution; callers decide which moves to propose.
+ * When provided, applied is set to the number of committed placements. */
+typedef struct SudokuGameMove {
+    unsigned row, col, digit;
+} SudokuGameMove;
+SudokuGameStatus sudoku_game_set_many(SudokuGame *game,
+                                      const SudokuGameMove *moves,
+                                      unsigned count, unsigned *applied);
 SudokuGameStatus sudoku_game_erase(SudokuGame *game, unsigned row, unsigned col);
+/* Atomically erase 0..81 unique editable cells in one Undo step.
+ * Clear both digits and notes. Invalid/duplicate/given targets fail without
+ * changing any cell or dropping Redo. A wholly empty batch is history-neutral.
+ * When supplied, cleared is the number of cells actually changed. */
+typedef struct SudokuGameCell {
+    unsigned row, col;
+} SudokuGameCell;
+SudokuGameStatus sudoku_game_erase_many(SudokuGame *game,
+                                         const SudokuGameCell *cells,
+                                         unsigned count, unsigned *cleared);
 SudokuGameStatus sudoku_game_note(SudokuGame *game, unsigned row, unsigned col, unsigned digit);
+/* Atomically replace the pencil-note bitmask (bits 1..9, or 0 to clear) in
+ * one editable empty cell. Reject invalid game/board/mask/coordinates and
+ * given or filled cells without mutation; unchanged masks are history-neutral.
+ * Notes are personal marks, not restricted to live legal candidates. */
+SudokuGameStatus sudoku_game_set_notes(SudokuGame *game,
+                                      unsigned row, unsigned col, uint16_t mask);
+/* Atomically replace handwritten note masks in 0..81 distinct empty cells
+ * using one Undo snapshot. A zero mask clears notes. Invalid/duplicate,
+ * given and filled targets all fail before mutation, preserving Redo.
+ * If changed is provided it counts edited cells, or 0 on failure. */
+typedef struct SudokuGameNoteEdit {
+    unsigned row, col;
+    uint16_t mask;
+} SudokuGameNoteEdit;
+SudokuGameStatus sudoku_game_set_notes_many(SudokuGame *game,
+                                           const SudokuGameNoteEdit *edits,
+                                           unsigned count,unsigned *changed);
+/* Add or remove marks across 0..81 distinct empty editable cells.
+ * All edits commit in one Undo action, or none; input masks must use only
+ * digits 1..9, duplicates and occupied/given targets are rejected.
+ * Repeated adds/absent removals are idempotent and preserve pending Redo.
+ * Changed counts affected cells (not individual digit marks), zero on error. */
+SudokuGameStatus sudoku_game_add_notes_many(SudokuGame *game,
+                                           const SudokuGameNoteEdit *edits,
+                                           unsigned count,unsigned *changed);
+SudokuGameStatus sudoku_game_remove_notes_many(SudokuGame *game,
+                                              const SudokuGameNoteEdit *edits,
+                                              unsigned count,unsigned *changed);
+/* Flip selected pencil digits in each distinct editable empty cell, leaving
+ * unspecified marks alone. The entire batch commits as one Undo action;
+ * duplicate/clue/filled targets or illegal masks abort with no mutation.
+ * Zero masks are no-ops and preserve a pending Redo branch. */
+SudokuGameStatus sudoku_game_toggle_notes_many(SudokuGame *game,
+                                              const SudokuGameNoteEdit *edits,
+                                              unsigned count,unsigned *changed);
+/* Add/remove any subset of 1..9 pencil digits in one history snapshot.
+ * Unlike toggle, both are idempotent: a duplicate add or absent removal
+ * preserves the undo/redo cursor. Zero masks are valid no-ops. Both are
+ * atomic on invalid masks, coordinates, clues, filled cells or bad state. */
+SudokuGameStatus sudoku_game_add_notes(SudokuGame *game,
+                                     unsigned row, unsigned col, uint16_t mask);
+SudokuGameStatus sudoku_game_remove_notes(SudokuGame *game,
+                                        unsigned row, unsigned col, uint16_t mask);
+/* Cell-scoped, solution-blind candidate-note updates. Fill replaces only
+ * the selected empty editable cell's marks with all locally legal candidates;
+ * prune keeps only the selected cell's existing legal marks (adds none).
+ * Both reject corrupted public boards or notes and invalid/given/filled
+ * targets before changes. One Undo step on change, no history on no-op.
+ * Use global prune-notes/auto-notes to repair malformed public notes. */
+SudokuGameStatus sudoku_game_fill_cell_notes(SudokuGame *game,
+                                              unsigned row, unsigned col);
+SudokuGameStatus sudoku_game_prune_cell_notes(SudokuGame *game,
+                                               unsigned row, unsigned col);
+/* Atomic row/column/box pencil updates (unit number 1..9).
+ * Fill replaces only the selected unit's empty editable cells with current
+ * legal candidates; prune removes invalid marks only in those cells.
+ * Givens, filled cells and cells outside the unit remain untouched.
+ * No-op preserves Undo/Redo; corrupt public game state is rejected. */
+typedef enum SudokuGameUnit {
+    SUDOKU_GAME_ROW=0,
+    SUDOKU_GAME_COLUMN=1,
+    SUDOKU_GAME_BOX=2
+} SudokuGameUnit;
+SudokuGameStatus sudoku_game_fill_unit_notes(SudokuGame *game,
+                                              SudokuGameUnit unit,unsigned number);
+SudokuGameStatus sudoku_game_prune_unit_notes(SudokuGame *game,
+                                               SudokuGameUnit unit,unsigned number);
+/* 1 << digit bitmask (digits 1..9), based only on the current board.
+ * Returns 0 on invalid arguments or a filled cell. Observational. */
+uint16_t sudoku_game_candidates(const SudokuGame *game, unsigned row, unsigned col);
+/* Fill candidates on empty cells, and clear any notes on filled cells,
+ * in one undoable step. Repairs malformed note masks without altering
+ * digits; repeated unchanged action is a no-op. */
+SudokuGameStatus sudoku_game_auto_notes(SudokuGame *game);
+/* Remove pencil notes that conflict with the current board, but never add
+ * missing marks. One undoable state change, or no history change if unchanged. */
+SudokuGameStatus sudoku_game_prune_notes(SudokuGame *game);
+/* Clear selected existing pencil-mark bits from each of 81 cells, never
+ * placing digits or changing the immutable clues. Validate every requested
+ * mask and target before changing any notes. Count removed pencil digits,
+ * not cells; one history snapshot only if at least one bit was removed.
+ * A no-op leaves both Undo and Redo history intact. The caller must derive
+ * logical eliminations; this API does not consult the solved board. */
+SudokuGameStatus sudoku_game_eliminate_notes(
+    SudokuGame *game, const uint16_t masks[SUDOKU_CELL_COUNT], unsigned *removed);
+/* Clear every pencil note as one undoable edit; empty note sets are a no-op. */
+SudokuGameStatus sudoku_game_clear_notes(SudokuGame *game);
+/* Remove all incorrect entered digits in one undoable move; never insert
+ * solution digits or modify immutable clues. No-op if there are no mistakes.
+ * Returns INVALID without mutation for inconsistent public game structs. */
+SudokuGameStatus sudoku_game_clear_mistakes(SudokuGame *game);
+/* Move 1..127 existing history steps atomically. If fewer steps are
+ * available, return NO_HISTORY without modifying board, notes or cursor.
+ * The target snapshot must preserve givens, obey Sudoku constraints, and
+ * contain only legal pencil notes on empty cells; otherwise return INVALID
+ * without changing the live board or history cursor. Only the target is
+ * checked, permitting Undo to recover a corrupted current board.
+ * No new history entries are created; zero/out-of-range counts are RANGE. */
+SudokuGameStatus sudoku_game_undo_steps(SudokuGame *game, unsigned steps);
+SudokuGameStatus sudoku_game_redo_steps(SudokuGame *game, unsigned steps);
+/* Jump to an existing zero-based snapshot index (0 = initial state,
+ * history_len-1 = newest, at most 127). Validate the destination before
+ * touching the current board or cursor. Missing steps return NO_HISTORY;
+ * indices >= 128 return RANGE. A move to the current snapshot is valid
+ * and does not create a new step. Redo snapshots are preserved.
+ * Like Undo/Redo, this can recover from corrupted current live state
+ * when the destination is intact. Never consult the solved board. */
+SudokuGameStatus sudoku_game_history_goto(SudokuGame *game,unsigned step);
 SudokuGameStatus sudoku_game_undo(SudokuGame *game);
 SudokuGameStatus sudoku_game_redo(SudokuGame *game);
+/* Restore immutable clues and clear editable digits/notes in one Undo step.
+ * No-op when already reset. Reject invalid public givens/current boards or
+ * altered clue cells without mutating state or history. */
 SudokuGameStatus sudoku_game_reset(SudokuGame *game);
 unsigned sudoku_game_empty(const SudokuGame *game);
 unsigned sudoku_game_mistakes(const SudokuGame *game);

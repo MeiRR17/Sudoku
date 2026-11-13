@@ -2,6 +2,13 @@
 
 Never claims other OS support. Requires Python stdlib, CMake and C11 compiler.
 """
+# These executable E2E scripts intentionally use Python 'assert' for
+# required release checks. -O/-OO and PYTHONOPTIMIZE remove all assertions;
+# refusing optimization prevents a silent false-positive acceptance.
+if not __debug__:
+    raise SystemExit('SUDOKU TEST FAIL: Python optimization disables required assertions')
+
+
 import hashlib
 from pathlib import Path
 import platform
@@ -19,6 +26,53 @@ EXPECTED = '53467891267219534819834256785976142342685379171392485696153728428741
 
 def call(*cmd):
     return subprocess.run([str(x) for x in cmd], capture_output=True, text=True, check=True)
+
+
+def verify_packaged_game_save_resume(binary, temp, label):
+    """Test real shipped CLI save and resume, not only the checkout binary.
+
+    Run the binary extracted from a release ZIP (and separately rebuild from
+    the release source ZIP) in an isolated temporary directory. No privileges,
+    network access, production save paths or third-party dependencies.
+    """
+    puzzle = '0' + EXPECTED[1:]
+    save = temp / (label + ' game with spaces.save')
+    damaged = temp / (label + ' corrupted.save')
+    unsaved = temp / (label + ' unsaved.save')
+
+    def play(args, commands=''):
+        return subprocess.run([str(binary), 'play', *map(str, args)],
+                              input=commands, capture_output=True, text=True,
+                              encoding='utf-8', timeout=25)
+
+    initial = play(['--puzzle', puzzle, '--save', save],
+                   'note 1 1 5\nsave\nquit\n')
+    assert initial.returncode == 0, (initial.stdout, initial.stderr)
+    assert 'Saved to ' + str(save) in initial.stdout, initial.stdout
+    assert save.is_file() and save.stat().st_size > 64
+    assert 'Resumed saved game' not in initial.stdout
+
+    restored = play(['--resume', save], 'notes 1 1\nstatus\nquit\n')
+    assert restored.returncode == 0, (restored.stdout, restored.stderr)
+    assert 'Resumed saved game' in restored.stdout
+    assert 'Notes for row 1 col 1: 5' in restored.stdout
+    assert 'undo 0, redo 0' in restored.stdout
+    assert 'Progress: 80/81 filled' in restored.stdout
+
+    # Tamper with the stored state, not its checksum; a real checksum
+    # verifier must refuse the modified bytes before entering gameplay.
+    corrupted = bytearray(save.read_bytes())
+    corrupted[50] = ord('0') if corrupted[50] != ord('0') else ord('1')
+    damaged.write_bytes(corrupted)
+    rejected = play(['--resume', damaged])
+    assert rejected.returncode == 3, (rejected.stdout, rejected.stderr)
+    assert 'corrupted save file' in rejected.stderr and not rejected.stdout
+
+    no_implicit = play(['--puzzle', puzzle, '--save', unsaved], 'quit\n')
+    assert no_implicit.returncode == 0, (no_implicit.stdout, no_implicit.stderr)
+    assert not unsaved.exists(), 'quitting a shipped binary must not autosave'
+
+
 
 
 with tempfile.TemporaryDirectory(prefix='sudoku-package-e2e-') as tmp:
@@ -42,10 +96,11 @@ with tempfile.TemporaryDirectory(prefix='sudoku-package-e2e-') as tmp:
     exe = root / 'bin' / ('sudoku.exe' if platform.system() == 'Windows' else 'sudoku')
     if platform.system() != 'Windows':
         exe.chmod(0o755)  # zip extraction permissions vary by host
-    assert call(exe, '--version').stdout.strip() == 'Sudoku 0.8.3 (experimental)'
+    assert call(exe, '--version').stdout.strip() == 'Sudoku 0.8.4 (experimental)'
     result = call(exe, 'solve', '--file', ROOT / 'tests/fixtures/unique.txt', '--format', 'compact')
     assert result.stdout.strip() == EXPECTED
     assert 'Usage' in call(exe, '--help').stdout
+    verify_packaged_game_save_resume(exe, temp, 'installed')
     with tarfile.open(next(left.glob('*-source.tar.gz')), 'r:gz') as tar:
         names = tar.getnames()
         assert any(x.endswith('/CMakeLists.txt') for x in names)
@@ -67,6 +122,7 @@ with tempfile.TemporaryDirectory(prefix='sudoku-package-e2e-') as tmp:
     assert call(from_source, 'solve', '--puzzle',
                 '530070000600195000098000060800060003400803001700020006060000280000419005000080079',
                 '--format', 'compact').stdout.strip() == EXPECTED
+    verify_packaged_game_save_resume(from_source, temp, 'rebuilt-source')
     # Consume the exported static core as an independently configured CMake project.
     consumer = temp / 'consumer'
     consumer.mkdir()
@@ -92,4 +148,4 @@ int main(void) {
     import shutil
     shutil.rmtree(root)
     assert not root.exists()
-    print('PACKAGE E2E PASS: reproducible ZIP/TGZ, source rebuild, hashes, install, CMake consumer and uninstall')
+    print('PACKAGE E2E PASS: reproducible ZIP/TGZ, source rebuild, exact native play/save/resume/corruption checks, hashes, install, CMake consumer and uninstall')

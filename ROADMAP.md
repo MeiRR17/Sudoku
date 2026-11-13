@@ -1,6 +1,6 @@
 # Sudoku — Production Roadmap (2026-11-09)
 
-**Status (2026-11-09):** v0.1.0 build recovery implemented and smoke-tested locally on GCC/Clang; v0.2.0 safe board model is the next milestone. This does not establish production readiness. Verification: [docs/VERIFICATION_v0.1.0.md](docs/VERIFICATION_v0.1.0.md).  
+**Status (2026-11-10):** v0.1–v0.7 implementation milestones accepted; v0.8.4 development patch improves interactive save-path handling, but the v0.8 packaging acceptance milestone remains **OPEN** because Windows x64/MSVC, macOS arm64, owner-approved licensing and release-grade provenance/rollback are pending. Do not advance to v0.9 RC. See [issue #10](https://github.com/MeiRR17/Sudoku/issues/10) and [CHANGELOG.md](CHANGELOG.md).  
 **Repository:** MeiRR17/Sudoku · **default branch:** master · **baseline inspected:** 2b8f43f80b2a791eeb69e2d9c344ced9d2d59bb7.  
 **Product goal:** a trustworthy, offline-first, cross-platform Sudoku engine and command-line application written in portable C11.  
 **Release target:** v1.0.0 production. **Version system:** SemVer; v0.x milestones are development milestones, not production releases.
@@ -173,6 +173,6 @@ Time may increase for toolchain/OS access, generator rating calibration, or unex
 
 ## 7. Immediate next task
 
-Open the **v0.1.0** implementation issue. Start with reconstructing sudoku.h and a clean CMake build; instrument diagnostics before attempting the solver rewrite. Do not claim v0.1 is complete merely because the source files exist.
+Continue **issue #10 / v0.8.x release hardening** without asserting acceptance: use `scripts/platform_acceptance.py` from clean Git checkouts to obtain exact-SHA per-platform build/package receipts (the script exists, but no native receipts have yet been produced); verify clean Windows x64/MSVC and macOS arm64 installs/game saves; obtain owner license decision and release provenance/rollback evidence. Keep issue #11 (v0.9 RC) blocked until these gates pass.
 
 See **docs/ARCHITECTURE.md** for planned interfaces, and **docs/PRODUCTION_READINESS.md** for mandatory verification/release gates.

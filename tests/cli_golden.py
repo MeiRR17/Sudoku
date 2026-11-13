@@ -3,7 +3,16 @@
 Runs a built binary, normalizes Windows CRLF, and checks byte-accurate JSON,
 exit codes, output file behavior, stdout/stderr separation and input paths.
 """
+# These executable E2E scripts intentionally use Python 'assert' for
+# required release checks. -O/-OO and PYTHONOPTIMIZE remove all assertions;
+# refusing optimization prevents a silent false-positive acceptance.
+if not __debug__:
+    raise SystemExit('SUDOKU TEST FAIL: Python optimization disables required assertions')
+
+
 import json
+import os
+import stat
 import pathlib
 import subprocess
 import sys
@@ -17,9 +26,10 @@ EMPTY = "0" * 81
 checks = 0
 
 
-def run(*args, input_bytes=None, code=0, stdout=None, stderr_contains=None):
+def run(*args, input_bytes=None, code=0, stdout=None, stderr_contains=None, timeout=15):
     global checks
-    p = subprocess.run([str(EXE), *map(str, args)], input=input_bytes, capture_output=True, check=False)
+    p = subprocess.run([str(EXE), *map(str, args)], input=input_bytes,
+                       capture_output=True, check=False, timeout=timeout)
     out = p.stdout.decode("utf-8").replace("\r\n", "\n")
     err = p.stderr.decode("utf-8").replace("\r\n", "\n")
     assert p.returncode == code, (args, p.returncode, code, out, err)
@@ -89,12 +99,27 @@ for invalid in [
     args = invalid[0].split()
     run(*args, code=invalid[1], stdout="", stderr_contains="Usage error")
 run("--help", stderr_contains="" if False else None)
-run("--version", stdout="Sudoku 0.8.3 (experimental)\n")
+run("--version", stdout="Sudoku 0.8.4 (experimental)\n")
 run("solve", "--help")
 run("--demo")
 
 with tempfile.TemporaryDirectory() as tmp:
     temp = pathlib.Path(tmp)
+    # --file must not block forever on a POSIX FIFO with no writer.
+    # Stdin remains the supported streaming input for solve/count/validate.
+    if os.name == "posix" and hasattr(os, "mkfifo"):
+        fifo = temp / "writerless-puzzle.fifo"
+        os.mkfifo(fifo)
+        for command in ("validate", "solve", "count"):
+            run(command, "--file", fifo, code=4, stdout="",
+                stderr_contains="Input open failed:", timeout=3)
+        # Symlinks to ordinary puzzle files retain the previous behavior.
+        regular = temp / "regular-puzzle.txt"
+        regular.write_text(GIVENS + "\n", encoding="ascii")
+        linked = temp / "linked-puzzle.txt"
+        linked.symlink_to(regular)
+        run("validate", "--file", linked, "--format", "compact",
+            stdout=GIVENS + "\n")
     output = temp / "result.json"
     run("solve", "--file", FIX / "unique.txt", "--format", "json", "--output", output,
         stdout="")
@@ -106,11 +131,38 @@ with tempfile.TemporaryDirectory() as tmp:
     run("solve", "--file", FIX / "unique.txt", "--format", "json", "--output", spaced_out, stdout="")
     assert json.loads(spaced_out.read_text()) == solve_json
     checks_add()
+    # New output is complete before atomically publishing its final name.
+    # Successful and refused-overwrite paths must clean staging files.
+    assert not list(temp.glob(output.name + ".tmp.*"))
+    checks_add()
     original = output.read_bytes()
     run("count", "--puzzle", EMPTY, "--format", "compact", "--output", output,
         code=4, stdout="", stderr_contains="never overwritten")
     assert output.read_bytes() == original
+    assert not list(temp.glob(output.name + ".tmp.*"))
     checks_add()
+    # Old orphaned staging files are never promoted into a final result.
+    orphan = temp / "recovery.txt.tmp.INTERRUPTED"
+    orphan.write_bytes(b"truncated, unverified")
+    recovered = temp / "recovery.txt"
+    run("validate", "--puzzle", GIVENS, "--format", "compact", "--output", recovered,
+        stdout="")
+    assert recovered.read_text() == GIVENS + "\n"
+    assert orphan.read_bytes() == b"truncated, unverified"
+    assert list(temp.glob(recovered.name + ".tmp.*")) == [orphan]
+    checks_add()
+    # Parent umask must not make newly published POSIX results world-readable.
+    if os.name == "posix":
+        owner_only = temp / "owner-only.txt"
+        previous_umask = os.umask(0)
+        try:
+            run("validate", "--puzzle", GIVENS, "--format", "compact",
+                "--output", owner_only, stdout="")
+        finally:
+            os.umask(previous_umask)
+        assert stat.S_IMODE(owner_only.stat().st_mode) == 0o600
+        assert not list(temp.glob(owner_only.name + ".tmp.*"))
+        checks_add()
     run("solve", "--file", FIX / "unsolvable.txt", "--output", temp / "not-created.txt",
         code=5, stdout="", stderr_contains="no solution")
     assert not (temp / "not-created.txt").exists()

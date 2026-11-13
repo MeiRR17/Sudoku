@@ -59,8 +59,46 @@ static int test_all(void) {
     unsigned count = 99, i, digit;
     char zeros[82];
     CHECK(check_unique(classic, solution) == 0);
+    /* An output pointer aliasing the original givens must not overwrite the
+     * caller's puzzle, even when a unique solution exists. All overloads
+     * must reject the alias transactionally with zero count/node outputs. */
+    CHECK(sudoku_board_parse(&board, (const unsigned char *)classic, 81, NULL) == SUDOKU_OK);
+    before = board;
+    count = 99;
+    {
+        uint64_t nodes = 99;
+        CHECK(sudoku_analyze_bounded(&board, &board, &count, UINT64_MAX, &nodes)
+              == SUDOKU_SOLVE_INVALID);
+        CHECK(nodes == 0 && count == 0);
+    }
+    CHECK(memcmp(&board, &before, sizeof board) == 0);
+    CHECK(sudoku_solve_first(&board, &board) == SUDOKU_SOLVE_INVALID);
+    CHECK(memcmp(&board, &before, sizeof board) == 0);
+    CHECK(sudoku_analyze(&board, &board, &count) == SUDOKU_SOLVE_INVALID);
+    CHECK(count == 0 && memcmp(&board, &before, sizeof board) == 0);
     CHECK(check_unique(escargot, NULL) == 0);
     CHECK(check_unique(diabolical, NULL) == 0);
+    /* Each empty cell has at least one legal digit here, yet row 8 has
+     * nowhere to place its missing 8. Root-level unit feasibility must
+     * classify this contradiction within a single search node. */
+    {
+        static const char missing_unit_digit[] =
+            "530070040640195000098000060800060003400803001"
+            "700020006060000280020419005000080079";
+        SudokuBoard original, unchanged_output;
+        uint64_t nodes = 99;
+        CHECK(strlen(missing_unit_digit) == 81);
+        CHECK(sudoku_board_parse(&board, (const unsigned char *)missing_unit_digit,
+                                 81, NULL) == SUDOKU_OK);
+        original = board;
+        unchanged_output = output;
+        count = 99;
+        CHECK(sudoku_analyze_bounded(&board, &output, &count, 1u, &nodes)
+              == SUDOKU_SOLVE_UNSOLVABLE);
+        CHECK(nodes == 1 && count == 0);
+        CHECK(memcmp(&board, &original, sizeof board) == 0);
+        CHECK(memcmp(&output, &unchanged_output, sizeof output) == 0);
+    }
     CHECK(sudoku_board_parse(&board, (const unsigned char *)solution, 81, NULL) == SUDOKU_OK);
     CHECK(sudoku_analyze(&board, &solved, &count) == SUDOKU_SOLVE_UNIQUE && count == 1);
     CHECK(memcmp(&board, &solved, sizeof board) == 0);

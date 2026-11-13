@@ -128,6 +128,10 @@ SudokuDifficulty sudoku_rate_difficulty(const SudokuBoard *board,
                     if (count > 1u) break;
                 }
             }
+            /* No candidate for a missing digit in a row, column or box
+             * is a logical contradiction, not a "hard" puzzle. This can
+             * happen even when every existing given passes validation. */
+            if (count == 0u) return SUDOKU_DIFFICULTY_INVALID;
             if (count == 1u) {
                 work.cells[slot] = (uint8_t)d;
                 ++hidden_count;
@@ -149,8 +153,13 @@ static unsigned clue_count(const SudokuBoard *board) {
 }
 static int cpu_budget_exceeded(clock_t start, unsigned max_ms) {
     clock_t now = clock();
-    if (start == (clock_t)-1 || now == (clock_t)-1) return 0;
-    return (double)(now - start) * 1000.0 / CLOCKS_PER_SEC >= max_ms;
+    double elapsed_ms;
+    /* When the CPU clock is unavailable or wraps backwards, do not silently
+     * disable the caller's time budget. Subtract as double: signed clock_t
+     * arithmetic could otherwise overflow before the conversion. */
+    if (start == (clock_t)-1 || now == (clock_t)-1) return 1;
+    elapsed_ms = ((double)now - (double)start) * 1000.0 / CLOCKS_PER_SEC;
+    return elapsed_ms < 0.0 || elapsed_ms >= (double)max_ms;
 }
 
 SudokuGenerateStatus sudoku_generate(const SudokuGenerateOptions *opts,
@@ -200,6 +209,10 @@ SudokuGenerateStatus sudoku_generate(const SudokuGenerateOptions *opts,
                          opts->difficulty == SUDOKU_DIFFICULTY_MEDIUM ? 36u : 32u))
                 continue;
             rated = sudoku_rate_difficulty(&puzzle, &naked, &hidden);
+            /* A bounded solver/rating pass can itself consume the deadline.
+             * Never report success after observing an exhausted CPU budget. */
+            if (cpu_budget_exceeded(start, opts->max_cpu_ms))
+                return SUDOKU_GENERATE_BUDGET;
             if (rated == opts->difficulty) {
                 SudokuGenerateResult result = {0};
                 result.puzzle = puzzle;

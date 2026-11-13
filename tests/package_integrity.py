@@ -3,11 +3,19 @@
 Intentionally rewrites test archives and their SHA256SUMS to verify that the
 format parity/regular-file/path controls cannot be bypassed by a new checksum.
 """
+# These executable E2E scripts intentionally use Python 'assert' for
+# required release checks. -O/-OO and PYTHONOPTIMIZE remove all assertions;
+# refusing optimization prevents a silent false-positive acceptance.
+if not __debug__:
+    raise SystemExit('SUDOKU TEST FAIL: Python optimization disables required assertions')
+
+
 import hashlib
 import importlib.util
 from pathlib import Path
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -66,6 +74,21 @@ with tempfile.TemporaryDirectory(prefix='sudoku-integrity-') as td:
         shutil.copytree(good, dest)
         return dest
 
+    # Fail before decoding a maliciously large checksum file, even though
+    # a valid four-archive distribution exists next to it.
+    oversized_manifest = scenario('oversized-checksum-manifest')
+    (oversized_manifest / 'SHA256SUMS').write_bytes(
+        b'X' * (PACKAGE.MAX_CHECKSUM_MANIFEST_BYTES + 1))
+    tested_fail(oversized_manifest, 'SHA256SUMS exceeds size budget')
+
+    # Fail before computing SHA-256 over an oversized sparse archive, not
+    # only after entering the TAR stream decoder.
+    oversized_tar = scenario('oversized-tar-container')
+    target_tar = next(oversized_tar.glob('*-source.tar.gz'))
+    with target_tar.open('wb') as output:
+        output.truncate(PACKAGE.MAX_TAR_ARCHIVE_BYTES + 1)
+    tested_fail(oversized_tar, 'archive exceeds compressed size budget')
+
     altered = scenario('checksum')
     with (altered / archive_name).open('ab') as file:
         file.write(b'bad')
@@ -76,6 +99,35 @@ with tempfile.TemporaryDirectory(prefix='sudoku-integrity-') as td:
                lambda index, item, data: (item, data + b'altered\n') if index == 0 else (item, data))
     update_checksum(mismatch, archive_name)
     tested_fail(mismatch, 'ZIP and TAR.GZ content disagree')
+
+    # Regression: tamper BOTH source formats, then recompute BOTH checksums.
+    # Zip/TAR parity and SHA256SUMS still pass, but the archived manifest
+    # must detect a missing non-mandatory test file.
+    incomplete = scenario('incomplete-source')
+    source_prefix = archive_name[:-len('.zip')]
+    complete_source = PACKAGE.ensure_safe_archive(good / archive_name, source_prefix)
+    omitted = 'tests/source_membership_unit.py'
+    assert omitted in complete_source
+    source_without_test = [(name, data, 0o644)
+                           for name, data in complete_source.items() if name != omitted]
+    for ext, writer in (('.zip', PACKAGE.create_zip),
+                        ('.tar.gz', PACKAGE.create_tar)):
+        filename = source_prefix + ext
+        writer(incomplete / filename, source_prefix, source_without_test)
+        update_checksum(incomplete, filename)
+    tested_fail(incomplete, 'source archive manifest mismatch')
+
+    # ZIP central-directory counts must be bounded *before* ZipFile
+    # materializes the entry list. Recompute SHA256SUMS so this checks the
+    # structural preflight, rather than just the outer archive checksum.
+    inflated_index = scenario('zip-eocd-count')
+    tampered_zip = inflated_index / archive_name
+    blob = bytearray(tampered_zip.read_bytes())
+    struct.pack_into('<H', blob, len(blob) - 22 + 8, PACKAGE.MAX_ARCHIVE_FILES + 1)
+    struct.pack_into('<H', blob, len(blob) - 22 + 10, PACKAGE.MAX_ARCHIVE_FILES + 1)
+    tampered_zip.write_bytes(blob)
+    update_checksum(inflated_index, archive_name)
+    tested_fail(inflated_index, 'invalid number of ZIP members')
 
     symlink = scenario('symlink')
     def set_symlink(index, item, data):
@@ -111,7 +163,11 @@ with tempfile.TemporaryDirectory(prefix='sudoku-integrity-') as td:
 
     forged_name = scenario('forged-name')
     manifest = forged_name / 'SHA256SUMS'
-    manifest.write_text(manifest.read_text().replace('-source.zip', '-source.exe'))
+    # Preserve canonical filename order: this case must test a forged archive
+    # filename, not fail early on the independent ordering guard.
+    replaced = manifest.read_text().replace('-source.zip', '-source.exe')
+    rows = sorted(replaced.splitlines(), key=lambda row: row.split('  ', 1)[1])
+    manifest.write_text('\n'.join(rows) + '\n')
     tested_fail(forged_name, 'checksum mismatch')
 
 print(f'PACKAGE INTEGRITY PASS: {checks} independent normal/adversarial checks')
