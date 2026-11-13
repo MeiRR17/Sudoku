@@ -221,8 +221,9 @@ def validate_test_manifest(raw, sanitizer=False, coverage=False, system=None,
     missing = sorted(required.difference(names))
     if missing:
         raise ValueError('Required CTest checks missing: ' + ', '.join(missing))
-    # CTest returns success when required tests are DISABLED or skipped.
-    # A listed-but-skipped test must never count as release gate evidence.
+    # CTest also marks some failing executables successful if WILL_FAIL
+    # inverts the exit code or PASS_REGULAR_EXPRESSION matches stdout.
+    # Mandatory release checks must retain their actual failure semantics.
     for test in tests:
         if test['name'] not in required:
             continue
@@ -234,8 +235,9 @@ def validate_test_manifest(raw, sanitizer=False, coverage=False, system=None,
                 raise ValueError('Required CTest properties malformed: ' + test['name'])
             label = prop['name']
             if (label == 'DISABLED' and prop.get('value')) or label in (
-                    'SKIP_RETURN_CODE', 'SKIP_REGULAR_EXPRESSION'):
-                raise ValueError('Required CTest check disabled or skippable: ' + test['name'])
+                    'SKIP_RETURN_CODE', 'SKIP_REGULAR_EXPRESSION',
+                    'WILL_FAIL', 'PASS_REGULAR_EXPRESSION'):
+                raise ValueError('Required CTest check disabled or skippable or outcome-overridden: ' + test['name'])
         validate_ctest_command(test['name'], test.get('command'), build_dir)
     print(f'CTEST INVENTORY PASS: {len(required)} mandatory / {len(names)} listed', flush=True)
     return len(required)

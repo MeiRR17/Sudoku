@@ -137,6 +137,36 @@ class InventoryTests(unittest.TestCase):
                     quality.validate_test_manifest(json.dumps({'tests': tests}),
                                                    sanitizer=True, system='Linux')
 
+    def test_required_outcome_inversion_or_regex_cannot_hide_failure(self):
+        # CTest --show-only=json-v1 emits a boolean WILL_FAIL or a list of
+        # PASS_REGULAR_EXPRESSION patterns. Either may turn a failed process
+        # into a passing mandatory check; even a configured false inversion
+        # is disallowed so acceptance never depends on toggling it later.
+        for label, value in (
+                ('WILL_FAIL', True),
+                ('WILL_FAIL', False),
+                ('PASS_REGULAR_EXPRESSION', ['READY'])):
+            with self.subTest(label=label, value=value):
+                tests = json.loads(inventory(sorted(quality.BASE_TESTS)))['tests']
+                target = next(t for t in tests if t['name'] == 'sudoku_game_unit')
+                target['properties'] = [{'name': label, 'value': value}]
+                with self.assertRaisesRegex(ValueError, 'outcome-overridden'):
+                    quality.validate_test_manifest(json.dumps({'tests': tests}),
+                                                   sanitizer=True, system='Linux')
+
+    def test_safe_ctest_test_properties_do_not_block_required_tests(self):
+        tests = json.loads(inventory(sorted(quality.BASE_TESTS)))['tests']
+        target = next(t for t in tests if t['name'] == 'sudoku_game_unit')
+        # Timeouts and extra failure conditions cannot disguise failures.
+        target['properties'] = [
+            {'name': 'TIMEOUT', 'value': 15.0},
+            {'name': 'FAIL_REGULAR_EXPRESSION', 'value': ['fatal']},
+        ]
+        self.assertEqual(
+            quality.validate_test_manifest(json.dumps({'tests': tests}),
+                                           sanitizer=True, system='Linux'),
+            len(quality.BASE_TESTS))
+
     def test_registered_test_cannot_be_replaced_with_noop(self):
         tests = json.loads(inventory(sorted(quality.BASE_TESTS)))['tests']
         cases = (
