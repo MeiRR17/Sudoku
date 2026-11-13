@@ -80,6 +80,17 @@ typedef struct SudokuGameNoteEdit {
 SudokuGameStatus sudoku_game_set_notes_many(SudokuGame *game,
                                            const SudokuGameNoteEdit *edits,
                                            unsigned count,unsigned *changed);
+/* Add or remove marks across 0..81 distinct empty editable cells.
+ * All edits commit in one Undo action, or none; input masks must use only
+ * digits 1..9, duplicates and occupied/given targets are rejected.
+ * Repeated adds/absent removals are idempotent and preserve pending Redo.
+ * Changed counts affected cells (not individual digit marks), zero on error. */
+SudokuGameStatus sudoku_game_add_notes_many(SudokuGame *game,
+                                           const SudokuGameNoteEdit *edits,
+                                           unsigned count,unsigned *changed);
+SudokuGameStatus sudoku_game_remove_notes_many(SudokuGame *game,
+                                              const SudokuGameNoteEdit *edits,
+                                              unsigned count,unsigned *changed);
 /* Add/remove any subset of 1..9 pencil digits in one history snapshot.
  * Unlike toggle, both are idempotent: a duplicate add or absent removal
  * preserves the undo/redo cursor. Zero masks are valid no-ops. Both are

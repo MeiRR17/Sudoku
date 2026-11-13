@@ -2000,6 +2000,65 @@ with tempfile.TemporaryDirectory() as directory:
     assert not stderr
     checks += 1
 
+    # Add and remove handwritten marks in separate cells without replacing
+    # unrelated pencil digits. Every batch is one Undo snapshot.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes batch r1c3=19,r1c4=26\n'
+                         'notes batch add r1c3=2,r1c4=4\n'
+                         'notes batch remove r1c3=1,r1c4=6\n'
+                         'notes 1 3\nnotes 1 4\n'
+                         'undo\nnotes 1 3\nnotes 1 4\nstatus\nquit\n')
+    assert 'Batch added notes in 2 cells in one undoable edit.' in stdout
+    assert 'Batch removed notes in 2 cells in one undoable edit.' in stdout
+    assert 'Notes for row 1 col 3: 2 9\n' in stdout
+    assert 'Notes for row 1 col 4: 2 4\n' in stdout
+    assert 'Notes for row 1 col 3: 1 2 9\n' in stdout
+    assert 'Notes for row 1 col 4: 2 4 6\n' in stdout
+    assert 'undo 2, redo 1' in stdout and not stderr
+    checks += 1
+
+    # No-op batch add/remove must leave a pending Redo branch intact.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes batch r1c3=19\nundo\n'
+                         'notes batch add r1c3=-\n'
+                         'notes batch remove r1c3=9\n'
+                         'status\nredo\nnotes 1 3\nstatus\nquit\n')
+    assert stdout.count('No note changes; history unchanged.') == 2
+    assert 'undo 0, redo 1' in stdout and 'undo 1, redo 0' in stdout
+    assert 'Notes for row 1 col 3: 1 9\n' in stdout and not stderr
+    checks += 1
+
+    # Invalid list, duplicate target or immutable clue is all-or-nothing.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes batch add r1c3=2,r1c3=9\n'
+                         'notes batch remove r1c3=2,r1c1=9\n'
+                         'notes batch add r1c3=2,r1c4=11\n'
+                         'notes 1 3\nnotes 1 4\nstatus\nquit\n')
+    assert 'Error: invalid puzzle or game' in stdout
+    assert 'Error: cannot modify an original clue' in stdout
+    assert 'Error: malformed notes batch' in stdout
+    assert 'Notes for row 1 col 3:\n' in stdout
+    assert 'Notes for row 1 col 4:\n' in stdout
+    assert 'undo 0, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Strict mode parsing rejects extra tokens, capitalization and missing
+    # coordinates rather than silently executing a different notes command.
+    bad_note_modes = [
+        'notes batch add', 'notes batch remove',
+        'notes batch ADD r1c3=1', 'notes batch delete r1c3=1',
+        'notes batch add r1c3=1 extra', 'notes batch remove r1c3=1 extra',
+        'notes batch add r1c3=12,r1c4=2,',
+        'notes batch remove r1c3=0', 'notes batch add r1c3=11'
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n'+'\n'.join(bad_note_modes)+
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: ') == len(bad_note_modes)
+    assert 'Batch added notes' not in stdout
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
     # Replace multiple pencil-note sets atomically, with one Undo/Redo.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],
                          'notes batch r1c3=19,r1c4=246\n'

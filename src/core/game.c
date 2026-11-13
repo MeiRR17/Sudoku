@@ -326,6 +326,40 @@ SudokuGameStatus sudoku_game_set_notes_many(SudokuGame *game,
     if(changed)*changed=updates;
     return SUDOKU_GAME_OK;
 }
+/* Apply additions/removals of pencil marks across multiple editable cells.
+ * Transform every mask against the same validated live snapshot, then use
+ * the all-or-nothing setter to detect duplicate/given/filled targets. */
+static SudokuGameStatus modify_notes_many(SudokuGame *game,
+                                         const SudokuGameNoteEdit *edits,
+                                         unsigned count,unsigned *changed,
+                                         int add) {
+    SudokuGameNoteEdit proposed[SUDOKU_CELL_COUNT];
+    unsigned i;
+    if(changed)*changed=0u;
+    if(!valid_game(game)||count>SUDOKU_CELL_COUNT||
+       (count!=0u&&edits==NULL))return SUDOKU_GAME_INVALID;
+    if(!valid_live_state(game))return SUDOKU_GAME_INVALID;
+    for(i=0u;i<count;++i){
+        int idx=cell_index(edits[i].row,edits[i].col);
+        if(idx<0||(edits[i].mask&(uint16_t)~0x3feu)!=0u)
+            return SUDOKU_GAME_RANGE;
+        proposed[i]=edits[i];
+        proposed[i].mask=add ?
+            (uint16_t)(game->state.notes[idx]|edits[i].mask) :
+            (uint16_t)(game->state.notes[idx]&(uint16_t)~edits[i].mask);
+    }
+    return sudoku_game_set_notes_many(game,proposed,count,changed);
+}
+SudokuGameStatus sudoku_game_add_notes_many(SudokuGame *game,
+                                           const SudokuGameNoteEdit *edits,
+                                           unsigned count,unsigned *changed) {
+    return modify_notes_many(game,edits,count,changed,1);
+}
+SudokuGameStatus sudoku_game_remove_notes_many(SudokuGame *game,
+                                              const SudokuGameNoteEdit *edits,
+                                              unsigned count,unsigned *changed) {
+    return modify_notes_many(game,edits,count,changed,0);
+}
 /* Add or remove a group of pencil digits in one undoable edit. Compute
  * the desired mask, then let set_notes enforce all public-board, clue and
  * pencil-integrity invariants before touching live history. Note that
