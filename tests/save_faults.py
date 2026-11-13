@@ -83,6 +83,26 @@ with tempfile.TemporaryDirectory(prefix='sudoku-fault-') as directory:
     assert manual.is_file() and not list(root.glob(manual.name + '.tmp.*'))
     checks += 1
 
+    # Simulate a directory-to-FIFO swap AFTER rename committed the save.
+    # The game must not block while trying to fsync a FIFO parent. The save
+    # has already been installed; return DURABILITY_UNCERTAIN, not IO.
+    raced_parent = root / 'parent-raced'
+    raced_parent.mkdir()
+    raced_save = raced_parent / 'installed.save'
+    raced_output = play(raced_save, 'save\nquit\n',
+                        'parent-fifo-after-rename', library)
+    assert 'Warning: save replaced target, but parent directory sync failed' in raced_output
+    assert 'Error: file operation failed' not in raced_output
+    assert raced_parent.is_fifo()
+    displaced = root / 'parent-raced.displaced'
+    assert displaced.is_dir()
+    assert (displaced / raced_save.name).is_file()
+    raced_parent.unlink()
+    displaced.rename(raced_parent)
+    assert raced_save.read_bytes().startswith(b'SUDOKU_SAVE_V1\n')
+    assert not list(raced_parent.glob('*.tmp.*'))
+    checks += 1
+
     # Verify the staging inode is already 0600 *before* its fchmod call,
     # including under umask(000). This catches the old fopen("wbx") race.
     born_private = root / 'private from birth.save'

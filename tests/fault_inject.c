@@ -37,11 +37,38 @@ int fsync(int fd) {
 
 int rename(const char *source, const char *target) {
     const char *fault = getenv("SUDOKU_TEST_FAULT");
+    int result;
     if (fault != NULL && strcmp(fault, "rename") == 0) {
         errno = EIO;
         return -1;
     }
-    return renameat(AT_FDCWD, source, AT_FDCWD, target);
+    result = renameat(AT_FDCWD, source, AT_FDCWD, target);
+    if (result == 0 && fault != NULL &&
+        strcmp(fault, "parent-fifo-after-rename") == 0) {
+        /* Simulate a concurrent path replacement after the save was installed
+         * but before the game opens its parent for metadata fsync. This
+         * intentionally leaves the old directory under .displaced so the
+         * Python test can verify it and restore the path after the child. */
+        char parent[4160], displaced[4192];
+        const char *slash = strrchr(target, '/');
+        size_t count;
+        int written;
+        if (!slash || slash == target) { errno = EINVAL; return -1; }
+        count = (size_t)(slash - target);
+        if (count >= sizeof parent) { errno = ENAMETOOLONG; return -1; }
+        memcpy(parent, target, count);
+        parent[count] = '\0';
+        written = snprintf(displaced, sizeof displaced, "%s.displaced", parent);
+        if (written < 0 || (size_t)written >= sizeof displaced) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        if (renameat(AT_FDCWD, parent, AT_FDCWD, displaced) != 0)
+            return -1;
+        if (mkfifo(parent, 0600) != 0)
+            return -1;
+    }
+    return result;
 }
 
 /* A successfully written CLI --output stage must never be installed if the
