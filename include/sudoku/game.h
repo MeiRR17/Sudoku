@@ -69,6 +69,17 @@ SudokuGameStatus sudoku_game_note(SudokuGame *game, unsigned row, unsigned col, 
  * Notes are personal marks, not restricted to live legal candidates. */
 SudokuGameStatus sudoku_game_set_notes(SudokuGame *game,
                                       unsigned row, unsigned col, uint16_t mask);
+/* Atomically replace handwritten note masks in 0..81 distinct empty cells
+ * using one Undo snapshot. A zero mask clears notes. Invalid/duplicate,
+ * given and filled targets all fail before mutation, preserving Redo.
+ * If changed is provided it counts edited cells, or 0 on failure. */
+typedef struct SudokuGameNoteEdit {
+    unsigned row, col;
+    uint16_t mask;
+} SudokuGameNoteEdit;
+SudokuGameStatus sudoku_game_set_notes_many(SudokuGame *game,
+                                           const SudokuGameNoteEdit *edits,
+                                           unsigned count,unsigned *changed);
 /* Add/remove any subset of 1..9 pencil digits in one history snapshot.
  * Unlike toggle, both are idempotent: a duplicate add or absent removal
  * preserves the undo/redo cursor. Zero masks are valid no-ops. Both are

@@ -296,6 +296,36 @@ SudokuGameStatus sudoku_game_set_notes(SudokuGame *game,
     remember(game);
     return SUDOKU_GAME_OK;
 }
+/* Atomically set explicit pencil masks on distinct editable empty cells.
+ * No live state or history changes until every requested edit validates. */
+SudokuGameStatus sudoku_game_set_notes_many(SudokuGame *game,
+                                           const SudokuGameNoteEdit *edits,
+                                           unsigned count,unsigned *changed) {
+    SudokuGameSnapshot proposed;
+    unsigned char seen[SUDOKU_CELL_COUNT]={0};
+    unsigned i,updates=0u;
+    if(changed)*changed=0u;
+    if(!valid_game(game)||count>SUDOKU_CELL_COUNT||
+       (count!=0u && edits==NULL))return SUDOKU_GAME_INVALID;
+    if(!valid_live_state(game))return SUDOKU_GAME_INVALID;
+    if(count==0u)return SUDOKU_GAME_OK;
+    proposed=game->state;
+    for(i=0u;i<count;++i){
+        int idx=cell_index(edits[i].row,edits[i].col);
+        uint16_t mask=edits[i].mask;
+        if(idx<0||(mask&(uint16_t)~0x3feu)!=0u)return SUDOKU_GAME_RANGE;
+        if(seen[idx])return SUDOKU_GAME_INVALID;
+        seen[idx]=1u;
+        if(game->givens.cells[idx])return SUDOKU_GAME_GIVEN;
+        if(game->state.board.cells[idx])return SUDOKU_GAME_NOT_EMPTY;
+        if(proposed.notes[idx]!=mask){proposed.notes[idx]=mask;++updates;}
+    }
+    if(!updates)return SUDOKU_GAME_OK;
+    game->state=proposed;
+    remember(game);
+    if(changed)*changed=updates;
+    return SUDOKU_GAME_OK;
+}
 /* Add or remove a group of pencil digits in one undoable edit. Compute
  * the desired mask, then let set_notes enforce all public-board, clue and
  * pencil-integrity invariants before touching live history. Note that

@@ -2000,6 +2000,65 @@ with tempfile.TemporaryDirectory() as directory:
     assert not stderr
     checks += 1
 
+    # Replace multiple pencil-note sets atomically, with one Undo/Redo.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes batch r1c3=19,r1c4=246\n'
+                         'notes 1 3\nnotes 1 4\nstatus\n'
+                         'undo\nnotes 1 3\nnotes 1 4\nstatus\n'
+                         'redo\nnotes 1 3\nstatus\nquit\n')
+    assert 'Batch updated notes in 2 cells in one undoable edit.' in stdout
+    assert 'Notes for row 1 col 3: 1 9\n' in stdout
+    assert 'Notes for row 1 col 4: 2 4 6\n' in stdout
+    assert 'Notes for row 1 col 3:\n' in stdout
+    assert 'Notes for row 1 col 4:\n' in stdout
+    assert 'undo 1, redo 0' in stdout and 'undo 0, redo 1' in stdout
+    assert 'Progress: 30/81 filled' in stdout and not stderr
+    checks += 1
+
+    # Repeating an unchanged mask after Undo retains the Redo branch.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes batch r1c3=19\nundo\n'
+                         'notes batch r1c3=-,r1c4=-\n'
+                         'status\nredo\nnotes 1 3\nstatus\nquit\n')
+    assert 'Batch updated notes in 1 cell in one undoable edit.' in stdout
+    assert 'No note changes; history unchanged.' in stdout
+    assert 'Notes for row 1 col 3: 1 9\n' in stdout
+    assert 'undo 0, redo 1' in stdout and 'undo 1, redo 0' in stdout
+    assert not stderr
+    checks += 1
+
+    # Invalid duplicate/given/occupied targets reject all intended edits.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\n'
+                         'notes batch r1c4=19,r1c3=25\n'
+                         'notes batch r1c4=19,r1c1=25\n'
+                         'notes batch r1c4=19,r1c4=25\n'
+                         'notes 1 4\nstatus\nquit\n')
+    assert 'Error: pencil notes only allowed in empty cells' in stdout
+    assert 'Error: cannot modify an original clue' in stdout
+    assert 'Error: invalid puzzle or game' in stdout
+    assert 'Notes for row 1 col 4:\n' in stdout
+    assert 'undo 1, redo 0' in stdout and not stderr
+    checks += 1
+
+    # Strict grammar rejects empty, illegal, repeated and surplus tokens.
+    bad_notes_batches = [
+        'notes batch', 'notes batch r1c3=', 'notes batch r1c3=0',
+        'notes batch r1c3=11', 'notes batch r0c3=1',
+        'notes batch R1C3=1', 'notes batch r1c3=19,',
+        'notes batch ,r1c3=19', 'notes batch r1c3=19,,r1c4=2',
+        'notes batch r1c3=19,r1c4=1x',
+        'notes batch r1c3=19 r1c4=2',
+        'notes batch r1c3=19 extra',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n'+'\n'.join(bad_notes_batches)+
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: ') == len(bad_notes_batches)
+    assert 'Batch updated notes' not in stdout
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
     # A new move after Undo cuts the old Redo branch. The timeline must
     # describe the replacement state, never the abandoned pencil notes.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],

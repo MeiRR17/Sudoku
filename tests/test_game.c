@@ -42,6 +42,69 @@ static int check_game(void){
     CHECK(sudoku_board_parse(&board,(const unsigned char*)classic,81,NULL)==SUDOKU_OK);
     CHECK(sudoku_game_start(game,&board)==SUDOKU_GAME_OK);
     CHECK(game->history_len==1u && game->history_cursor==0u);
+    /* Pencil-note batch edits validate all targets before committing one
+     * snapshot; rejected/no-op requests never discard pending Redo. */
+    {
+        SudokuGame *probe=malloc(sizeof *probe);
+        SudokuGameNoteEdit edits[]={
+            {1u,3u,(uint16_t)((1u<<1)|(1u<<9))},
+            {1u,4u,(uint16_t)((1u<<2)|(1u<<4))}
+        };
+        SudokuGameNoteEdit zero[]={{1u,3u,0u},{1u,4u,0u}};
+        SudokuGameNoteEdit duplicate[]={{1u,3u,0u},{1u,3u,0u}};
+        SudokuGameNoteEdit given[]={{1u,3u,0u},{1u,1u,0u}};
+        SudokuGameNoteEdit invalid[]={{1u,3u,0u},{10u,2u,0u}};
+        SudokuGameNoteEdit badmask[]={{1u,3u,0u},{1u,4u,0x8000u}};
+        unsigned changed=99u,cursor,length;
+        SudokuGameSnapshot before;
+        CHECK(probe!=NULL);
+        CHECK(sudoku_game_start(probe,&board)==SUDOKU_GAME_OK);
+        CHECK(sudoku_game_set_notes_many(probe,edits,2u,&changed)==SUDOKU_GAME_OK);
+        CHECK(changed==2u && probe->history_cursor==1u);
+        CHECK(probe->state.notes[2]==edits[0].mask &&
+              probe->state.notes[3]==edits[1].mask);
+        CHECK(sudoku_game_set_notes_many(probe,edits,2u,&changed)==SUDOKU_GAME_OK);
+        CHECK(changed==0u && probe->history_cursor==1u);
+        CHECK(sudoku_game_undo(probe)==SUDOKU_GAME_OK);
+        CHECK(probe->state.notes[2]==0u && probe->state.notes[3]==0u);
+        cursor=probe->history_cursor;length=probe->history_len;
+        before=probe->state;
+        CHECK(sudoku_game_set_notes_many(probe,zero,2u,&changed)==SUDOKU_GAME_OK);
+        CHECK(changed==0u && probe->history_cursor==cursor &&
+              probe->history_len==length);
+        CHECK(sudoku_game_set_notes_many(probe,duplicate,2u,&changed)==SUDOKU_GAME_INVALID);
+        CHECK(changed==0u);
+        CHECK(sudoku_game_set_notes_many(probe,given,2u,&changed)==SUDOKU_GAME_GIVEN);
+        CHECK(changed==0u);
+        CHECK(sudoku_game_set_notes_many(probe,invalid,2u,&changed)==SUDOKU_GAME_RANGE);
+        CHECK(changed==0u);
+        CHECK(sudoku_game_set_notes_many(probe,badmask,2u,&changed)==SUDOKU_GAME_RANGE);
+        CHECK(changed==0u);
+        CHECK(sudoku_game_set_notes_many(probe,NULL,2u,&changed)==SUDOKU_GAME_INVALID);
+        CHECK(changed==0u);
+        CHECK(sudoku_game_set_notes_many(probe,edits,82u,&changed)==SUDOKU_GAME_INVALID);
+        CHECK(changed==0u);
+        CHECK(probe->history_cursor==cursor && probe->history_len==length);
+        CHECK(memcmp(before.board.cells,probe->state.board.cells,
+                     sizeof before.board.cells)==0);
+        CHECK(memcmp(before.notes,probe->state.notes,sizeof before.notes)==0);
+        CHECK(sudoku_game_redo(probe)==SUDOKU_GAME_OK);
+        CHECK(probe->state.notes[2]==edits[0].mask);
+        CHECK(sudoku_game_set_notes_many(probe,zero,2u,&changed)==SUDOKU_GAME_OK);
+        CHECK(changed==2u && probe->state.notes[2]==0u &&
+              probe->state.notes[3]==0u);
+        CHECK(sudoku_game_undo(probe)==SUDOKU_GAME_OK);
+        probe->state.notes[3]=0u; /* Filled cells cannot retain notes. */
+        probe->state.board.cells[3]=6u;
+        CHECK(sudoku_game_set_notes_many(probe,zero,2u,&changed)==SUDOKU_GAME_NOT_EMPTY);
+        CHECK(changed==0u);
+        probe->state.board.cells[3]=0u;
+        probe->state.notes[3]=edits[1].mask;
+        probe->state.notes[0]=(uint16_t)(1u<<1);
+        CHECK(sudoku_game_set_notes_many(probe,zero,2u,&changed)==SUDOKU_GAME_INVALID);
+        CHECK(changed==0u);
+        free(probe);
+    }
     CHECK(sudoku_game_reset(game)==SUDOKU_GAME_OK);
     CHECK(game->history_len==1u && game->history_cursor==0u);
     /* Transactional erase batch: all targets are checked before any write.
