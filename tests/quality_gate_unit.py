@@ -22,9 +22,18 @@ def test_command(name, build_dir=None):
     if name in quality.C_TEST_PROGRAMS:
         return [str(build / quality.C_TEST_PROGRAMS[name])]
     if name in quality.PYTHON_TEST_SCRIPTS:
-        return [sys.executable,
-                str(SOURCE.parent.parent / 'tests' / quality.PYTHON_TEST_SCRIPTS[name]),
-                binary]
+        command = [sys.executable,
+                   str(SOURCE.parent.parent / 'tests' / quality.PYTHON_TEST_SCRIPTS[name])]
+        if name in ('sudoku_game_e2e', 'sudoku_cli_golden'):
+            return command + [binary, str(SOURCE.parent.parent / 'tests' / 'fixtures')]
+        if name == 'sudoku_generator_golden':
+            return command + [binary]
+        if name in ('sudoku_package_e2e', 'sudoku_package_integrity'):
+            return command + [str(SOURCE.parent.parent), str(build)]
+        if name == 'sudoku_save_fault_injection':
+            return command + [binary, str(SOURCE.parent.parent / 'tests' /
+                                          'fault_inject.c'), '/usr/bin/cc']
+        raise AssertionError('unhandled Python CTest name: ' + name)
     if name == 'sudoku_stdin':
         return ['cmake', '-DSUDOKU_BIN=' + binary,
                 '-DFIXTURE=' + str(SOURCE.parent.parent / 'tests' / 'fixtures'
@@ -233,6 +242,73 @@ class InventoryTests(unittest.TestCase):
                     quality.validate_test_manifest(
                         json.dumps(data), sanitizer=True, system='Linux')
 
+    def test_all_python_ctest_arguments_have_exact_arity(self):
+        names = set(quality.BASE_TESTS) | set(quality.PACKAGE_TESTS)
+        names.add('sudoku_save_fault_injection')
+        for name in sorted(quality.PYTHON_TEST_SCRIPTS):
+            for variant in ('missing', 'surplus'):
+                data = json.loads(inventory(sorted(names)))
+                target = next(test for test in data['tests'] if test['name'] == name)
+                if variant == 'missing':
+                    target['command'].pop()
+                else:
+                    target['command'].append('--skip')
+                with self.subTest(name=name, variant=variant):
+                    with self.assertRaisesRegex(ValueError, 'Python arguments mismatch'):
+                        quality.validate_test_manifest(
+                            json.dumps(data), system='Linux')
+
+    def test_python_e2e_fixture_directory_cannot_be_substituted(self):
+        for name in ('sudoku_game_e2e', 'sudoku_cli_golden'):
+            data = json.loads(inventory(sorted(quality.BASE_TESTS)))
+            target = next(test for test in data['tests'] if test['name'] == name)
+            target['command'][-1] = str(SOURCE.parent.parent / 'fixtures-wrong')
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, 'fixture directory mismatch'):
+                    quality.validate_test_manifest(json.dumps(data),
+                                                   sanitizer=True, system='Linux')
+
+    def test_python_package_source_and_build_dirs_must_match(self):
+        build = SOURCE.parent.parent / 'test-native-build'
+        names = set(quality.BASE_TESTS) | set(quality.PACKAGE_TESTS)
+        for name in sorted(quality.PACKAGE_TESTS):
+            for arg_index, expected_error in ((2, 'checkout directory mismatch'),
+                                               (3, 'build directory mismatch')):
+                data = json.loads(inventory(sorted(names), build_dir=build))
+                target = next(test for test in data['tests'] if test['name'] == name)
+                target['command'][arg_index] = str(build / 'substituted')
+                with self.subTest(name=name, argument=arg_index):
+                    with self.assertRaisesRegex(ValueError, expected_error):
+                        quality.validate_test_manifest(json.dumps(data),
+                                                       system='Darwin', build_dir=build)
+
+    def test_fault_injection_driver_and_compiler_must_match(self):
+        build = SOURCE.parent.parent / 'test-fault-build'
+        names = set(quality.BASE_TESTS) | set(quality.PACKAGE_TESTS)
+        names.add('sudoku_save_fault_injection')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            build = Path(tmpdir)
+            (build / 'CMakeCache.txt').write_text(
+                'CMAKE_C_COMPILER:FILEPATH=/usr/bin/cc\n', encoding='utf-8')
+            good = json.loads(inventory(sorted(names), build_dir=build))
+            self.assertEqual(quality.validate_test_manifest(
+                json.dumps(good), system='Linux', build_dir=build), len(names))
+            for index, bad, error in (
+                    (3, '/tmp/wrong-fault.c', 'fault source mismatch'),
+                    (4, '/bin/echo', 'compiler mismatch')):
+                data = json.loads(inventory(sorted(names), build_dir=build))
+                target = next(test for test in data['tests']
+                              if test['name'] == 'sudoku_save_fault_injection')
+                target['command'][index] = bad
+                with self.subTest(argument=index):
+                    with self.assertRaisesRegex(ValueError, error):
+                        quality.validate_test_manifest(json.dumps(data),
+                                                       system='Linux', build_dir=build)
+            (build / 'CMakeCache.txt').unlink()
+            with self.assertRaisesRegex(ValueError, 'configured C compiler missing'):
+                quality.validate_test_manifest(json.dumps(good),
+                                               system='Linux', build_dir=build)
+
     def test_real_python_script_must_match_repository_test_path(self):
         data = json.loads(inventory(sorted(quality.BASE_TESTS)))
         target = next(t for t in data['tests'] if t['name'] == 'sudoku_game_e2e')
@@ -249,7 +325,8 @@ class InventoryTests(unittest.TestCase):
         data = json.loads(inventory(sorted(quality.BASE_TESTS)))
         target = next(t for t in data['tests'] if t['name'] == 'sudoku_game_e2e')
         target['command'] = [sys.executable, str(SOURCE.parent.parent / 'tests'
-                                               / 'game_e2e.py'), 'echo']
+                                               / 'game_e2e.py'), 'echo',
+                             str(SOURCE.parent.parent / 'tests' / 'fixtures')]
         with self.assertRaisesRegex(ValueError, 'executable mismatch'):
             quality.validate_test_manifest(json.dumps(data),
                                            sanitizer=True, system='Linux')

@@ -9,6 +9,7 @@ import argparse
 import json
 import pathlib
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -89,6 +90,18 @@ PYTHON_TEST_SCRIPTS = {
 }
 
 
+# The Python CTest wrapper must run the actual checked-in script with the
+# complete expected argument contract, not merely its filename. Substituting
+# fixtures/build roots or appending switches can make a CTest pass meaningless.
+PYTHON_TEST_ARG_COUNTS = {
+    'sudoku_game_e2e': 4,
+    'sudoku_generator_golden': 3,
+    'sudoku_cli_golden': 4,
+    'sudoku_package_e2e': 4,
+    'sudoku_package_integrity': 4,
+    'sudoku_save_fault_injection': 5,
+}
+
 def validate_ctest_command(name, command, build_dir=None):
     """Require a real, expected test executable/script, not merely its name."""
     if (not isinstance(command, list) or not command or
@@ -117,11 +130,36 @@ def validate_ctest_command(name, command, build_dir=None):
         expected = ROOT / 'tests' / PYTHON_TEST_SCRIPTS[name]
         if pathlib.Path(command[1]).resolve() != expected.resolve():
             raise ValueError('Required CTest Python script mismatch: ' + name)
-        if name in ('sudoku_game_e2e', 'sudoku_cli_golden',
-                    'sudoku_generator_golden'):
-            if len(command) < 3:
-                raise ValueError('Required CTest game executable missing: ' + name)
+        if len(command) != PYTHON_TEST_ARG_COUNTS[name]:
+            raise ValueError('Required CTest Python arguments mismatch: ' + name)
+        if name in ('sudoku_game_e2e', 'sudoku_generator_golden',
+                    'sudoku_cli_golden', 'sudoku_save_fault_injection'):
             require_build_binary(command[2], 'sudoku')
+        if name in ('sudoku_game_e2e', 'sudoku_cli_golden'):
+            if pathlib.Path(command[3]).resolve() != (
+                    ROOT / 'tests' / 'fixtures').resolve():
+                raise ValueError('Required CTest Python fixture directory mismatch: ' + name)
+        elif name in ('sudoku_package_e2e', 'sudoku_package_integrity'):
+            if pathlib.Path(command[2]).resolve() != ROOT.resolve():
+                raise ValueError('Required CTest Python checkout directory mismatch: ' + name)
+            if build_dir is not None and pathlib.Path(command[3]).resolve() != (
+                    pathlib.Path(build_dir).resolve()):
+                raise ValueError('Required CTest Python build directory mismatch: ' + name)
+        elif name == 'sudoku_save_fault_injection':
+            if pathlib.Path(command[3]).resolve() != (
+                    ROOT / 'tests' / 'fault_inject.c').resolve():
+                raise ValueError('Required CTest Python fault source mismatch: ' + name)
+            if build_dir is not None:
+                cache = pathlib.Path(build_dir) / 'CMakeCache.txt'
+                try:
+                    cache_text = cache.read_text(encoding='utf-8')
+                except OSError as exc:
+                    raise ValueError('Required CTest configured C compiler missing: ' + name) from exc
+                matches = re.findall(
+                    r'^CMAKE_C_COMPILER:(?:FILEPATH|STRING)=(.+)$', cache_text, re.M)
+                if len(matches) != 1 or pathlib.Path(command[4]).resolve() != (
+                        pathlib.Path(matches[0]).resolve()):
+                    raise ValueError('Required CTest Python compiler mismatch: ' + name)
     elif name == 'sudoku_stdin':
         if (executable_name(command[0]) not in ('cmake', 'cmake.exe') or
                 '-P' not in command or
