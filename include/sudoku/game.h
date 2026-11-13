@@ -91,6 +91,13 @@ SudokuGameStatus sudoku_game_add_notes_many(SudokuGame *game,
 SudokuGameStatus sudoku_game_remove_notes_many(SudokuGame *game,
                                               const SudokuGameNoteEdit *edits,
                                               unsigned count,unsigned *changed);
+/* Flip selected pencil digits in each distinct editable empty cell, leaving
+ * unspecified marks alone. The entire batch commits as one Undo action;
+ * duplicate/clue/filled targets or illegal masks abort with no mutation.
+ * Zero masks are no-ops and preserve a pending Redo branch. */
+SudokuGameStatus sudoku_game_toggle_notes_many(SudokuGame *game,
+                                              const SudokuGameNoteEdit *edits,
+                                              unsigned count,unsigned *changed);
 /* Add/remove any subset of 1..9 pencil digits in one history snapshot.
  * Unlike toggle, both are idempotent: a duplicate add or absent removal
  * preserves the undo/redo cursor. Zero masks are valid no-ops. Both are

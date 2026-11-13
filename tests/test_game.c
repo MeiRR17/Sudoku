@@ -42,6 +42,51 @@ static int check_game(void){
     CHECK(sudoku_board_parse(&board,(const unsigned char*)classic,81,NULL)==SUDOKU_OK);
     CHECK(sudoku_game_start(game,&board)==SUDOKU_GAME_OK);
     CHECK(game->history_len==1u && game->history_cursor==0u);
+    /* Toggle is an involution: toggling the same digits twice returns the
+     * original marks. Validation remains atomic and zero-mask no-ops do
+     * not destroy an existing Redo branch. */
+    {
+        SudokuGame *probe=malloc(sizeof *probe);
+        SudokuGameNoteEdit initial[]={{1u,3u,(uint16_t)((1u<<1)|(1u<<9))},
+                                      {1u,4u,(uint16_t)(1u<<2)}};
+        SudokuGameNoteEdit flips[]={{1u,3u,(uint16_t)((1u<<1)|(1u<<2))},
+                                    {1u,4u,(uint16_t)((1u<<2)|(1u<<4))}};
+        SudokuGameNoteEdit zero[]={{1u,3u,0u},{1u,4u,0u}};
+        SudokuGameNoteEdit duplicate[]={{1u,3u,(uint16_t)(1u<<3)},
+                                        {1u,3u,(uint16_t)(1u<<7)}};
+        SudokuGameNoteEdit clue[]={{1u,3u,(uint16_t)(1u<<2)},
+                                   {1u,1u,(uint16_t)(1u<<3)}};
+        SudokuGameNoteEdit invalid[]={{1u,3u,(uint16_t)(1u<<2)},
+                                      {10u,4u,(uint16_t)(1u<<3)}};
+        unsigned changed=99u,cursor,length;
+        CHECK(probe!=NULL);
+        CHECK(sudoku_game_start(probe,&board)==SUDOKU_GAME_OK);
+        CHECK(sudoku_game_set_notes_many(probe,initial,2u,&changed)==SUDOKU_GAME_OK);
+        CHECK(changed==2u && probe->history_cursor==1u);
+        CHECK(sudoku_game_toggle_notes_many(probe,flips,2u,&changed)==SUDOKU_GAME_OK);
+        CHECK(changed==2u && probe->history_cursor==2u);
+        CHECK(probe->state.notes[2]==((1u<<2)|(1u<<9)));
+        CHECK(probe->state.notes[3]==(1u<<4));
+        CHECK(sudoku_game_undo(probe)==SUDOKU_GAME_OK);
+        cursor=probe->history_cursor;length=probe->history_len;
+        CHECK(sudoku_game_toggle_notes_many(probe,zero,2u,&changed)==SUDOKU_GAME_OK);
+        CHECK(changed==0u && probe->history_cursor==cursor &&
+              probe->history_len==length);
+        CHECK(sudoku_game_toggle_notes_many(probe,duplicate,2u,&changed)==SUDOKU_GAME_INVALID);
+        CHECK(changed==0u);
+        CHECK(sudoku_game_toggle_notes_many(probe,clue,2u,&changed)==SUDOKU_GAME_GIVEN);
+        CHECK(changed==0u);
+        CHECK(sudoku_game_toggle_notes_many(probe,invalid,2u,&changed)==SUDOKU_GAME_RANGE);
+        CHECK(changed==0u);
+        CHECK(probe->history_cursor==cursor && probe->history_len==length);
+        CHECK(sudoku_game_redo(probe)==SUDOKU_GAME_OK);
+        CHECK(probe->state.notes[2]==((1u<<2)|(1u<<9)));
+        CHECK(sudoku_game_toggle_notes_many(probe,flips,2u,&changed)==SUDOKU_GAME_OK);
+        CHECK(changed==2u);
+        CHECK(probe->state.notes[2]==initial[0].mask);
+        CHECK(probe->state.notes[3]==initial[1].mask);
+        free(probe);
+    }
     /* Add/remove note marks without replacing unrelated masks. A failed or
      * idempotent batch must never truncate an outstanding Redo branch. */
     {

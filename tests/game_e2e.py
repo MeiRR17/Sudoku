@@ -2000,6 +2000,47 @@ with tempfile.TemporaryDirectory() as directory:
     assert not stderr
     checks += 1
 
+    # Toggle multiple handwritten masks with one Undo step. Existing
+    # unmentioned pencil digits remain intact; Undo restores both cells.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes batch r1c3=19,r1c4=2\n'
+                         'notes batch toggle r1c3=12,r1c4=24\n'
+                         'notes 1 3\nnotes 1 4\nundo\n'
+                         'notes 1 3\nnotes 1 4\nstatus\nquit\n')
+    assert 'Batch toggled notes in 2 cells in one undoable edit.' in stdout
+    assert 'Notes for row 1 col 3: 2 9\n' in stdout
+    assert 'Notes for row 1 col 4: 4\n' in stdout
+    assert 'Notes for row 1 col 3: 1 9\n' in stdout
+    assert 'Notes for row 1 col 4: 2\n' in stdout
+    assert 'undo 1, redo 1' in stdout and not stderr
+    checks += 1
+
+    # Zero-mask toggle is a true no-op and leaves pending Redo available.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes batch r1c3=19\nundo\n'
+                         'notes batch toggle r1c3=-\n'
+                         'status\nredo\nnotes 1 3\nstatus\nquit\n')
+    assert 'No note changes; history unchanged.' in stdout
+    assert 'undo 0, redo 1' in stdout and 'undo 1, redo 0' in stdout
+    assert 'Notes for row 1 col 3: 1 9\n' in stdout and not stderr
+    checks += 1
+
+    # Invalid/malformed toggle batches cannot mutate any cell.
+    bad_toggle_batches = [
+        'notes batch toggle', 'notes batch toggle r1c3=11',
+        'notes batch toggle r1c3=19,', 'notes batch toggle r1c3=0',
+        'notes batch toggle r1c3=19 extra', 'notes batch TOGGLE r1c3=1'
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n'+'\n'.join(bad_toggle_batches)+
+                         '\nnotes batch toggle r1c3=1,r1c3=2\n'
+                         'notes batch toggle r1c3=1,r1c1=2\n'
+                         'status\nquit\n')
+    assert stdout.count('Error: ') == len(bad_toggle_batches) + 2
+    assert 'Batch toggled notes' not in stdout
+    assert stdout.count('undo 0, redo 0') == 2 and not stderr
+    checks += 1
+
     # Add and remove handwritten marks in separate cells without replacing
     # unrelated pencil digits. Every batch is one Undo snapshot.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],

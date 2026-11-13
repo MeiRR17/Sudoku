@@ -367,7 +367,7 @@ static void commands(void){
     puts("          note ROW COL DIGIT,");
     puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
     puts("          notes batch r1c3=19,r1c4=- (atomic pencil edits),");
-    puts("          notes batch add|remove r1c3=12,r1c4=9,");
+    puts("          notes batch add|remove|toggle r1c3=12,r1c4=9,");
     puts("          notes audit [N] | notes audit row|column|box N,");
     puts("          notes clear ROW COL, notes fill|prune ROW COL,");
     puts("          notes fill|prune row|column|box N (unit 1..9),");
@@ -396,7 +396,8 @@ static void commands(void){
     puts("'notes add ROW COL 135' adds marks; 'notes remove ROW COL 135' erases.");
     puts("'notes batch r1c3=19,r1c4=-' sets several note masks in one Undo.");
     puts("A rejected or unchanged notes batch preserves Redo.");
-    puts("'notes batch add|remove' keeps unmentioned pencil marks.");
+    puts("'notes batch add|remove|toggle' keeps unmentioned pencil marks.");
+    puts("Toggle flips each specified mark, also in one Undo step.");
     puts("Adding existing or removing absent marks leaves history unchanged.");
     puts("'notes audit [N]' lists stale and unmarked legal digits (default 10).");
     puts("'notes audit row|column|box N' limits the report to one unit.");
@@ -3211,7 +3212,8 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
         }
         else if(strcmp(command,"notes")==0&&a&&
                 strcmp(a,"batch")==0&&b&&!extra&&
-                ((!c)||(c&&(strcmp(b,"add")==0||strcmp(b,"remove")==0)))){
+                ((!c)||(c&&(strcmp(b,"add")==0||strcmp(b,"remove")==0||
+                            strcmp(b,"toggle")==0)))){
             SudokuGameNoteEdit edits[SUDOKU_CELL_COUNT];
             unsigned count=0u,changed=0u;
             const char *spec=c?c:b;
@@ -3224,13 +3226,16 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                 status=sudoku_game_add_notes_many(game,edits,count,&changed);
             else if(strcmp(mode,"remove")==0)
                 status=sudoku_game_remove_notes_many(game,edits,count,&changed);
+            else if(strcmp(mode,"toggle")==0)
+                status=sudoku_game_toggle_notes_many(game,edits,count,&changed);
             else
                 status=sudoku_game_set_notes_many(game,edits,count,&changed);
             if(status==SUDOKU_GAME_OK){
                 if(changed)
                     printf("Batch %s notes in %u cell%s in one undoable edit.\n",
                            strcmp(mode,"set")==0?"updated":
-                           strcmp(mode,"add")==0?"added":"removed",
+                           strcmp(mode,"add")==0?"added":
+                           strcmp(mode,"toggle")==0?"toggled":"removed",
                            changed,changed==1u?"":"s");
                 else
                     puts("No note changes; history unchanged.");
