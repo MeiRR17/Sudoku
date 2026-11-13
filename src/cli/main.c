@@ -439,10 +439,69 @@ static FILE *open_result_stage(const char *path, char *stage, size_t capacity) {
 #endif
 }
 
+#if !defined(_WIN32)
+/* Pin the destination directory before publishing a new --output file.
+ * Nonblocking directory-only opens avoid trapping the CLI on a FIFO parent. */
+static int open_result_parent(const char *path) {
+    const char *slash = strrchr(path, '/');
+    size_t length = slash == NULL ? 1u :
+                    slash == path ? 1u : (size_t)(slash - path);
+    char parent[4098];
+    struct stat info;
+    int fd, flags = O_RDONLY | O_NONBLOCK;
+    if (length >= sizeof parent) return -1;
+    if (slash == NULL) parent[0] = '.';
+    else if (slash == path) parent[0] = '/';
+    else memcpy(parent, path, length);
+    parent[length] = '\0';
+#ifdef O_DIRECTORY
+    flags |= O_DIRECTORY;
+#endif
+#ifdef O_CLOEXEC
+    flags |= O_CLOEXEC;
+#endif
+    fd = open(parent, flags);
+    if (fd < 0) return -1;
+    if (fstat(fd, &info) != 0 || !S_ISDIR(info.st_mode)) {
+        (void)close(fd);
+        return -1;
+    }
+    return fd;
+}
+/* After link(stage,target) and unlink(stage), confirm that the original
+ * directory, not a concurrently substituted one, was fsynced. This is
+ * best effort: it cannot guarantee durability on all filesystems. */
+static int sync_result_parent(const char *path, int original_fd) {
+    struct stat original, current, final;
+    int first_fd = open_result_parent(path), last_fd = -1;
+    int ok = original_fd >= 0 && first_fd >= 0;
+    if (ok) {
+        ok = fstat(original_fd, &original) == 0 &&
+             fstat(first_fd, &current) == 0 &&
+             original.st_dev == current.st_dev &&
+             original.st_ino == current.st_ino;
+        if (ok) ok = fsync(original_fd) == 0;
+        if (ok) {
+            last_fd = open_result_parent(path);
+            ok = last_fd >= 0 && fstat(last_fd, &final) == 0 &&
+                 original.st_dev == final.st_dev &&
+                 original.st_ino == final.st_ino;
+        }
+    }
+    if (last_fd >= 0 && close(last_fd) != 0) ok = 0;
+    if (first_fd >= 0 && close(first_fd) != 0) ok = 0;
+    if (original_fd >= 0 && close(original_fd) != 0) ok = 0;
+    return ok;
+}
+#endif
+
 static int publish_result(const Options *opt, const Result *result) {
     FILE *output = stdout;
     char *stage = NULL;
     int failure, publish_failed = 0;
+#if !defined(_WIN32)
+    int parent_fd = -1, post_publish_uncertain = 0;
+#endif
     int new_file = opt->output_path != NULL && strcmp(opt->output_path, "-") != 0;
     if (new_file) {
         size_t length = strlen(opt->output_path);
@@ -473,6 +532,14 @@ static int publish_result(const Options *opt, const Result *result) {
         if (!failure && fsync(fileno(output)) != 0) failure = 1;
 #endif
         if (fclose(output) != 0) failure = 1;
+#if !defined(_WIN32)
+        /* Pin the original parent before publishing. A directory path may
+         * be replaced while a link and subsequent metadata fsync execute. */
+        if (!failure) {
+            parent_fd = open_result_parent(opt->output_path);
+            if (parent_fd < 0) failure = 1;
+        }
+#endif
         if (!failure) {
 #if defined(_WIN32)
             /* No MOVEFILE_REPLACE_EXISTING: never clobber a concurrent writer. */
@@ -483,7 +550,21 @@ static int publish_result(const Options *opt, const Result *result) {
             publish_failed = link(stage, opt->output_path) != 0;
 #endif
         }
+#if defined(_WIN32)
         (void)remove(stage);
+#else
+        /* POSIX link adds the published name and unlink removes the staged
+         * one. Sync BOTH metadata changes before reporting durable success.
+         * Failure after publication must not claim no file was created. */
+        if (remove(stage) != 0 && !failure && !publish_failed)
+            post_publish_uncertain = 1;
+        if (!failure && !publish_failed) {
+            if (!sync_result_parent(opt->output_path, parent_fd))
+                post_publish_uncertain = 1;
+            parent_fd = -1; /* consumed and closed by sync_result_parent */
+        }
+        if (parent_fd >= 0) (void)close(parent_fd);
+#endif
         free(stage);
     } else if (fflush(output) != 0) {
         failure = 1;
@@ -493,6 +574,12 @@ static int publish_result(const Options *opt, const Result *result) {
         return 4;
     }
     if (failure) { fputs("Output write failed\n", stderr); return 4; }
+#if !defined(_WIN32)
+    if (post_publish_uncertain) {
+        fputs("Output published but directory synchronization or staging cleanup failed; durability uncertain\n", stderr);
+        return 4;
+    }
+#endif
     return 0;
 }
 

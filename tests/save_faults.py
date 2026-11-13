@@ -76,6 +76,43 @@ with tempfile.TemporaryDirectory(prefix='sudoku-fault-') as directory:
     during_sync.unlink()
     checks += 1
 
+    # A CLI --output link succeeds before the containing-directory fsync.
+    # A post-publication fsync error must never be reported as success.
+    command_output = root / 'cli-output-dir-sync.txt'
+    env = os.environ.copy()
+    env['LD_PRELOAD'] = str(library)
+    env['SUDOKU_TEST_FAULT'] = 'dir-sync'
+    report = subprocess.run(
+        [str(EXE), 'validate', '--puzzle', PUZZLE, '--format', 'compact',
+         '--output', str(command_output)],
+        text=True, capture_output=True, env=env, timeout=15)
+    assert report.returncode == 4 and not report.stdout
+    assert 'Output published but directory synchronization' in report.stderr
+    assert command_output.read_text(encoding='ascii') == PUZZLE + '\n'
+    assert not list(root.glob(command_output.name + '.tmp.*'))
+    checks += 1
+
+    # A directory swapped away immediately after fsync is also uncertain.
+    cli_parent = root / 'cli-output-raced'
+    cli_parent.mkdir()
+    cli_path = cli_parent / 'result.txt'
+    env['SUDOKU_TEST_FAULT'] = 'parent-directory-after-fsync'
+    env['SUDOKU_TEST_PARENT'] = str(cli_parent)
+    report = subprocess.run(
+        [str(EXE), 'validate', '--puzzle', PUZZLE, '--format', 'compact',
+         '--output', str(cli_path)],
+        text=True, capture_output=True, env=env, timeout=15)
+    assert report.returncode == 4 and not report.stdout
+    assert 'Output published but directory synchronization' in report.stderr
+    displaced = root / 'cli-output-raced.displaced'
+    assert cli_parent.is_dir() and displaced.is_dir()
+    assert not cli_path.exists()
+    assert (displaced / cli_path.name).read_text(encoding='ascii') == PUZZLE + '\n'
+    cli_parent.rmdir()
+    displaced.rename(cli_parent)
+    assert cli_path.is_file() and not list(cli_parent.glob('*.tmp.*'))
+    checks += 1
+
     # The target is replaced before the parent-directory fsync; if fsync fails,
     # distinguish this from a failed rename rather than promising old data.
     output = play(save, 'set 1 1 5\nsave\nquit\n', 'dir-sync', library)

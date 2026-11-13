@@ -2,6 +2,13 @@
 
 **Status (2026-11-09):** local Linux packaging infrastructure implemented and tested. **Not an official production or public distribution release.** The exit criteria in GitHub issue #10 are **not met**: owner has not approved a license and native Windows x64 / macOS arm64 acceptance runs are missing.
 
+## v0.8.4 — POSIX output directory durability (development only)
+
+The noninteractive --output PATH command already publishes completed result bytes using an exclusive staging file and link(stage, target) to refuse overwrite. On POSIX, after the staged name is unlinked, the CLI now fsyncs the original parent directory as well. Its directory descriptor is pinned before the link, opened nonblockingly with a directory-only check, and verified against reopened parent identities both before and after sync. This covers publication and staging-cleanup metadata, rather than only syncing the file contents.
+
+If publishing succeeded but syncing the parent directory or removing the stage fails, the CLI exits with code 4 and explicitly states: "Output published but directory synchronization or staging cleanup failed; durability uncertain." Users should inspect the already published target before retrying. A normal successful output remains byte-identical and existing targets are never overwritten. The directory check is best effort, not power-loss certification or a defense against all races. Windows retains its previous MoveFileExA write-through behavior pending actual native acceptance. Linux fault injection exercises a failed parent fsync and a parent-directory swap after sync.
+
+
 ## Local build, installation and rollback
 
 Requirements: CMake >=3.16, C11 compiler, Python >=3.9 for deterministic archive tooling, and a native host. Windows builds require MSVC in a developer prompt (or another explicitly selected toolchain); macOS builds require Apple Clang.
