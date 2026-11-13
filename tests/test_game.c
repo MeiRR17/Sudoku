@@ -50,6 +50,8 @@ static int check_game(void){
                                     {1u,4u,(uint16_t)(1u<<2)}};
         SudokuGameNoteEdit add[]={{1u,3u,(uint16_t)(1u<<1)},
                                   {1u,4u,(uint16_t)(1u<<4)}};
+        SudokuGameNoteEdit absent[]={{1u,3u,(uint16_t)(1u<<3)},
+                                     {1u,4u,(uint16_t)(1u<<7)}};
         SudokuGameNoteEdit bad[]={{1u,3u,(uint16_t)(1u<<1)},
                                   {1u,4u,0x8000u}};
         SudokuGameNoteEdit repeated[]={{1u,3u,(uint16_t)(1u<<1)},
@@ -72,7 +74,7 @@ static int check_game(void){
         cursor=probe->history_cursor;length=probe->history_len;
         CHECK(sudoku_game_add_notes_many(probe,add,2u,&changed)==SUDOKU_GAME_OK);
         CHECK(changed==0u && probe->history_cursor==cursor);
-        CHECK(sudoku_game_remove_notes_many(probe,first,2u,&changed)==SUDOKU_GAME_OK);
+        CHECK(sudoku_game_remove_notes_many(probe,absent,2u,&changed)==SUDOKU_GAME_OK);
         CHECK(changed==0u && probe->history_len==length);
         CHECK(sudoku_game_add_notes_many(probe,bad,2u,&changed)==SUDOKU_GAME_RANGE);
         CHECK(changed==0u);
