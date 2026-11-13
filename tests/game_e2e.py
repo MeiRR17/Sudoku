@@ -2409,6 +2409,59 @@ with tempfile.TemporaryDirectory() as directory:
     assert stdout.count('undo 0, redo 0') == 2 and not stderr
     checks += 1
 
+    # Erase a complete row's editable digits and pencil notes in one step.
+    # Original clues remain fixed; Undo/Redo restores both changed cells.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nnotes set 1 4 19\n'
+                         'erase row 1\nstatus\nundo\nnotes 1 4\n'
+                         'status\nredo\nnotes 1 4\nstatus\nquit\n')
+    assert 'Erased 2 cells from row 1 in one undoable edit.' in stdout
+    assert 'Progress: 30/81 filled' in stdout
+    assert 'Progress: 31/81 filled' in stdout
+    assert 'Notes for row 1 col 4: 1 9\n' in stdout
+    assert 'Notes for row 1 col 4:\n' in stdout
+    assert 'undo 3, redo 0' in stdout and 'undo 2, redo 1' in stdout
+    assert not stderr
+    checks += 1
+
+    # Column and 3x3 box selections use the same safe atomic engine. After
+    # Undo, a new region edit discards the obsolete Redo branch.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'notes set 1 3 19\nnotes set 2 3 25\n'
+                         'erase column 3\nundo\nnotes 1 3\nnotes 2 3\n'
+                         'erase box 1\nstatus\nundo\nnotes 2 3\nquit\n')
+    assert 'Erased 2 cells from column 3 in one undoable edit.' in stdout
+    assert 'Erased 2 cells from box 1 in one undoable edit.' in stdout
+    assert 'Notes for row 1 col 3: 1 9\n' in stdout
+    assert stdout.count('Notes for row 2 col 3: 2 5\n') == 2
+    assert 'undo 3, redo 0' in stdout and not stderr
+    checks += 1
+
+    # No-op region clearing must preserve Redo and never create a new edit.
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'set 1 3 4\nundo\nerase row 1\n'
+                         'status\nredo\nstatus\nquit\n')
+    assert 'No editable changes in row 1; history unchanged.' in stdout
+    assert 'undo 0, redo 1' in stdout and 'undo 1, redo 0' in stdout
+    assert not stderr
+    checks += 1
+
+    # Only explicit lowercase scopes and one canonical 1..9 unit are legal.
+    # Bad arguments cannot accidentally fall through to erase ROW COL.
+    bad_erase_units = [
+        'erase row', 'erase column', 'erase box',
+        'erase row 0', 'erase row 10', 'erase column -1',
+        'erase box no', 'erase box 1.0', 'erase col 1',
+        'erase ROW 1', 'erase row 1 extra', 'erase box 9 extra more',
+    ]
+    stdout, stderr = run(['--file', fixtures / 'unique.txt'],
+                         'status\n'+'\n'.join(bad_erase_units)+
+                         '\nstatus\nquit\n')
+    assert stdout.count('Error: unknown command or invalid arguments') == len(bad_erase_units)
+    assert stdout.count('undo 0, redo 0') == 2
+    assert not stderr
+    checks += 1
+
     # Read-only check of a complete batch: no board, notes, or Undo/Redo
     # changes; safe application then commits the same batch in one action.
     stdout, stderr = run(['--file', fixtures / 'unique.txt'],

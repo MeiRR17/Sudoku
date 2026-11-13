@@ -363,6 +363,7 @@ static void commands(void){
     puts("          set batch r1c3=4,r1c4=6 (comma-separated, atomic),");
     puts("          set batch check|safe r1c3=4,r1c4=6,");
     puts("          erase ROW COL | erase batch r1c3,r1c4,");
+    puts("          erase row|column|box N (unit 1..9, one Undo),");
     puts("          note ROW COL DIGIT,");
     puts("          notes ROW COL, notes set|add|remove ROW COL DIGITS,");
     puts("          notes audit [N] | notes audit row|column|box N,");
@@ -402,6 +403,8 @@ static void commands(void){
     puts("Invalid/duplicate digits are rejected; one replacement = one Undo.");
     puts("'erase batch' clears multiple editable cells and notes in one Undo.");
     puts("Any given/duplicate target rejects the entire erase batch.");
+    puts("'erase row|column|box N' clears editable digits and notes only.");
+    puts("Boxes are numbered left-to-right, top-to-bottom (1..9).");
     puts("'candidates' lists legal digits without guessing.");
     puts("'focus [N]' ranks empty cells by fewest legal candidates (default 5).");
     puts("'set batch r1c3=4,r1c4=6' places all digits in a single Undo step.");
@@ -735,6 +738,29 @@ static int parse_batch_moves(const char *spec,
     }
     *count=n;
     return n!=0u;
+}
+/* Collect only non-given cells of a selected row, column or 3x3 box.
+ * Box numbering is row-major: 1 = top left, 9 = bottom right.
+ * The transactional engine still validates every target and the live state. */
+static unsigned erase_unit_targets(const SudokuGame *game,
+                                   const char *scope,unsigned number,
+                                   SudokuGameCell cells[9]){
+    unsigned slot,count=0u;
+    for(slot=0u;slot<9u;++slot){
+        unsigned row,col,index;
+        if(strcmp(scope,"row")==0){row=number;col=slot+1u;}
+        else if(strcmp(scope,"column")==0){row=slot+1u;col=number;}
+        else {
+            row=((number-1u)/3u)*3u+slot/3u+1u;
+            col=((number-1u)%3u)*3u+slot%3u+1u;
+        }
+        index=(row-1u)*9u+col-1u;
+        if(game->givens.cells[index])continue;
+        cells[count].row=row;
+        cells[count].col=col;
+        ++count;
+    }
+    return count;
 }
 /* A strict comma-separated list of 1..81 rNcM coordinates.
  * No whitespace, optional digits, partial tokens or trailing comma accepted.
@@ -3244,6 +3270,23 @@ static int event_loop(SudokuGame *game,PlayOptions *opt){
                            cleared,cleared==1u?"":"s");
                 else
                     puts("No cells to erase; history unchanged.");
+            }
+        }
+        else if(strcmp(command,"erase")==0&&a&&b&&!c&&!extra&&
+                (strcmp(a,"row")==0||strcmp(a,"column")==0||
+                 strcmp(a,"box")==0)&&
+                decimal(b,9u,&digit)&&digit>=1u){
+            SudokuGameCell cells[9];
+            unsigned count=erase_unit_targets(game,a,(unsigned)digit,cells);
+            unsigned cleared=0u;
+            status=sudoku_game_erase_many(game,cells,count,&cleared);
+            if(status==SUDOKU_GAME_OK){
+                if(cleared)
+                    printf("Erased %u cell%s from %s %u in one undoable edit.\n",
+                           cleared,cleared==1u?"":"s",a,(unsigned)digit);
+                else
+                    printf("No editable changes in %s %u; history unchanged.\n",
+                           a,(unsigned)digit);
             }
         }
         else if(strcmp(command,"erase")==0&&position(a,b,&r,&d)&&!c)
