@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import secrets
 import stat
 import subprocess
 import sys
@@ -154,21 +155,40 @@ def _open_receipt_parent(parent):
     return fd
 
 
+def _create_receipt_stage(parent_fd, basename):
+    """Create a private random staging inode inside the pinned POSIX parent.
+
+    Resolving a pathname via mkstemp(dir=parent) would let a concurrent parent
+    rename redirect staging into a different directory. dir_fd avoids this.
+    """
+    flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+             getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_NOFOLLOW', 0))
+    for _ in range(16):
+        name = basename + '.tmp.' + secrets.token_hex(12)
+        try:
+            return os.open(name, flags, 0o600, dir_fd=parent_fd), name
+        except FileExistsError:
+            continue
+    raise FileExistsError('could not reserve a private receipt staging file')
+
+
 def write_receipt(output, receipt):
     """Publish a private, no-overwrite JSON receipt; sync its POSIX directory.
 
-    File fsync alone does not persist the link/unlink directory updates. On
-    POSIX pin the parent, publish via directory-relative hardlink, remove the
-    staging name, then fsync the pinned directory and check path identity.
-    A failure after link means publication may have occurred: never claim an
-    acceptance receipt was successfully durably published in that case.
-    Windows keeps the existing no-replace hardlink path without dir fsync.
+    Pin the parent before creating the stage. All POSIX stage, link and cleanup
+    operations use that directory handle, not a separately resolved pathname.
+    File and directory fsyncs precede any claim of durable local publication.
+    This does not authenticate evidence or eliminate external filesystem races.
     """
     output.parent.mkdir(parents=True, exist_ok=True)
     parent_fd = _open_receipt_parent(output.parent) if os.name == 'posix' else None
     try:
-        fd, name = tempfile.mkstemp(prefix=output.name + '.tmp.', dir=output.parent)
-        stage = Path(name)
+        if parent_fd is None:
+            fd, name = tempfile.mkstemp(prefix=output.name + '.tmp.', dir=output.parent)
+            stage = Path(name)
+            stage_name = None
+        else:
+            fd, stage_name = _create_receipt_stage(parent_fd, output.name)
         created = os.fstat(fd)
         try:
             try:
@@ -184,21 +204,23 @@ def write_receipt(output, receipt):
             if parent_fd is None:
                 os.link(stage, output)
             else:
-                # Stage and destination must resolve in the pinned parent.
-                # This check also prevents publishing a swapped staging inode.
                 if not _same_receipt_parent(output.parent, parent_fd):
                     raise OSError('receipt directory changed before publication')
-                staged = os.stat(stage.name, dir_fd=parent_fd,
+                staged = os.stat(stage_name, dir_fd=parent_fd,
                                  follow_symlinks=False)
                 if (staged.st_dev, staged.st_ino) != (created.st_dev, created.st_ino):
                     raise OSError('receipt staging file replaced')
-                os.link(stage.name, output.name, src_dir_fd=parent_fd,
+                os.link(stage_name, output.name, src_dir_fd=parent_fd,
                         dst_dir_fd=parent_fd, follow_symlinks=False)
+                published = os.stat(output.name, dir_fd=parent_fd,
+                                    follow_symlinks=False)
+                if (published.st_dev, published.st_ino) != (created.st_dev, created.st_ino):
+                    raise OSError('receipt published inode differs from stage')
         finally:
             if parent_fd is None:
                 stage.unlink()
             else:
-                os.unlink(stage.name, dir_fd=parent_fd)
+                os.unlink(stage_name, dir_fd=parent_fd)
         if parent_fd is not None:
             os.fsync(parent_fd)
             if not _same_receipt_parent(output.parent, parent_fd):

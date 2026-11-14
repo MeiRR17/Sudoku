@@ -257,6 +257,76 @@ class ReceiptWriteTests(unittest.TestCase):
                 acceptance.write_receipt(alias / 'receipt.json', {'status': 'passed'})
             self.assertEqual(list(genuine.iterdir()), [])
 
+    @unittest.skipUnless(os.name == 'posix', 'POSIX dir_fd stage only')
+    def test_posix_stage_collision_retries_without_touching_orphan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'receipt.json'
+            orphan = root / ('receipt.json.tmp.' + 'a' * 24)
+            orphan.write_text('previous incomplete stage', encoding='utf-8')
+            with patch.object(acceptance.secrets, 'token_hex',
+                              side_effect=['a' * 24, 'b' * 24]):
+                acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertEqual(orphan.read_text(encoding='utf-8'),
+                             'previous incomplete stage')
+            self.assertEqual(json.loads(dest.read_text()), {'status': 'passed'})
+            self.assertEqual(list(root.glob('receipt.json.tmp.*')), [orphan])
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX dir_fd stage only')
+    def test_parent_swap_during_stage_creation_cleans_pinned_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = root / 'original'
+            original.mkdir()
+            displaced = root / 'displaced'
+            destination = original / 'receipt.json'
+            def swap_parent(_):
+                original.rename(displaced)
+                original.mkdir()
+                return 'a' * 24
+            with patch.object(acceptance.secrets, 'token_hex',
+                              side_effect=swap_parent):
+                with self.assertRaisesRegex(OSError,
+                                            'changed before publication'):
+                    acceptance.write_receipt(destination, {'status': 'passed'})
+            self.assertEqual(list(displaced.iterdir()), [])
+            self.assertEqual(list(original.iterdir()), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX dir_fd stage only')
+    def test_published_inode_replacement_cannot_be_certified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / 'receipt.json'
+            real_link = os.link
+            def tamper(*args, **kwargs):
+                real_link(*args, **kwargs)
+                destination.unlink()
+                destination.write_text('replacement', encoding='utf-8')
+            with patch.object(acceptance.os, 'link', side_effect=tamper):
+                with self.assertRaisesRegex(OSError, 'published inode differs'):
+                    acceptance.write_receipt(destination, {'status': 'passed'})
+            self.assertEqual(destination.read_text(encoding='utf-8'),
+                             'replacement')
+            self.assertEqual(list(root.glob('receipt.json.tmp.*')), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX private stage only')
+    def test_stage_is_private_before_receipt_bytes_written(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory) / 'receipt.json'
+            real_fdopen = os.fdopen
+            seen_modes = []
+            def observe(fd, *args, **kwargs):
+                seen_modes.append(stat.S_IMODE(os.fstat(fd).st_mode))
+                return real_fdopen(fd, *args, **kwargs)
+            old_umask = os.umask(0)
+            try:
+                with patch.object(acceptance.os, 'fdopen', side_effect=observe):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            finally:
+                os.umask(old_umask)
+            self.assertEqual(seen_modes, [0o600])
+            self.assertEqual(stat.S_IMODE(dest.stat().st_mode), 0o600)
+
     def test_existing_receipt_cannot_be_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:
             dest = Path(directory) / 'evidence.json'
