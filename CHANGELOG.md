@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-14 final receipt privacy/link-count verification:** The last post-fsync receipt check now also requires owner-only `0600`, the same file owner as the staged inode, and exactly one remaining hard link. Two fault-injection regressions attempt to broaden permissions or add a second hardlink during directory fsync; both must prevent a successful receipt result. Full repository and native platform acceptance remain pending.
+
 - **2026-11-14 post-directory-fsync receipt identity:** After syncing the pinned parent and verifying its pathname identity, re-stat the final published name relative to the pinned descriptor and require the exact original regular-file inode. A replacement symlink/file or removal during the final fsync window now prevents a false success receipt. Two real filesystem regressions inject replacement and deletion immediately after directory fsync. Full project/native acceptance is still pending; release remains HOLD.
 
 - **2026-11-14 receipt-stage `fstat` recovery:** If the first inode lookup fails immediately after exclusive POSIX stage creation, retry identity lookup through the still-open descriptor before guarded cleanup. If identity remains unavailable, close the descriptor and deliberately leave the unidentifiable orphan rather than unlinking by name. Two focused tests cover one-shot and persistent `fstat` failure. This is a fail-closed cleanup improvement; full project/native acceptance remains pending.

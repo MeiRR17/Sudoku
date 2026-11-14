@@ -231,6 +231,51 @@ class ReceiptWriteTests(unittest.TestCase):
             self.assertTrue(dest.is_symlink())
             self.assertEqual(victim.read_text(encoding='utf-8'), 'do not follow')
 
+    @unittest.skipUnless(os.name == 'posix', 'post-fsync private mode check is POSIX-only')
+    def test_final_mode_broadening_after_directory_fsync_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory) / 'receipt.json'
+            real_fsync = os.fsync
+            changed = False
+            def broaden_after_directory_sync(fd):
+                nonlocal changed
+                result = real_fsync(fd)
+                if stat.S_ISDIR(os.fstat(fd).st_mode) and not changed:
+                    changed = True
+                    os.chmod(dest, 0o644)
+                return result
+            with patch.object(acceptance.os, 'fsync',
+                              side_effect=broaden_after_directory_sync):
+                with self.assertRaisesRegex(OSError,
+                                            'permissions or link count changed'):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertTrue(changed)
+            self.assertEqual(stat.S_IMODE(dest.stat().st_mode), 0o644)
+
+    @unittest.skipUnless(os.name == 'posix', 'post-fsync hardlink check is POSIX-only')
+    def test_extra_hardlink_after_directory_fsync_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'receipt.json'
+            alias = root / 'unexpected-alias'
+            real_fsync = os.fsync
+            changed = False
+            def add_link_after_directory_sync(fd):
+                nonlocal changed
+                result = real_fsync(fd)
+                if stat.S_ISDIR(os.fstat(fd).st_mode) and not changed:
+                    changed = True
+                    os.link(dest, alias)
+                return result
+            with patch.object(acceptance.os, 'fsync',
+                              side_effect=add_link_after_directory_sync):
+                with self.assertRaisesRegex(OSError,
+                                            'permissions or link count changed'):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertTrue(changed)
+            self.assertTrue(alias.exists())
+            self.assertEqual(dest.stat().st_ino, alias.stat().st_ino)
+
     @unittest.skipUnless(os.name == 'posix', 'post-fsync identity check is POSIX-only')
     def test_final_name_removal_after_directory_fsync_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

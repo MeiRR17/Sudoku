@@ -156,11 +156,14 @@ def _open_receipt_parent(parent):
 
 
 def _verify_published_receipt(parent_fd, name, original):
-    """Require the final public name to retain the exact staged inode."""
+    """Require the final name, private mode and link count to match the stage."""
     published = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
     if (not stat.S_ISREG(published.st_mode) or
             (published.st_dev, published.st_ino) != (original.st_dev, original.st_ino)):
         raise OSError('published receipt changed after directory synchronization')
+    if (stat.S_IMODE(published.st_mode) != 0o600 or
+            published.st_uid != original.st_uid or published.st_nlink != 1):
+        raise OSError('published receipt permissions or link count changed')
 
 
 def _unlink_owned_receipt_stage(parent_fd, name, original):
