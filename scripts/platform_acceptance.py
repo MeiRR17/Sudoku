@@ -174,6 +174,7 @@ def _create_receipt_stage(parent_fd, basename):
             fd = os.open(name, flags, 0o600, dir_fd=parent_fd)
         except FileExistsError:
             continue
+        created = None
         try:
             created = os.fstat(fd)
             # A restrictive caller umask can strip owner bits at creation.
@@ -184,8 +185,14 @@ def _create_receipt_stage(parent_fd, basename):
                 raise OSError('receipt staging permissions not private and owner-readable')
         except BaseException:
             try:
-                if 'created' in locals():
-                    _unlink_owned_receipt_stage(parent_fd, name, created)
+                # If the initial fstat itself failed, retry through the still
+                # open descriptor. Only remove a pathname after its inode has
+                # been identified; otherwise leave an orphan rather than risk
+                # deleting an unrelated file.
+                identity = created if created is not None else os.fstat(fd)
+                _unlink_owned_receipt_stage(parent_fd, name, identity)
+            except OSError:
+                pass
             finally:
                 os.close(fd)
             raise

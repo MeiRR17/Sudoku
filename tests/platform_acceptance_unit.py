@@ -339,6 +339,44 @@ class ReceiptWriteTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(dest.stat().st_mode), 0o600)
             self.assertEqual(json.loads(dest.read_text()), {'status': 'passed'})
 
+    @unittest.skipUnless(os.name == 'posix', 'POSIX receipt descriptor check only')
+    def test_initial_fstat_failure_retries_identity_and_cleans_stage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory) / 'receipt.json'
+            real_fstat = os.fstat
+            failed = False
+            def fail_once(fd):
+                nonlocal failed
+                if not stat.S_ISDIR(real_fstat(fd).st_mode) and not failed:
+                    failed = True
+                    raise OSError('injected initial fstat failure')
+                return real_fstat(fd)
+            with patch.object(acceptance.os, 'fstat', side_effect=fail_once):
+                with self.assertRaisesRegex(OSError, 'initial fstat failure'):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertTrue(failed)
+            self.assertFalse(dest.exists())
+            self.assertEqual(list(dest.parent.iterdir()), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX receipt descriptor check only')
+    def test_persistent_fstat_failure_leaves_only_unidentified_orphan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory) / 'receipt.json'
+            real_fstat = os.fstat
+            def fail_file_fstat(fd):
+                if not stat.S_ISDIR(real_fstat(fd).st_mode):
+                    raise OSError('persistent fstat failure')
+                return real_fstat(fd)
+            with patch.object(acceptance.os, 'fstat', side_effect=fail_file_fstat):
+                with self.assertRaisesRegex(OSError, 'persistent fstat failure'):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertFalse(dest.exists())
+            stages = list(dest.parent.glob('receipt.json.tmp.*'))
+            # Without a trustworthy inode identity, fail closed and do not
+            # unlink by pathname. The open descriptor is closed on the error path.
+            self.assertEqual(len(stages), 1)
+            self.assertTrue(stages[0].is_file())
+
     @unittest.skipUnless(os.name == 'posix', 'POSIX receipt mode check only')
     def test_fchmod_failure_aborts_and_cleans_private_stage(self):
         with tempfile.TemporaryDirectory() as directory:
