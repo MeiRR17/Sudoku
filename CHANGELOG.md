@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-14 strict dirfd capability gate:** Before POSIX receipt path traversal, explicitly require `O_DIRECTORY`, `O_NOFOLLOW`, and `dir_fd` support from `open`, `mkdir`, `stat`, `link` and `unlink`. Use the required flags directly instead of silently substituting zero when a platform constant is absent. Unsupported POSIX hosts now fail closed before creating receipt directories or files. Two capability-injection regressions cover a missing no-follow flag and incomplete dirfd support.
+
 - **2026-11-14 pinned receipt parent walk:** Replace full-path parent opening and `mkdir(parents=True)` with component-by-component POSIX `openat`-style traversal using a pinned `dir_fd`, `O_DIRECTORY` and `O_NOFOLLOW`. Missing directories are created relative to the pinned predecessor, so a concurrent ancestor symlink swap cannot redirect staging. Three regressions cover direct writer rejection of a symlink ancestor, nested parent creation, and an injected swap at component open. Full project/native acceptance remains pending.
 
 - **2026-11-14 full receipt parent-chain validation:** Extend the destination preflight beyond the immediate parent: reject `..` traversal, inspect every existing ancestor with `lstat` so intermediate symlinks cannot redirect the receipt, and reject non-directory path components before the quality gate starts. Preserve the absolute lexical path for the pinned-dirfd writer. Three regressions cover a symlinked grandparent, a regular-file parent component, and parent traversal. Full repository/native acceptance remains pending.

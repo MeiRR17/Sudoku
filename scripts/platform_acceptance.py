@@ -143,6 +143,16 @@ def _same_receipt_parent(parent, pinned_fd):
             and (pinned.st_dev, pinned.st_ino) == (current.st_dev, current.st_ino))
 
 
+def _require_receipt_dirfd_support():
+    """Refuse POSIX hosts missing any primitive required by the no-follow walk."""
+    required_flags = ('O_DIRECTORY', 'O_NOFOLLOW')
+    required_functions = (os.open, os.mkdir, os.stat, os.link, os.unlink)
+    if any(not hasattr(os, name) for name in required_flags):
+        raise OSError('platform lacks required no-follow directory flags')
+    if any(function not in os.supports_dir_fd for function in required_functions):
+        raise OSError('platform lacks required directory-relative filesystem operations')
+
+
 def _open_receipt_parent(parent):
     """Walk and pin every directory component without following symlinks.
 
@@ -152,9 +162,9 @@ def _open_receipt_parent(parent):
     """
     if os.name != 'posix':
         raise OSError('pinned receipt parent walk requires POSIX')
+    _require_receipt_dirfd_support()
     flags = (os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0) |
-             getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_DIRECTORY', 0) |
-             getattr(os, 'O_NOFOLLOW', 0))
+             getattr(os, 'O_CLOEXEC', 0) | os.O_DIRECTORY | os.O_NOFOLLOW)
     absolute = Path(os.path.abspath(parent))
     current_fd = os.open(absolute.anchor, flags)
     try:

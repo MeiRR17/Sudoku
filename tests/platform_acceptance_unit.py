@@ -281,6 +281,28 @@ class ReceiptWriteTests(unittest.TestCase):
                 self.assertEqual(stat.S_IMODE(dest.stat().st_mode), 0o600)
 
     @unittest.skipUnless(os.name == 'posix', 'pinned directory walk is POSIX-only')
+    def test_missing_no_follow_flag_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'receipt.json'
+            with patch.object(acceptance.os, 'O_NOFOLLOW', 0):
+                with self.assertRaisesRegex(OSError, 'no-follow directory flags'):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertEqual(list(root.iterdir()), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'pinned directory walk is POSIX-only')
+    def test_missing_dirfd_primitive_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'receipt.json'
+            supported = set(acceptance.os.supports_dir_fd)
+            supported.discard(acceptance.os.open)
+            with patch.object(acceptance.os, 'supports_dir_fd', supported):
+                with self.assertRaisesRegex(OSError, 'directory-relative filesystem operations'):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertEqual(list(root.iterdir()), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'pinned directory walk is POSIX-only')
     def test_writer_rejects_symlinked_ancestor_without_touching_target(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
