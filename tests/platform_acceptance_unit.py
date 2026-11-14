@@ -327,6 +327,84 @@ class ReceiptWriteTests(unittest.TestCase):
             self.assertEqual(seen_modes, [0o600])
             self.assertEqual(stat.S_IMODE(dest.stat().st_mode), 0o600)
 
+    @unittest.skipUnless(os.name == 'posix', 'POSIX receipt mode check only')
+    def test_restrictive_umask_still_produces_owner_readable_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory) / 'receipt.json'
+            previous = os.umask(0o777)
+            try:
+                acceptance.write_receipt(dest, {'status': 'passed'})
+            finally:
+                os.umask(previous)
+            self.assertEqual(stat.S_IMODE(dest.stat().st_mode), 0o600)
+            self.assertEqual(json.loads(dest.read_text()), {'status': 'passed'})
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX receipt mode check only')
+    def test_fchmod_failure_aborts_and_cleans_private_stage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory) / 'receipt.json'
+            with patch.object(acceptance.os, 'fchmod',
+                              side_effect=OSError('injected mode failure')):
+                with self.assertRaisesRegex(OSError, 'mode failure'):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertFalse(dest.exists())
+            self.assertEqual(list(dest.parent.iterdir()), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX receipt mode check only')
+    def test_ineffective_fchmod_fails_closed_under_restrictive_umask(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory) / 'receipt.json'
+            previous = os.umask(0o777)
+            try:
+                with patch.object(acceptance.os, 'fchmod', return_value=None):
+                    with self.assertRaisesRegex(OSError, 'permissions not private'):
+                        acceptance.write_receipt(dest, {'status': 'passed'})
+            finally:
+                os.umask(previous)
+            self.assertFalse(dest.exists())
+            self.assertEqual(list(dest.parent.iterdir()), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX inode-guarded cleanup only')
+    def test_replaced_stage_regular_file_is_not_unlinked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'receipt.json'
+            real_link = os.link
+            def replace_stage(*args, **kwargs):
+                real_link(*args, **kwargs)
+                stage = next(root.glob('receipt.json.tmp.*'))
+                stage.unlink()
+                stage.write_text('another writer', encoding='utf-8')
+            with patch.object(acceptance.os, 'link',
+                              side_effect=replace_stage):
+                with self.assertRaisesRegex(OSError,
+                                            'staging file replaced before cleanup'):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertEqual(next(root.glob('receipt.json.tmp.*')).read_text(),
+                             'another writer')
+            self.assertEqual(json.loads(dest.read_text()), {'status': 'passed'})
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX inode-guarded cleanup only')
+    def test_replaced_stage_symlink_does_not_delete_unrelated_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'receipt.json'
+            victim = root / 'unrelated'
+            victim.write_text('keep', encoding='utf-8')
+            real_link = os.link
+            def replace_stage(*args, **kwargs):
+                real_link(*args, **kwargs)
+                stage = next(root.glob('receipt.json.tmp.*'))
+                stage.unlink()
+                stage.symlink_to(victim)
+            with patch.object(acceptance.os, 'link',
+                              side_effect=replace_stage):
+                with self.assertRaisesRegex(OSError,
+                                            'staging file replaced before cleanup'):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertEqual(victim.read_text(), 'keep')
+            self.assertTrue(next(root.glob('receipt.json.tmp.*')).is_symlink())
+
     def test_existing_receipt_cannot_be_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:
             dest = Path(directory) / 'evidence.json'

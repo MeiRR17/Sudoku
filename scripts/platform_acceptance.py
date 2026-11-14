@@ -155,20 +155,41 @@ def _open_receipt_parent(parent):
     return fd
 
 
-def _create_receipt_stage(parent_fd, basename):
-    """Create a private random staging inode inside the pinned POSIX parent.
+def _unlink_owned_receipt_stage(parent_fd, name, original):
+    """Never delete a staging pathname after a concurrent inode substitution."""
+    current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    if (not stat.S_ISREG(current.st_mode) or
+            (current.st_dev, current.st_ino) != (original.st_dev, original.st_ino)):
+        raise OSError('receipt staging file replaced before cleanup')
+    os.unlink(name, dir_fd=parent_fd)
 
-    Resolving a pathname via mkstemp(dir=parent) would let a concurrent parent
-    rename redirect staging into a different directory. dir_fd avoids this.
-    """
+
+def _create_receipt_stage(parent_fd, basename):
+    """Create owner-readable staging inside pinned directory under any umask."""
     flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL |
              getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_NOFOLLOW', 0))
     for _ in range(16):
         name = basename + '.tmp.' + secrets.token_hex(12)
         try:
-            return os.open(name, flags, 0o600, dir_fd=parent_fd), name
+            fd = os.open(name, flags, 0o600, dir_fd=parent_fd)
         except FileExistsError:
             continue
+        try:
+            created = os.fstat(fd)
+            # A restrictive caller umask can strip owner bits at creation.
+            # Reassert private access before writing any evidence bytes.
+            os.fchmod(fd, 0o600)
+            if (not stat.S_ISREG(created.st_mode) or
+                    stat.S_IMODE(os.fstat(fd).st_mode) != 0o600):
+                raise OSError('receipt staging permissions not private and owner-readable')
+        except BaseException:
+            try:
+                if 'created' in locals():
+                    _unlink_owned_receipt_stage(parent_fd, name, created)
+            finally:
+                os.close(fd)
+            raise
+        return fd, name, created
     raise FileExistsError('could not reserve a private receipt staging file')
 
 
@@ -187,9 +208,9 @@ def write_receipt(output, receipt):
             fd, name = tempfile.mkstemp(prefix=output.name + '.tmp.', dir=output.parent)
             stage = Path(name)
             stage_name = None
+            created = os.fstat(fd)
         else:
-            fd, stage_name = _create_receipt_stage(parent_fd, output.name)
-        created = os.fstat(fd)
+            fd, stage_name, created = _create_receipt_stage(parent_fd, output.name)
         try:
             try:
                 file = os.fdopen(fd, 'w', encoding='utf-8', newline='\n')
@@ -220,7 +241,7 @@ def write_receipt(output, receipt):
             if parent_fd is None:
                 stage.unlink()
             else:
-                os.unlink(stage_name, dir_fd=parent_fd)
+                _unlink_owned_receipt_stage(parent_fd, stage_name, created)
         if parent_fd is not None:
             os.fsync(parent_fd)
             if not _same_receipt_parent(output.parent, parent_fd):
