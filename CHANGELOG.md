@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-14 complete receipt-writer capability gate:** Extend POSIX preflight to require descriptor-based `fchmod` (`os.supports_fd`) and `follow_symlinks=False` support for both `stat` and `link` (`os.supports_follow_symlinks`), in addition to directory-relative operations. The writer now refuses to start if a primitive it actually uses is unsupported. Three capability-injection regressions cover missing fchmod fd support, no-follow stat, and no-follow link. Tests have been authored but not run; native release gates remain open.
+
 - **2026-11-14 nonzero mandatory flag validation:** Tighten the capability gate to reject missing, non-integer or zero-valued `O_DIRECTORY`/`O_NOFOLLOW` constants; existence alone is not sufficient. Expand the injection regression to exercise both flags as zero and require no output directory or receipt to be created. Full test execution remains pending.
 
 - **2026-11-14 strict dirfd capability gate:** Before POSIX receipt path traversal, explicitly require `O_DIRECTORY`, `O_NOFOLLOW`, and `dir_fd` support from `open`, `mkdir`, `stat`, `link` and `unlink`. Use the required flags directly instead of silently substituting zero when a platform constant is absent. Unsupported POSIX hosts now fail closed before creating receipt directories or files. Two capability-injection regressions cover a missing no-follow flag and incomplete dirfd support.

@@ -146,12 +146,18 @@ def _same_receipt_parent(parent, pinned_fd):
 def _require_receipt_dirfd_support():
     """Refuse POSIX hosts missing any primitive required by the no-follow walk."""
     required_flags = ('O_DIRECTORY', 'O_NOFOLLOW')
-    required_functions = (os.open, os.mkdir, os.stat, os.link, os.unlink)
+    dirfd_functions = (os.open, os.mkdir, os.stat, os.link, os.unlink)
     if any(not isinstance(getattr(os, name, None), int) or getattr(os, name) == 0
            for name in required_flags):
         raise OSError('platform lacks required no-follow directory flags')
-    if any(function not in os.supports_dir_fd for function in required_functions):
+    if any(function not in os.supports_dir_fd for function in dirfd_functions):
         raise OSError('platform lacks required directory-relative filesystem operations')
+    if (not callable(getattr(os, 'fchmod', None)) or
+            os.fchmod not in os.supports_fd):
+        raise OSError('platform lacks descriptor-based chmod support')
+    if any(function not in os.supports_follow_symlinks
+           for function in (os.stat, os.link)):
+        raise OSError('platform lacks no-follow stat/link support')
 
 
 def _open_receipt_parent(parent):

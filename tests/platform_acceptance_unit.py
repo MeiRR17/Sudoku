@@ -305,6 +305,39 @@ class ReceiptWriteTests(unittest.TestCase):
             self.assertEqual(list(root.iterdir()), [])
 
     @unittest.skipUnless(os.name == 'posix', 'pinned directory walk is POSIX-only')
+    def test_missing_fchmod_fd_support_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            supported = set(acceptance.os.supports_fd)
+            supported.discard(acceptance.os.fchmod)
+            with patch.object(acceptance.os, 'supports_fd', supported):
+                with self.assertRaisesRegex(OSError, 'descriptor-based chmod'):
+                    acceptance.write_receipt(root / 'receipt.json', {'status': 'passed'})
+            self.assertEqual(list(root.iterdir()), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'pinned directory walk is POSIX-only')
+    def test_missing_no_follow_stat_support_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            supported = set(acceptance.os.supports_follow_symlinks)
+            supported.discard(acceptance.os.stat)
+            with patch.object(acceptance.os, 'supports_follow_symlinks', supported):
+                with self.assertRaisesRegex(OSError, 'no-follow stat/link'):
+                    acceptance.write_receipt(root / 'receipt.json', {'status': 'passed'})
+            self.assertEqual(list(root.iterdir()), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'pinned directory walk is POSIX-only')
+    def test_missing_no_follow_link_support_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            supported = set(acceptance.os.supports_follow_symlinks)
+            supported.discard(acceptance.os.link)
+            with patch.object(acceptance.os, 'supports_follow_symlinks', supported):
+                with self.assertRaisesRegex(OSError, 'no-follow stat/link'):
+                    acceptance.write_receipt(root / 'receipt.json', {'status': 'passed'})
+            self.assertEqual(list(root.iterdir()), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'pinned directory walk is POSIX-only')
     def test_writer_rejects_symlinked_ancestor_without_touching_target(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
