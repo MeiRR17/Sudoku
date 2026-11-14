@@ -49,7 +49,7 @@ Errors are **not** JSON documents in v1: failures produce no JSON/standard-outpu
 | 4 | input/output I/O or internal solver error | cannot read input, output exists, cannot write result |
 | 5 | `solve` of a well-formed but unsatisfiable puzzle | no solution; no output generated |
 
-`--output PATH` creates a **new** result file only after successful parsing and solving. Existing paths and symlinks are not overwritten. `--output -` selects stdout. The file is removed if a newly created output file encounters a detected write/close failure. This is **not** a transactional/atomic file replacement protocol; a crash/power loss during output may leave partial data. No `--force` flag is implemented. Input may be selected via `--puzzle`, `--file PATH` (including `--file -`), or `--stdin` (exactly one source).
+`--output PATH` stages and syncs the complete result in a same-directory temporary file and only then publishes a **new** final result file. POSIX uses private (`0600`) exclusive staging and atomic no-overwrite `link`; Windows uses exclusive staging with `MoveFileExA` without replace (Windows behavior still unverified). Existing files and symlinks cannot be overwritten, including a race where another writer creates the destination. `--output -` selects stdout. A write, sync or publish error removes the newly created staging file without installing a partial final result. A process crash can leave an orphaned `.tmp.*` staging file; neither this nor file syncing guarantees the parent-directory entry survives power loss on all filesystems.
 
 `--format compact` retains the preexisting output convention: one 81-digit board (validate/solve), or `0`, `1`, `2+` for count. `--format text` is intended for people; it is not a machine-readable contract.
 

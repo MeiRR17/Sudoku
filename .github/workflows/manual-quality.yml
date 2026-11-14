@@ -1,11 +1,11 @@
 name: Sudoku manual quality gate
-# Intentionally no push/pull_request/cron triggers: conserve CI minutes.
-# Run manually in Actions, selecting exactly one platform per invocation.
+# No push/pull_request/cron triggers: conserve CI minutes.
+# Default runs one host; select 'all' to run the same exact SHA on 3 hosts.
 on:
   workflow_dispatch:
     inputs:
       runner_os:
-        description: Host runner to test (one platform per invocation)
+        description: Host runner to test, or all three for a receipt matrix
         required: true
         type: choice
         default: ubuntu-latest
@@ -13,6 +13,7 @@ on:
           - ubuntu-latest
           - windows-latest
           - macos-latest
+          - all
       full_linux_gate:
         description: Run GCC/Clang/Sanitizers/coverage/benchmark (Linux only)
         required: true
@@ -21,10 +22,15 @@ on:
 
 permissions:
   contents: read
+  actions: read # Review job downloads metadata from this exact run only.
 
 jobs:
   quality:
-    runs-on: ${{ inputs.runner_os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ${{ fromJSON(inputs.runner_os == 'all' && '["ubuntu-latest","windows-latest","macos-latest"]' || format('["{0}"]', inputs.runner_os)) }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
       - name: Report actual host architecture (platform claims require evidence)
@@ -32,20 +38,62 @@ jobs:
       - name: Check out code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Refuse to certify a runner with the wrong CPU architecture
-        run: python scripts/verify_runner_platform.py --expected "${{ inputs.runner_os }}"
-      - name: Fast CMake/CTest gate (no external Python deps)
-        if: ${{ !inputs.full_linux_gate || inputs.runner_os != 'ubuntu-latest' }}
-        run: python scripts/quality_gate.py --mode fast
-      - name: Full Linux gate (may consume more CI minutes)
-        if: ${{ inputs.full_linux_gate && inputs.runner_os == 'ubuntu-latest' }}
-        run: python scripts/quality_gate.py --mode full
-      - name: Verify deterministic development archives on selected OS
-        if: ${{ !inputs.full_linux_gate || inputs.runner_os != 'ubuntu-latest' }}
+        run: python scripts/verify_runner_platform.py --expected "${{ matrix.runner }}"
+      - name: Test acceptance guards without C toolchain
+        run: python -B -m unittest discover -s tests -p '*_unit.py' -v
+      - name: Build, verify development archives, and emit exact-commit receipt
+        # A receipt exists only after the quality gate and package verification
+        # succeed on the selected host; this workflow remains manual-only.
+        run: python scripts/platform_acceptance.py --expected "${{ matrix.runner }}" --mode "${{ inputs.full_linux_gate && matrix.runner == 'ubuntu-latest' && 'full' || 'fast' }}" --require-sha "${{ github.sha }}"
+      - name: Validate real local archives against the unsigned receipt
+        # All four archive files are still present here; they are intentionally
+        # NOT uploaded to public Actions artifacts before owner license approval.
+        run: python scripts/verify_receipt_matrix.py --require-sha "${{ github.sha }}" --local dist --expected "${{ matrix.runner }}"
+      - name: Preserve unsigned acceptance evidence for independent review
+        # Only metadata is retained after independent local ZIP/TAR/digest checks.
+        # Keep unlicensed development binaries off public Actions artifacts.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sudoku-evidence-${{ matrix.runner }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: |
+            dist/platform-receipt.json
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+
+  compare-unsigned-receipts:
+    # Single-host runs incur no additional job. Three-host runs compare only
+    # metadata; archive bytes were validated separately on each native host.
+    if: ${{ inputs.runner_os == 'all' }}
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the same commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Fetch only unsigned receipts from this run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_SHA: ${{ github.sha }}
+          EVIDENCE_ATTEMPT: ${{ github.run_attempt }}
         run: |
-          python scripts/package_release.py --build .quality-build/native --output dist
-          python scripts/package_release.py --verify-only --output dist
-      - name: Verify full Linux development archives
-        if: ${{ inputs.full_linux_gate && inputs.runner_os == 'ubuntu-latest' }}
-        run: |
-          python scripts/package_release.py --build .quality-build/clang --output dist
-          python scripts/package_release.py --verify-only --output dist
+          set -euo pipefail
+          for runner in ubuntu-latest windows-latest macos-latest; do
+            mkdir -p "evidence/$runner"
+            gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --name "sudoku-evidence-${runner}-${EVIDENCE_SHA}-attempt-${EVIDENCE_ATTEMPT}" \
+              --dir "evidence/$runner"
+          done
+      - name: Compare three unsigned metadata claims (NOT release certification)
+        run: >-
+          python scripts/verify_receipt_matrix.py
+          --require-sha "${{ github.sha }}"
+          --metadata-only
+          --require-run-id "${{ github.run_id }}"
+          --require-run-attempt "${{ github.run_attempt }}"
+          --linux evidence/ubuntu-latest
+          --windows evidence/windows-latest
+          --macos evidence/macos-latest

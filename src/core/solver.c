@@ -30,6 +30,11 @@ static unsigned popcount9(uint16_t bits) {
 /* Select the least-constrained branching point with a deterministic tie-break.
  * -1: complete; -2: contradiction; otherwise the next board index. */
 static int choose_cell(const Search *search, uint16_t *allowed) {
+    /* A unit with a missing digit and no possible location is impossible
+     * even when every individual empty cell has other legal candidates.
+     * Accumulate possibilities during the existing MRV traversal. */
+    uint16_t row_possible[9] = {0}, col_possible[9] = {0};
+    uint16_t box_possible[9] = {0};
     unsigned best_count = 10;
     int best = -1;
     unsigned i;
@@ -45,12 +50,22 @@ static int choose_cell(const Search *search, uint16_t *allowed) {
         candidates = (uint16_t)(ALL_DIGITS & (uint16_t)~blocked);
         options = popcount9(candidates);
         if (options == 0u) return -2;
+        row_possible[row] |= candidates;
+        col_possible[col] |= candidates;
+        box_possible[box] |= candidates;
         if (options < best_count) {
             best_count = options;
             best = (int)i;
             *allowed = candidates;
-            if (options == 1u) break;
         }
+    }
+    /* Do not stop the scan at a naked single: the remaining cells must
+     * contribute their possibilities before declaring a dead end. */
+    for (i = 0; i < 9u; ++i) {
+        if (((search->rows[i] | row_possible[i]) & ALL_DIGITS) != ALL_DIGITS ||
+            ((search->cols[i] | col_possible[i]) & ALL_DIGITS) != ALL_DIGITS ||
+            ((search->boxes[i] | box_possible[i]) & ALL_DIGITS) != ALL_DIGITS)
+            return -2;
     }
     return best;
 }
@@ -98,7 +113,12 @@ SudokuSolveStatus sudoku_analyze_bounded(const SudokuBoard *givens,
     if (solutions_up_to_two != NULL) *solutions_up_to_two = 0;
     if (nodes_visited != NULL) *nodes_visited = 0;
     search.limit = max_nodes;
-    if (givens == NULL || sudoku_board_validate(givens, NULL) != SUDOKU_OK)
+    /* The API promises that givens are immutable. A caller could otherwise
+     * pass the same public board pointer for input and first_solution; the
+     * final output assignment would silently overwrite the puzzle. Refuse
+     * this alias before searching or publishing any solver output. */
+    if (givens == NULL || first_solution == givens ||
+        sudoku_board_validate(givens, NULL) != SUDOKU_OK)
         return SUDOKU_SOLVE_INVALID;
     search.board = *givens;
     for (i = 0; i < SUDOKU_CELL_COUNT; ++i) {

@@ -18,7 +18,7 @@ Proposed public model:
 - Solver state contains occupancy/candidate bitsets local to an invocation; no process-wide mutable globals (UNSOLVED etc.).
 - Explicit enum values for OK, INVALID, UNSOLVABLE, UNIQUE, MULTIPLE, IO_ERROR, LIMIT_REACHED and INTERNAL_ERROR. Exact public names are finalized during v0.2.
 
-**Invariants:** all values within 0..9; no duplicate nonzero value in any unit for valid partial boards; clue positions are immutable during gameplay; solver never reports success with unsatisfied constraints.
+**Invariants:** all values within 0..9; no duplicate nonzero value in any unit for valid partial boards; clue positions are immutable during gameplay; solver never reports success with unsatisfied constraints. Exact solving also preserves the caller-owned givens board: an output pointer aliasing the input board is an invalid API call and must fail without modifying the puzzle.
 
 **Ownership:** engine should prefer stack allocation and fixed-size arrays. Any buffer allocated for CLI input or gameplay save state has an explicit owner, maximum length and cleanup path. Bounded recursion in exact solver, maximum 81 placements. A canceled/failed operation leaves externally visible state unchanged unless documented.
 

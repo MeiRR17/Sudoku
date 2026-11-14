@@ -24,3 +24,7 @@ quality-*/
 dist/
 build-*/
 .packages/
+
+# Disposable Python bytecode from local stdlib unit tests
+__pycache__/
+*.pyc

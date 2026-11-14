@@ -85,6 +85,21 @@ static int checks(void) {
     CHECK(sudoku_generate(&opts,NULL)==SUDOKU_GENERATE_INVALID);
     CHECK(memcmp(&output,&snapshot,sizeof output)==0);
     CHECK(sudoku_rate_difficulty(NULL,NULL,NULL)==SUDOKU_DIFFICULTY_INVALID);
+    /* Valid, non-duplicated givens can still leave a unit with no place
+     * for a missing digit (row 2 cannot place 8). Singles stall and the
+     * previous difficulty evaluator incorrectly reported HARD. */
+    {
+        static const char impossible[] =
+            "000008509015000400200040086000000000100320000"
+            "000001097800004000900500040000000703";
+        unsigned naked = 99u, hidden = 99u;
+        CHECK(strlen(impossible) == 81u);
+        CHECK(sudoku_board_parse(&board, (const unsigned char *)impossible,
+                                 81u, NULL) == SUDOKU_OK);
+        CHECK(sudoku_rate_difficulty(&board, &naked, &hidden)
+              == SUDOKU_DIFFICULTY_INVALID);
+        CHECK(naked == 0u && hidden == 0u);
+    }
     board.cells[0]=10u;
     CHECK(sudoku_rate_difficulty(&board,NULL,NULL)==SUDOKU_DIFFICULTY_INVALID);
     CHECK(sudoku_analyze_bounded(&board,NULL,&count,10,NULL)==SUDOKU_SOLVE_INVALID && count==0);

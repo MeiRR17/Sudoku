@@ -43,7 +43,10 @@ typedef struct SudokuGenerateResult {
  * HARD stalls with cells remaining after naked+hidden singles.
  * This is an explicitly limited, deterministic human-technique proxy, NOT
  * a validated estimate of a person's solving time. Does not ensure unique
- * solvability: call exact sudoku_analyze to validate uniqueness separately. */
+ * solvability: call exact sudoku_analyze to validate uniqueness separately.
+ * A detected contradiction (including a missing digit with no legal place
+ * in a row, column or box) returns INVALID rather than HARD; detecting all
+ * unsatisfiable boards still requires the exact solver. */
 SudokuDifficulty sudoku_rate_difficulty(const SudokuBoard *board,
                                        unsigned *naked, unsigned *hidden);
 

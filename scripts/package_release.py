@@ -14,26 +14,121 @@ import platform
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tarfile
 import tempfile
 import zipfile
+import zlib
+import unicodedata
 
-VERSION = '0.8.3'
+VERSION = '0.8.4'
+# This release gate supports three native targets, not every detected OS/CPU.
+SUPPORTED_ARCHIVE_PLATFORMS = frozenset((
+    'linux-x86_64', 'windows-x86_64', 'macos-arm64'))
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE_LIST = ROOT / 'scripts' / 'release_files.txt'
 EPOCH = 315532800  # 1980-01-01 UTC; valid in both ZIP and TAR.
 MAX_ARCHIVE_FILES = 1024
 MAX_UNPACKED_BYTES = 64 * 1024 * 1024  # Bound untrusted archive verification memory.
+MAX_SOURCE_MANIFEST_BYTES = 256 * 1024  # Refuse oversized manifest before decoding.
+MAX_ZIP_ARCHIVE_BYTES = MAX_UNPACKED_BYTES + 16 * 1024 * 1024
+MAX_ZIP_DIRECTORY_BYTES = 8 * 1024 * 1024
+MAX_TAR_ARCHIVE_BYTES = MAX_UNPACKED_BYTES + 16 * 1024 * 1024
+# Include TAR headers, per-entry PAX metadata and zero padding in decoded budget.
+MAX_TAR_DECODED_BYTES = MAX_UNPACKED_BYTES + MAX_ARCHIVE_FILES * 8192 + 16384
+MAX_CHECKSUM_MANIFEST_BYTES = 4096
+MAX_PORTABLE_PATH_BYTES = 4096  # Avoid pathological component-prefix expansion.
+MAX_PORTABLE_PATH_PARTS = 64
+
+# Windows rejects device names, ADS colons, restricted punctuation, control
+# characters and trailing dots/spaces. Enforce the same canonical names on
+# source entries, staged install files and untrusted archive members.
+_WINDOWS_DEVICES = frozenset(
+    ('CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$') +
+    tuple(f'{prefix}{digit}' for prefix in ('COM', 'LPT')
+          for digit in ('1', '2', '3', '4', '5', '6', '7', '8', '9', '¹', '²', '³'))
+)
+
+
+def portable_relative_name(name):
+    """True only for canonical POSIX components safe on Windows as well."""
+    if not name or not isinstance(name, str):
+        return False
+    # Casefold collision tracking indexes every path prefix. Bound both
+    # pathname length and nesting before creating those intermediate keys.
+    if (len(name) > MAX_PORTABLE_PATH_BYTES
+            or name.count('/') >= MAX_PORTABLE_PATH_PARTS
+            or len(name.encode('utf-8')) > MAX_PORTABLE_PATH_BYTES):
+        return False
+    for component in name.split('/'):
+        if (component in ('', '.', '..') or component.endswith((' ', '.'))
+                or any(ord(ch) < 32 or ord(ch) == 127 or ch in '<>:"\\|?*'
+                       for ch in component)
+                or component.split('.', 1)[0].rstrip(' ').upper() in _WINDOWS_DEVICES):
+            return False
+    return True
+
+
+def claim_portable_path(name, known):
+    """Reject case/Unicode aliases and file-versus-directory collisions.
+
+    On case-insensitive extraction, different POSIX spellings can resolve to
+    the same file or directory. Track every normalized path prefix so even
+    distinct child names under "Assets/" and "assets/" cannot be packaged.
+    The bounded archive file-count limit bounds this dictionary too.
+    """
+    parts = name.split('/')
+    for i in range(1, len(parts) + 1):
+        prefix = '/'.join(parts[:i])
+        key = unicodedata.normalize('NFC', prefix).casefold()
+        old = known.get(key)
+        is_file = i == len(parts)
+        if old is not None:
+            old_prefix, old_is_file = old
+            if old_prefix != prefix or old_is_file or is_file:
+                raise ValueError(f'nonportable path collision: {name!r} versus {old_prefix!r}')
+        else:
+            known[key] = (prefix, is_file)
+
+
+def open_checked_binary(path, kind):
+    """Refuse FIFO, device and final symlink replacements at actual open time.
+
+    Callers must close the returned stream. An earlier path.is_file() check
+    does not make a later open safe if another process swaps its target.
+    """
+    fd = os.open(path, _source_file_flags())
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError(kind + ' must be a regular file')
+        stream = os.fdopen(fd, 'rb')
+        fd = -1
+        return stream
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def file_hash(path):
-    h = hashlib.sha256()
-    with path.open('rb') as src:
-        for chunk in iter(lambda: src.read(65536), b''):
-            h.update(chunk)
-    return h.hexdigest()
+    """Hash a bounded, opened regular archive; never block on a swapped FIFO."""
+    limit = MAX_TAR_ARCHIVE_BYTES if path.name.endswith('.tar.gz') else MAX_ZIP_ARCHIVE_BYTES
+    digest = hashlib.sha256()
+    with open_checked_binary(path, 'release archive') as stream:
+        size = os.fstat(stream.fileno()).st_size
+        if size < 0 or size > limit:
+            raise ValueError('archive exceeds compressed size budget: ' + path.name)
+        remaining = size
+        while remaining:
+            chunk = stream.read(min(65536, remaining + 1))
+            if not chunk or len(chunk) > remaining:
+                raise ValueError('release archive changed during hashing')
+            digest.update(chunk)
+            remaining -= len(chunk)
+        if stream.read(1):
+            raise ValueError('release archive changed during hashing')
+    return digest.hexdigest()
 
 
 def target_platform():
@@ -41,26 +136,127 @@ def target_platform():
     machines = {'x86_64': 'x86_64', 'AMD64': 'x86_64', 'aarch64': 'arm64', 'arm64': 'arm64'}
     system = systems.get(platform.system())
     arch = machines.get(platform.machine())
-    if not system or not arch:
-        raise ValueError('unsupported packaging host; no platform label inferred')
-    return f'{system}-{arch}'
+    label = f'{system}-{arch}'
+    if label not in SUPPORTED_ARCHIVE_PLATFORMS:
+        raise ValueError('unsupported packaging host; no approved target label')
+    return label
+
+
+def _read_bounded_descriptor(fd, maximum, kind):
+    """Own the descriptor and verify size/type on the inode actually opened."""
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError(kind + ' must be a regular file')
+        size = metadata.st_size
+        if size < 0 or size > maximum:
+            raise ValueError(kind + ' exceeds size budget')
+        with os.fdopen(fd, 'rb') as stream:
+            fd = -1
+            payload = stream.read(size + 1)
+        if len(payload) != size:
+            raise ValueError(kind + ' changed during read')
+        return payload
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _source_file_flags():
+    return (os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0) |
+            getattr(os, 'O_NOFOLLOW', 0) |
+            getattr(os, 'O_CLOEXEC', 0) |
+            getattr(os, 'O_BINARY', 0))
+
+
+def read_regular_source(path, maximum, kind):
+    """Reject nonregular, oversized, changed or swapped-in file inputs."""
+    return _read_bounded_descriptor(os.open(path, _source_file_flags()),
+                                    maximum, kind)
+
+
+def read_tree_member(root, relative_name, remaining, kind):
+    """Open only a regular member beneath root, pinning each POSIX directory.
+
+    This protects both source manifests and staged installation payloads from
+    parent-directory symlink substitutions between listing and reading.
+    On Windows the existing pathname preflight remains necessary; native
+    Windows platform acceptance is required before claiming race safety.
+    """
+    if not portable_relative_name(relative_name):
+        raise ValueError('unsafe ' + kind + ' path')
+    parts = PurePosixPath(relative_name).parts
+    if (os.name != 'posix' or not hasattr(os, 'O_DIRECTORY') or
+            not hasattr(os, 'O_NOFOLLOW') or
+            os.open not in os.supports_dir_fd):
+        return read_regular_source(root / relative_name, remaining, kind)
+    directory_flags = (os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW |
+                       getattr(os, 'O_CLOEXEC', 0))
+    directory_fd = os.open(root, directory_flags)
+    try:
+        for component in parts[:-1]:
+            child_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = child_fd
+        file_fd = os.open(parts[-1], _source_file_flags(),
+                          dir_fd=directory_fd)
+    finally:
+        os.close(directory_fd)
+    return _read_bounded_descriptor(file_fd, remaining, kind)
+
+
+def read_source_member(relative_name, remaining):
+    """Read a manifested source using pinned directory-relative traversal."""
+    return read_tree_member(ROOT, relative_name, remaining, 'package content')
+
+
+def bounded_file_bytes(path, remaining):
+    """Read a verified regular file within the remaining archive byte budget."""
+    return read_regular_source(path, remaining, 'package content')
 
 
 def source_paths():
-    raw = SOURCE_LIST.read_text(encoding='utf-8').splitlines()
+    # A source manifest is itself part of the release trust boundary.
+    if SOURCE_LIST.is_symlink():
+        raise ValueError('symlinked source manifest refused')
+    manifest = read_tree_member(
+        ROOT, SOURCE_LIST.relative_to(ROOT).as_posix(),
+        MAX_SOURCE_MANIFEST_BYTES, 'source manifest')
+    raw = manifest.decode('utf-8').splitlines()
     files = []
+    seen = set()
+    seen_portable = {}
+    total = 0
     for line in raw:
         if not line or line.startswith('#'):
             continue
-        name = PurePosixPath(line)
-        if name.is_absolute() or '..' in name.parts or str(name) != line or line.startswith('.') and line == '.':
+        # Check size, depth and forbidden names before normalizing the path.
+        if not portable_relative_name(line):
             raise ValueError(f'unsafe source path: {line}')
-        path = ROOT.joinpath(*name.parts)
-        if not path.is_file() or path.is_symlink():
+        name = PurePosixPath(line)
+        # A POSIX-only name check is insufficient on Windows: backslashes
+        # become path separators and colons can select a drive or NTFS
+        # alternate data stream. Forbid both on every host.
+        if (name.is_absolute() or str(name) != line):
+            raise ValueError(f'unsafe source path: {line}')
+        if line in seen:
+            raise ValueError('duplicate source manifest path')
+        if len(files) >= MAX_ARCHIVE_FILES:
+            raise ValueError('source manifest exceeds file count budget')
+        claim_portable_path(line, seen_portable)
+        seen.add(line)
+        # Refuse *every* symlink component, not just a symlink at the leaf.
+        # Otherwise a tracked directory symlink could package external data.
+        path = ROOT
+        for part in name.parts:
+            path = path / part
+            if path.is_symlink():
+                raise ValueError(f'symlink in source manifest path: {line}')
+        if not path.is_file():
             raise ValueError(f'not a regular source file: {line}')
-        files.append((str(name), path.read_bytes(), 0o644))
-    if len(files) != len(set(x[0] for x in files)):
-        raise ValueError('duplicate source manifest path')
+        payload = read_source_member(line, MAX_UNPACKED_BYTES - total)
+        total += len(payload)
+        files.append((str(name), payload, 0o644))
     if not files:
         raise ValueError('empty source manifest')
     return sorted(files)
@@ -68,17 +264,33 @@ def source_paths():
 
 def installed_paths(prefix):
     files = []
-    for file in sorted(prefix.rglob('*')):
+    total = 0
+    seen = 0
+    seen_portable = {}
+    # Walk lazily: sorting rglob() before applying count budgets allocates
+    # an unbounded path list, even when the eventual archive has few files.
+    for file in prefix.rglob('*'):
+        seen += 1
+        if seen > MAX_ARCHIVE_FILES * 4:
+            raise ValueError('installation exceeds entry count budget')
         if file.is_symlink():
             raise ValueError('symlink in installation tree, refusing to package')
         if not file.is_file():
             continue
+        if len(files) >= MAX_ARCHIVE_FILES:
+            raise ValueError('installation exceeds file count budget')
         rel = file.relative_to(prefix).as_posix()
+        if not portable_relative_name(rel):
+            raise ValueError(f'unsafe installed path: {rel}')
+        claim_portable_path(rel, seen_portable)
         mode = 0o755 if rel.startswith('bin/') else 0o644
-        files.append((rel, file.read_bytes(), mode))
+        payload = read_tree_member(prefix, rel, MAX_UNPACKED_BYTES - total,
+                                   'package content')
+        total += len(payload)
+        files.append((rel, payload, mode))
     if not any(p.startswith('bin/sudoku') for p, _, _ in files):
         raise ValueError('sudoku executable missing from staged installation')
-    return files
+    return sorted(files)
 
 
 def create_tar(dest, prefix, files):
@@ -114,59 +326,222 @@ def _safe_member_name(name, expected_prefix):
             or len(parsed.parts) < 2 or parsed.parts[0] != expected_prefix
             or any(part in ('.', '..') for part in name.split('/'))):
         raise ValueError(f'unsafe archive member {name!r}')
-    return '/'.join(parsed.parts[1:])
+    relative_name = '/'.join(parsed.parts[1:])
+    if not portable_relative_name(relative_name):
+        raise ValueError(f'unsafe archive member {name!r}')
+    return relative_name
 
 
-def ensure_safe_archive(path, expected_prefix):
+def preflight_zip_directory(path):
+    """Bound ZIP central-directory metadata before ZipFile builds filelist.
+
+    The canonical Sudoku packager produces one single-disk ZIP, with an
+    ordinary 22-byte EOCD record, zero archive comment and no ZIP64 records.
+    Checking the tail *before* constructing ZipFile prevents an attacker from
+    forcing its eager central-directory parser to allocate many member objects.
+    This is an input-format check, not authentication.
+    """
+    length = path.stat().st_size
+    if length < 22 or length > MAX_ZIP_ARCHIVE_BYTES:
+        raise ValueError('ZIP container exceeds size budget or is truncated')
+    with open_checked_binary(path, 'ZIP archive') as source:
+        source.seek(-22, 2)
+        tail = source.read(22)
+    if len(tail) != 22:
+        raise ValueError('ZIP directory trailer is truncated')
+    signature, disk, start_disk, disk_entries, entries, cd_size, cd_start, comment = (
+        struct.unpack('<4s4H2IH', tail)
+    )
+    if signature != b'PK' + bytes((5, 6)) or comment != 0:
+        raise ValueError('ZIP canonical directory trailer missing')
+    if disk or start_disk or disk_entries != entries:
+        raise ValueError('multi-disk ZIP archive not supported')
+    if entries < 1 or entries > MAX_ARCHIVE_FILES:
+        raise ValueError('invalid number of ZIP members')
+    if cd_size > MAX_ZIP_DIRECTORY_BYTES or cd_start + cd_size != length - 22:
+        raise ValueError('ZIP central directory exceeds budget or offset is invalid')
+    # EOCD counts are attacker-controlled too. Walk the actual central
+    # records without decoding names or instantiating ZipInfo objects.
+    # Require exactly 'entries' records occupying exactly 'cd_size' bytes.
+    with open_checked_binary(path, 'ZIP archive') as source:
+        source.seek(cd_start)
+        end = cd_start + cd_size
+        for _ in range(entries):
+            if source.tell() + 46 > end:
+                raise ValueError('ZIP central directory entry count mismatch')
+            header = source.read(46)
+            if (len(header) != 46 or
+                    header[:4] != b'PK' + bytes((1, 2))):
+                raise ValueError('ZIP central directory entry count mismatch')
+            if (header[20:24] == bytes((255,)) * 4 or
+                    header[24:28] == bytes((255,)) * 4 or
+                    header[42:46] == bytes((255,)) * 4):
+                raise ValueError('ZIP64 entries are not canonical development archives')
+            name_len, extra_len, comment_len = struct.unpack_from('<3H', header, 28)
+            source.seek(name_len + extra_len + comment_len, 1)
+            if source.tell() > end:
+                raise ValueError('ZIP central directory entry length exceeds budget')
+        if source.tell() != end:
+            raise ValueError('ZIP central directory entry count mismatch')
+
+
+class _BoundedTarGzipReader:
+    """Count *all* decoded GZIP bytes, including TAR headers and padding."""
+
+    def __init__(self, stream):
+        self.stream = stream
+        self.total = 0
+        self.crc = 0
+
+    def read(self, size=-1):
+        # Streaming TAR normally requests fixed-size blocks. Never permit an
+        # unbounded read even when a caller supplies -1.
+        if size is None or size < 0:
+            size = 65536
+        remaining = MAX_TAR_DECODED_BYTES - self.total
+        chunk = self.stream.read(min(size, remaining + 1))
+        self.total += len(chunk)
+        if self.total > MAX_TAR_DECODED_BYTES:
+            raise ValueError('TAR decoded stream exceeds size budget')
+        self.crc = zlib.crc32(chunk, self.crc)
+        return chunk
+
+
+def canonical_archive_mode(relative_name, expected_prefix):
+    """Require the exact portable permission bits emitted by the packager.
+
+    Development source archives contain read-only text/source files (0644).
+    Installed binaries in bin/ use 0755, while libraries and headers use 0644.
+    Checking modes prevents a byte-identical but non-executable Unix binary
+    from passing ZIP/TAR parity and checksum verification.
+    """
+    if relative_name.startswith('bin/') and not expected_prefix.endswith('-source'):
+        return 0o755
+    return 0o644
+
+
+def _ensure_safe_archive(path, expected_prefix):
     """Read only bounded, regular files beneath one expected top-level dir."""
     members = {}
     names = []
+    seen_portable = {}
     unpacked = 0
     if path.name.endswith('.tar.gz'):
-        with tarfile.open(path, 'r:gz') as archive:
-            infos = archive.getmembers()
-            if not 1 <= len(infos) <= MAX_ARCHIVE_FILES:
-                raise ValueError('invalid number of TAR members')
-            for item in infos:
-                if not item.isfile() or item.size < 0:
-                    raise ValueError('non-regular TAR member')
-                rel = _safe_member_name(item.name, expected_prefix)
-                unpacked += item.size
-                if unpacked > MAX_UNPACKED_BYTES:
-                    raise ValueError('TAR unpacked content exceeds size budget')
-                stream = archive.extractfile(item)
-                if stream is None:
-                    raise ValueError('unreadable TAR member')
-                with stream:
-                    payload = stream.read(item.size + 1)
-                if len(payload) != item.size:
-                    raise ValueError('TAR member length mismatch')
-                members[rel] = payload
-                names.append(item.name)
+        # A huge sparse/compressed container should not be streamed for
+        # hashing or parsing merely because its unpacked members are small.
+        if path.stat().st_size > MAX_TAR_ARCHIVE_BYTES:
+            raise ValueError('TAR container exceeds compressed size budget')
+        # r|gz reads one member at a time. getmembers() would eagerly
+        # materialize attacker-controlled metadata before applying the
+        # MAX_ARCHIVE_FILES limit, defeating bounded-memory verification.
+        # The tarfile iterator stops at the TAR end marker without necessarily
+        # reading the GZIP trailer. Drain the decompressor so CRC32 and ISIZE
+        # are checked even when all file members looked valid.
+        with open_checked_binary(path, 'TAR archive') as compressed:
+            with gzip.GzipFile(fileobj=compressed, mode='rb') as decoder:
+                bounded = _BoundedTarGzipReader(decoder)
+                with tarfile.open(fileobj=bounded, mode='r|') as archive:
+                    for item in archive:
+                        if len(names) >= MAX_ARCHIVE_FILES:
+                            raise ValueError('invalid number of TAR members')
+                        if not item.isfile() or item.size < 0:
+                            raise ValueError('non-regular TAR member')
+                        rel = _safe_member_name(item.name, expected_prefix)
+                        if item.mode != canonical_archive_mode(rel, expected_prefix):
+                            raise ValueError('non-canonical TAR file mode')
+                        if rel in members:
+                            raise ValueError('archive entries empty, duplicated or not sorted')
+                        claim_portable_path(rel, seen_portable)
+                        unpacked += item.size
+                        if unpacked > MAX_UNPACKED_BYTES:
+                            raise ValueError('TAR unpacked content exceeds size budget')
+                        stream = archive.extractfile(item)
+                        if stream is None:
+                            raise ValueError('unreadable TAR member')
+                        with stream:
+                            payload = stream.read(item.size + 1)
+                        if len(payload) != item.size:
+                            raise ValueError('TAR member length mismatch')
+                        members[rel] = payload
+                        names.append(item.name)
+                    if not names:
+                        raise ValueError('invalid number of TAR members')
+                    # The writer uses standard 10 KiB TAR records. Reject
+                    # extra zero-only records hidden after the end marker.
+                    canonical_size = (
+                        (archive.offset + 2 * tarfile.BLOCKSIZE +
+                         tarfile.RECORDSIZE - 1) // tarfile.RECORDSIZE
+                    ) * tarfile.RECORDSIZE
+                while True:
+                    padding = bounded.read(65536)
+                    if not padding:
+                        break
+                    if any(padding):
+                        raise ValueError('non-zero trailing TAR data')
+                if bounded.total != canonical_size:
+                    raise ValueError('non-canonical TAR padding length')
+                # gzip transparently accepts concatenated members and raw
+                # zero bytes after the footer. Our package writer emits one
+                # gzip member only: its final CRC32/ISIZE must describe the
+                # entire decoded TAR stream, not a later appended member.
+                with open_checked_binary(path, 'TAR archive') as encoded:
+                    encoded.seek(-8, 2)
+                    crc, isize = struct.unpack('<II', encoded.read(8))
+                if crc != bounded.crc or isize != (bounded.total & 0xffffffff):
+                    raise ValueError('non-canonical GZIP trailer or extra member')
     else:
-        with zipfile.ZipFile(path) as archive:
-            infos = archive.infolist()
-            if not 1 <= len(infos) <= MAX_ARCHIVE_FILES:
-                raise ValueError('invalid number of ZIP members')
-            for item in infos:
-                # The canonical packager sets Unix regular-file attributes on
-                # every host. Reject symlinks, device files, and missing types.
-                mode = item.external_attr >> 16
-                if item.is_dir() or item.create_system != 3 or not stat.S_ISREG(mode):
-                    raise ValueError('non-regular ZIP member')
-                rel = _safe_member_name(item.filename, expected_prefix)
-                unpacked += item.file_size
-                if unpacked > MAX_UNPACKED_BYTES:
-                    raise ValueError('ZIP unpacked content exceeds size budget')
-                with archive.open(item, 'r') as stream:
-                    payload = stream.read(item.file_size + 1)
-                if len(payload) != item.file_size:
-                    raise ValueError('ZIP member length mismatch')
-                members[rel] = payload
-                names.append(item.filename)
+        preflight_zip_directory(path)
+        with open_checked_binary(path, 'ZIP archive') as encoded:
+            with zipfile.ZipFile(encoded) as archive:
+                infos = archive.infolist()
+                if not 1 <= len(infos) <= MAX_ARCHIVE_FILES:
+                    raise ValueError('invalid number of ZIP members')
+                for item in infos:
+                    # The canonical packager sets Unix regular-file attributes on
+                    # every host. Reject symlinks, device files, and missing types.
+                    mode = item.external_attr >> 16
+                    if item.is_dir() or item.create_system != 3 or not stat.S_ISREG(mode):
+                        raise ValueError('non-regular ZIP member')
+                    # Forged metadata can request encryption or compressors our
+                    # development writer never emits. Reject before ZipExtFile
+                    # raises RuntimeError or NotImplementedError on open().
+                    if item.flag_bits & 0x41:
+                        raise ValueError('encrypted ZIP member is not supported')
+                    if item.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                        raise ValueError('unsupported ZIP compression method')
+                    rel = _safe_member_name(item.filename, expected_prefix)
+                    if mode != (stat.S_IFREG | canonical_archive_mode(rel, expected_prefix)):
+                        raise ValueError('non-canonical ZIP file mode')
+                    if rel in members:
+                        raise ValueError('archive entries empty, duplicated or not sorted')
+                    claim_portable_path(rel, seen_portable)
+                    unpacked += item.file_size
+                    if unpacked > MAX_UNPACKED_BYTES:
+                        raise ValueError('ZIP unpacked content exceeds size budget')
+                    with archive.open(item, 'r') as stream:
+                        payload = stream.read(item.file_size + 1)
+                    if len(payload) != item.file_size:
+                        raise ValueError('ZIP member length mismatch')
+                    members[rel] = payload
+                    names.append(item.filename)
     if names != sorted(set(names)) or len(names) != len(members):
         raise ValueError('archive entries empty, duplicated or not sorted')
     return members
+
+
+def ensure_safe_archive(path, expected_prefix):
+    """Reject damaged ZIP/TAR.GZ payloads with the verifier's ValueError API.
+
+    zipfile, gzip and tarfile raise several decoder-specific exceptions for
+    untrusted compressed bytes. A malformed distribution is a verification
+    failure, not an uncaught traceback or a successful partial extraction.
+    Preserve the bounded, regular-file and canonical-path checks above.
+    """
+    try:
+        return _ensure_safe_archive(path, expected_prefix)
+    except (tarfile.TarError, zipfile.BadZipFile, gzip.BadGzipFile,
+            zlib.error, EOFError, struct.error) as exc:
+        raise ValueError('malformed archive container') from exc
 
 
 def check_archive(path, expected_prefix):
@@ -175,31 +550,137 @@ def check_archive(path, expected_prefix):
     return members
 
 
+def verify_source_membership(entries):
+    """Require a self-consistent, buildable-source membership declaration.
+
+    A recomputed unsigned SHA256SUMS and matching ZIP/TAR bytes do not prove
+    that a source package contains the files claimed by its own manifest.
+    Verify exact equality of the archived path set and archived manifest.
+    This validates completeness relative to that manifest, not authenticity.
+    """
+    payload = entries.get('scripts/release_files.txt')
+    if payload is None or len(payload) > MAX_SOURCE_MANIFEST_BYTES:
+        raise ValueError('source archive missing or oversized release_files manifest')
+    try:
+        lines = payload.decode('utf-8').splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValueError('source archive manifest must be UTF-8') from exc
+    declared = set()
+    seen_portable = {}
+    for line in lines:
+        if not line or line.startswith('#'):
+            continue
+        path = PurePosixPath(line)
+        if (not portable_relative_name(line) or path.is_absolute()
+                or str(path) != line):
+            raise ValueError(f'unsafe source archive manifest path: {line!r}')
+        if line in declared:
+            raise ValueError(f'duplicate source archive manifest path: {line!r}')
+        if len(declared) >= MAX_ARCHIVE_FILES:
+            raise ValueError('source archive manifest exceeds file count budget')
+        claim_portable_path(line, seen_portable)
+        declared.add(line)
+    if not declared:
+        raise ValueError('empty source archive manifest')
+    actual = set(entries)
+    if actual != declared:
+        missing = sorted(declared - actual)
+        extra = sorted(actual - declared)
+        raise ValueError(f'source archive manifest mismatch: missing={missing!r} extra={extra!r}')
+
+
+def canonical_checksum_records(raw):
+    """Validate the exact four-record format emitted by this packager.
+
+    Only ASCII LF endings with a final newline and filename-order sorting
+    are canonical. Checking before archive IO prevents malformed manifests
+    from triggering avoidable hashing or decompression work.
+    """
+    if len(raw) > MAX_CHECKSUM_MANIFEST_BYTES:
+        raise ValueError('SHA256SUMS exceeds size budget')
+    try:
+        lines = raw.decode('ascii').splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValueError('SHA256SUMS must be ASCII') from exc
+    if len(lines) != 4 or len(lines) != len(set(lines)):
+        raise ValueError('expected four distinct archive checksums')
+    if raw != ('\n'.join(lines) + '\n').encode('ascii'):
+        raise ValueError('non-canonical SHA256SUMS line endings')
+    records = []
+    for line in lines:
+        if not re.fullmatch(r'[0-9a-f]{64}  [a-zA-Z0-9._-]+', line):
+            raise ValueError('invalid SHA256SUMS record')
+        records.append(line.split('  ', 1))
+    names = [name for _, name in records]
+    if names != sorted(set(names)):
+        raise ValueError('non-canonical SHA256SUMS filename ordering')
+    return records
+
+
+def valid_release_prefix(prefix):
+    """Release verification admits only the roadmap's three native targets."""
+    name = f'sudoku-v{VERSION}-'
+    return prefix == name + 'source' or (
+        prefix.startswith(name) and
+        prefix[len(name):] in SUPPORTED_ARCHIVE_PLATFORMS)
+
+
+def verified_archive_members(path, expected_sha, expected_prefix):
+    """Hash and parse the *same* private archive snapshot, never reopen its source.
+
+    The original path is acquired once with O_NONBLOCK/O_NOFOLLOW where
+    available. The snapshot lives in a private, auto-cleaned directory and is
+    capped using fstat on the original opened inode, not a pathname precheck.
+    Hashing and format verification then consume the same staged bytes, even
+    if another process replaces the source pathname in the meantime.
+    This ensures input consistency; SHA256SUMS is still unsigned/untrusted.
+    """
+    name = path.name
+    limit = MAX_TAR_ARCHIVE_BYTES if name.endswith('.tar.gz') else MAX_ZIP_ARCHIVE_BYTES
+    with tempfile.TemporaryDirectory(prefix='sudoku-archive-verify-') as workdir:
+        snapshot = Path(workdir) / name
+        with open_checked_binary(path, 'release archive') as stream:
+            size = os.fstat(stream.fileno()).st_size
+            if size < 0 or size > limit:
+                raise ValueError('archive exceeds compressed size budget: ' + name)
+            with snapshot.open('xb') as destination:
+                remaining = size
+                while remaining:
+                    block = stream.read(min(65536, remaining + 1))
+                    if not block or len(block) > remaining:
+                        raise ValueError('release archive changed during snapshot')
+                    destination.write(block)
+                    remaining -= len(block)
+                if stream.read(1):
+                    raise ValueError('release archive changed during snapshot')
+        if file_hash(snapshot) != expected_sha:
+            raise ValueError('checksum mismatch: ' + name)
+        return check_archive(snapshot, expected_prefix)
+
+
 def verify_packages(dest):
     manifest = dest / 'SHA256SUMS'
     if not manifest.is_file() or manifest.is_symlink():
         raise ValueError('missing or unsafe SHA256SUMS')
-    lines = manifest.read_text(encoding='ascii').splitlines()
-    if len(lines) != 4 or len(lines) != len(set(lines)):
-        raise ValueError('expected four distinct archive checksums')
+    # Open once and validate the descriptor before reading the manifest.
+    # A swapped-in FIFO must fail rather than hang indefinitely at open().
+    raw = read_regular_source(manifest, MAX_CHECKSUM_MANIFEST_BYTES, 'SHA256SUMS')
     parsed = {}
-    for line in lines:
-        if not re.fullmatch(r'[0-9a-f]{64}  [a-zA-Z0-9._-]+', line):
-            raise ValueError('invalid SHA256SUMS record')
-        digest, name = line.split('  ', 1)
+    for digest, name in canonical_checksum_records(raw):
         file = dest / name
-        if not file.is_file() or file.is_symlink() or file_hash(file) != digest:
+        if not file.is_file() or file.is_symlink():
             raise ValueError(f'checksum mismatch: {name}')
+        # Snapshot a single validated descriptor; hash and parse that same
+        # immutable private copy, never a second open of the attacker path.
         ext = '.tar.gz' if name.endswith('.tar.gz') else '.zip' if name.endswith('.zip') else ''
         if not ext:
             raise ValueError(f'unexpected release extension: {name}')
         prefix = name[:-len(ext)]
-        if not re.fullmatch(r'sudoku-v' + re.escape(VERSION) +
-                            r'-(?:source|(?:linux|windows|macos)-(?:x86_64|arm64))', prefix):
+        if not valid_release_prefix(prefix):
             raise ValueError(f'unexpected release filename: {name}')
         if (prefix, ext) in parsed:
             raise ValueError(f'duplicate release variant: {name}')
-        parsed[(prefix, ext)] = check_archive(file, prefix)
+        parsed[(prefix, ext)] = verified_archive_members(file, digest, prefix)
     variants = {prefix for prefix, _ in parsed}
     if len(variants) != 2 or f'sudoku-v{VERSION}-source' not in variants:
         raise ValueError('must contain one binary platform and one source release')
@@ -213,6 +694,7 @@ def verify_packages(dest):
             required = {'README.md', 'CMakeLists.txt',
                         'src/core/solver.c', 'src/core/game.c',
                         'scripts/package_release.py', 'scripts/release_files.txt'}
+            verify_source_membership(tar_entries)
         else:
             executable = 'bin/sudoku.exe' if '-windows-' in prefix else 'bin/sudoku'
             required = {executable, 'include/sudoku/board.h',
@@ -220,6 +702,41 @@ def verify_packages(dest):
         if not required.issubset(tar_entries):
             raise ValueError(f'missing mandatory release content: {prefix}')
     print('SHA256 AND CROSS-FORMAT PASS: 4 archives, matched files byte-for-byte')
+
+
+def publish_checked_package_set(staged, destination, names):
+    """Publish preverified development files without replacing existing paths.
+
+    All five artifacts must be complete before the first hard link. Links are
+    exclusive on the same filesystem; on a publication error, remove only
+    links that still refer to our own staged inodes. A process crash during
+    this multi-file operation can still leave a partial set; no signed or
+    power-loss-atomic release publication is claimed.
+    """
+    if (len(names) != 5 or len(set(names)) != 5 or
+            'SHA256SUMS' not in names or
+            any(not portable_relative_name(name) or '/' in name for name in names)):
+        raise ValueError('invalid development package publication set')
+    for name in names:
+        source, target = staged / name, destination / name
+        if source.is_symlink() or not source.is_file():
+            raise ValueError('missing staged package artifact: ' + name)
+        if target.exists() or target.is_symlink():
+            raise ValueError('refusing to overwrite package artifact: ' + name)
+    published = []
+    try:
+        for name in names:
+            source, target = staged / name, destination / name
+            os.link(source, target)
+            published.append((source, target))
+    except BaseException:
+        for source, target in reversed(published):
+            try:
+                if target.samefile(source):
+                    target.unlink()
+            except OSError:
+                pass
+        raise
 
 
 def main():
@@ -250,14 +767,24 @@ def main():
         out.mkdir(parents=True, exist_ok=True)
         prefixes = [(f'sudoku-v{VERSION}-{target}', files),
                     (f'sudoku-v{VERSION}-source', source_paths())]
-        records = []
-        for prefix, entries in prefixes:
-            for ext, fn in [('.tar.gz', create_tar), ('.zip', create_zip)]:
-                archive = out / (prefix + ext)
-                fn(archive, prefix, entries)
-                check_archive(archive, prefix)
-                records.append((archive.name, file_hash(archive)))
-        (out / 'SHA256SUMS').write_text(''.join(f'{digest}  {name}\n' for name, digest in sorted(records)), encoding='ascii')
+        # Build and verify the complete set in a private directory on the
+        # destination filesystem before exposing any archive or checksum.
+        # Repeated runs may not silently overwrite a previous verified set.
+        with tempfile.TemporaryDirectory(prefix='.sudoku-package-', dir=out) as scratch:
+            staged = Path(scratch)
+            records = []
+            for prefix, entries in prefixes:
+                for ext, fn in [('.tar.gz', create_tar), ('.zip', create_zip)]:
+                    archive = staged / (prefix + ext)
+                    fn(archive, prefix, entries)
+                    check_archive(archive, prefix)
+                    records.append((archive.name, file_hash(archive)))
+            (staged / 'SHA256SUMS').write_text(
+                ''.join(f'{digest}  {name}\n' for name, digest in sorted(records)),
+                encoding='ascii')
+            verify_packages(staged)
+            publish_checked_package_set(
+                staged, out, sorted(name for name, _ in records) + ['SHA256SUMS'])
     verify_packages(out)
     print('DEVELOPMENT PACKAGE PASS — no official GitHub release or license approved')
 
