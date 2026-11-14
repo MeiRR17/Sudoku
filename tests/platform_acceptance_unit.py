@@ -205,6 +205,53 @@ class ReceiptWriteTests(unittest.TestCase):
             self.assertEqual(synced_directory, [False, True])
             self.assertEqual(json.loads(dest.read_text()), {'status': 'passed'})
 
+    @unittest.skipUnless(os.name == 'posix', 'post-fsync identity check is POSIX-only')
+    def test_final_name_replacement_after_directory_fsync_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'receipt.json'
+            victim = root / 'unrelated.json'
+            victim.write_text('do not follow', encoding='utf-8')
+            real_fsync = os.fsync
+            changed = False
+            def replace_after_directory_sync(fd):
+                nonlocal changed
+                result = real_fsync(fd)
+                if stat.S_ISDIR(os.fstat(fd).st_mode) and not changed:
+                    changed = True
+                    dest.unlink()
+                    dest.symlink_to(victim)
+                return result
+            with patch.object(acceptance.os, 'fsync',
+                              side_effect=replace_after_directory_sync):
+                with self.assertRaisesRegex(
+                        OSError, 'published receipt changed after directory synchronization'):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertTrue(changed)
+            self.assertTrue(dest.is_symlink())
+            self.assertEqual(victim.read_text(encoding='utf-8'), 'do not follow')
+
+    @unittest.skipUnless(os.name == 'posix', 'post-fsync identity check is POSIX-only')
+    def test_final_name_removal_after_directory_fsync_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'receipt.json'
+            real_fsync = os.fsync
+            changed = False
+            def remove_after_directory_sync(fd):
+                nonlocal changed
+                result = real_fsync(fd)
+                if stat.S_ISDIR(os.fstat(fd).st_mode) and not changed:
+                    changed = True
+                    dest.unlink()
+                return result
+            with patch.object(acceptance.os, 'fsync',
+                              side_effect=remove_after_directory_sync):
+                with self.assertRaisesRegex(OSError, 'No such file'):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertTrue(changed)
+            self.assertFalse(dest.exists())
+
     @unittest.skipUnless(os.name == 'posix', 'directory fsync is POSIX-only')
     def test_parent_sync_failure_reports_uncertain_published_receipt(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -155,6 +155,14 @@ def _open_receipt_parent(parent):
     return fd
 
 
+def _verify_published_receipt(parent_fd, name, original):
+    """Require the final public name to retain the exact staged inode."""
+    published = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    if (not stat.S_ISREG(published.st_mode) or
+            (published.st_dev, published.st_ino) != (original.st_dev, original.st_ino)):
+        raise OSError('published receipt changed after directory synchronization')
+
+
 def _unlink_owned_receipt_stage(parent_fd, name, original):
     """Never delete a staging pathname after a concurrent inode substitution."""
     current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
@@ -253,6 +261,7 @@ def write_receipt(output, receipt):
             os.fsync(parent_fd)
             if not _same_receipt_parent(output.parent, parent_fd):
                 raise OSError('receipt directory changed after publication')
+            _verify_published_receipt(parent_fd, output.name, created)
     finally:
         if parent_fd is not None:
             os.close(parent_fd)
