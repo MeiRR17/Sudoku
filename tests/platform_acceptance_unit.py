@@ -354,6 +354,39 @@ class ReceiptWriteTests(unittest.TestCase):
             self.assertEqual(list(outside.iterdir()), [])
 
     @unittest.skipUnless(os.name == 'posix', 'pinned directory walk is POSIX-only')
+    def test_component_fstat_failure_closes_new_directory_descriptor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parent = root / 'nested'
+            parent.mkdir()
+            real_open = os.open
+            real_fstat = os.fstat
+            opened = []
+
+            def capture_component(path, flags, *args, **kwargs):
+                descriptor = real_open(path, flags, *args, **kwargs)
+                if path == 'nested' and kwargs.get('dir_fd') is not None:
+                    opened.append(descriptor)
+                return descriptor
+
+            def fail_component_fstat(descriptor):
+                if opened and descriptor == opened[0]:
+                    raise OSError('injected component fstat failure')
+                return real_fstat(descriptor)
+
+            with patch.object(acceptance.os, 'open', side_effect=capture_component):
+                with patch.object(acceptance.os, 'fstat', side_effect=fail_component_fstat):
+                    with self.assertRaisesRegex(OSError, 'component fstat failure'):
+                        acceptance.write_receipt(parent / 'receipt.json',
+                                                 {'status': 'passed'})
+
+            self.assertEqual(len(opened), 1)
+            with self.assertRaises(OSError):
+                os.fstat(opened[0])
+            self.assertFalse((parent / 'receipt.json').exists())
+            self.assertEqual(list(parent.iterdir()), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'pinned directory walk is POSIX-only')
     def test_missing_nested_parent_components_are_created_and_pinned(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

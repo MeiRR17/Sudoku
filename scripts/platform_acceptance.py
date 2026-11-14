@@ -186,10 +186,16 @@ def _open_receipt_parent(parent):
                     # whether the resulting component is an actual directory.
                     pass
                 next_fd = os.open(component, flags, dir_fd=current_fd)
-            metadata = os.fstat(next_fd)
-            if not stat.S_ISDIR(metadata.st_mode):
+            try:
+                metadata = os.fstat(next_fd)
+                if not stat.S_ISDIR(metadata.st_mode):
+                    raise OSError('unsafe non-directory receipt path component')
+            except BaseException:
+                # The newly opened descriptor is not current_fd yet. Close it
+                # here on every metadata/type failure before unwinding the
+                # outer handler, which owns only the previous directory fd.
                 os.close(next_fd)
-                raise OSError('unsafe non-directory receipt path component')
+                raise
             os.close(current_fd)
             current_fd = next_fd
         if not _same_receipt_parent(absolute, current_fd):
