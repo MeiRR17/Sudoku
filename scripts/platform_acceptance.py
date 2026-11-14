@@ -354,6 +354,24 @@ def verified_archive_hashes(dist, version, expected):
     return dict(sorted(parsed.items()))
 
 
+def acceptance_receipt_path(root, requested):
+    """Select a fresh receipt path without resolving away symlink evidence.
+
+    Keep the lexical destination so the POSIX dirfd/O_NOFOLLOW publication
+    guard can inspect its actual parent. Reject a symlink at the final name or
+    immediate parent on every host, and never overwrite an existing target.
+    """
+    requested = Path(requested)
+    output = requested if requested.is_absolute() else Path(root) / requested
+    if output.is_symlink():
+        raise ValueError('refusing symlinked acceptance receipt destination')
+    if output.parent.is_symlink():
+        raise ValueError('refusing symlinked acceptance receipt directory')
+    if output.exists():
+        raise ValueError('refusing to overwrite an existing acceptance receipt')
+    return output
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--expected', required=True,
@@ -364,9 +382,7 @@ def main():
     args = ap.parse_args()
     if args.mode == 'full' and args.expected != 'ubuntu-latest':
         ap.error('full mode is only supported for the Linux x64 runner')
-    output = (ROOT / args.output).resolve()
-    if output.exists():
-        raise ValueError('refusing to overwrite an existing acceptance receipt')
+    output = acceptance_receipt_path(ROOT, args.output)
 
     call(sys.executable, ROOT / 'scripts/verify_runner_platform.py',
          '--expected', args.expected)

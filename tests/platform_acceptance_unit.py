@@ -180,6 +180,61 @@ class WorkflowIdentityTests(unittest.TestCase):
                     acceptance.workflow_identity_from_env(env)
 
 
+class ReceiptOutputPathTests(unittest.TestCase):
+    def test_relative_destination_stays_under_repository_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result = acceptance.acceptance_receipt_path(
+                root, Path('dist') / 'platform-receipt.json')
+            self.assertEqual(result, root / 'dist' / 'platform-receipt.json')
+            self.assertFalse(result.parent.exists())
+
+    def test_absolute_destination_is_preserved_without_resolving(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result = acceptance.acceptance_receipt_path(root, root / 'receipt.json')
+            self.assertEqual(result, root / 'receipt.json')
+
+    @unittest.skipUnless(hasattr(os, 'symlink'), 'symlinks unavailable')
+    def test_dangling_receipt_symlink_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / 'missing-target'
+            output = root / 'receipt.json'
+            try:
+                output.symlink_to(target)
+            except OSError:
+                self.skipTest('creating symlinks is not permitted')
+            with self.assertRaisesRegex(ValueError, 'symlinked acceptance receipt'):
+                acceptance.acceptance_receipt_path(root, Path('receipt.json'))
+            self.assertTrue(output.is_symlink())
+            self.assertFalse(target.exists())
+
+    @unittest.skipUnless(hasattr(os, 'symlink'), 'symlinks unavailable')
+    def test_symlinked_receipt_parent_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            real = root / 'real'
+            real.mkdir()
+            alias = root / 'alias'
+            try:
+                alias.symlink_to(real, target_is_directory=True)
+            except OSError:
+                self.skipTest('creating symlinks is not permitted')
+            with self.assertRaisesRegex(ValueError, 'symlinked acceptance receipt directory'):
+                acceptance.acceptance_receipt_path(root, Path('alias') / 'receipt.json')
+            self.assertEqual(list(real.iterdir()), [])
+
+    def test_existing_receipt_file_is_never_overwritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'receipt.json'
+            output.write_text('keep', encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'overwrite'):
+                acceptance.acceptance_receipt_path(root, Path('receipt.json'))
+            self.assertEqual(output.read_text(encoding='utf-8'), 'keep')
+
+
 class ReceiptWriteTests(unittest.TestCase):
     def test_private_atomic_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
