@@ -280,6 +280,57 @@ class ReceiptWriteTests(unittest.TestCase):
             if os.name == 'posix':
                 self.assertEqual(stat.S_IMODE(dest.stat().st_mode), 0o600)
 
+    @unittest.skipUnless(os.name == 'posix', 'pinned directory walk is POSIX-only')
+    def test_writer_rejects_symlinked_ancestor_without_touching_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outside = root / 'outside'
+            outside.mkdir()
+            alias = root / 'alias'
+            try:
+                alias.symlink_to(outside, target_is_directory=True)
+            except OSError:
+                self.skipTest('creating symlinks is not permitted')
+            with self.assertRaises(OSError):
+                acceptance.write_receipt(alias / 'receipt.json',
+                                         {'status': 'passed'})
+            self.assertEqual(list(outside.iterdir()), [])
+
+    @unittest.skipUnless(os.name == 'posix', 'pinned directory walk is POSIX-only')
+    def test_missing_nested_parent_components_are_created_and_pinned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dest = root / 'one' / 'two' / 'receipt.json'
+            acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertEqual(json.loads(dest.read_text()), {'status': 'passed'})
+            self.assertFalse(list(dest.parent.glob('receipt.json.tmp.*')))
+
+    @unittest.skipUnless(os.name == 'posix', 'dir_fd race injection is POSIX-only')
+    def test_ancestor_swap_at_open_is_not_followed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outside = root / 'outside'
+            outside.mkdir()
+            victim = outside / 'receipt.json'
+            parent = root / 'nested'
+            parent.mkdir()
+            real_open = os.open
+            swapped = False
+            def swap_then_open(path, flags, *args, **kwargs):
+                nonlocal swapped
+                if path == 'nested' and kwargs.get('dir_fd') is not None and not swapped:
+                    parent.rename(root / 'original')
+                    parent.symlink_to(outside, target_is_directory=True)
+                    swapped = True
+                return real_open(path, flags, *args, **kwargs)
+            with patch.object(acceptance.os, 'open', side_effect=swap_then_open):
+                with self.assertRaises(OSError):
+                    acceptance.write_receipt(parent / 'receipt.json',
+                                             {'status': 'passed'})
+            self.assertTrue(swapped)
+            self.assertFalse(victim.exists())
+            self.assertEqual(list(outside.iterdir()), [])
+
     @unittest.skipUnless(os.name == 'posix', 'directory fsync is POSIX-only')
     def test_published_receipt_syncs_parent_after_file(self):
         with tempfile.TemporaryDirectory() as directory:

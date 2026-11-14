@@ -144,15 +144,45 @@ def _same_receipt_parent(parent, pinned_fd):
 
 
 def _open_receipt_parent(parent):
-    """Pin the real output directory before staging or publishing evidence."""
+    """Walk and pin every directory component without following symlinks.
+
+    Each component is opened relative to the already pinned predecessor.
+    Missing directories are created relative to that descriptor and reopened
+    with O_NOFOLLOW; a concurrent replacement cannot redirect later stages.
+    """
+    if os.name != 'posix':
+        raise OSError('pinned receipt parent walk requires POSIX')
     flags = (os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0) |
              getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_DIRECTORY', 0) |
              getattr(os, 'O_NOFOLLOW', 0))
-    fd = os.open(parent, flags)
-    if not _same_receipt_parent(parent, fd):
-        os.close(fd)
-        raise OSError('unsafe or replaced receipt directory')
-    return fd
+    absolute = Path(os.path.abspath(parent))
+    current_fd = os.open(absolute.anchor, flags)
+    try:
+        for component in absolute.parts[1:]:
+            try:
+                next_fd = os.open(component, flags, dir_fd=current_fd)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(component, mode=0o700, dir_fd=current_fd)
+                except FileExistsError:
+                    # Another creator won; the no-follow open below decides
+                    # whether the resulting component is an actual directory.
+                    pass
+                next_fd = os.open(component, flags, dir_fd=current_fd)
+            metadata = os.fstat(next_fd)
+            if not stat.S_ISDIR(metadata.st_mode):
+                os.close(next_fd)
+                raise OSError('unsafe non-directory receipt path component')
+            os.close(current_fd)
+            current_fd = next_fd
+        if not _same_receipt_parent(absolute, current_fd):
+            raise OSError('unsafe or replaced receipt directory')
+        result = current_fd
+        current_fd = -1
+        return result
+    finally:
+        if current_fd >= 0:
+            os.close(current_fd)
 
 
 def _verify_published_receipt(parent_fd, name, original):
@@ -219,8 +249,11 @@ def write_receipt(output, receipt):
     File and directory fsyncs precede any claim of durable local publication.
     This does not authenticate evidence or eliminate external filesystem races.
     """
-    output.parent.mkdir(parents=True, exist_ok=True)
-    parent_fd = _open_receipt_parent(output.parent) if os.name == 'posix' else None
+    if os.name == 'posix':
+        parent_fd = _open_receipt_parent(output.parent)
+    else:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        parent_fd = None
     try:
         if parent_fd is None:
             fd, name = tempfile.mkstemp(prefix=output.name + '.tmp.', dir=output.parent)
