@@ -4,6 +4,8 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [0.8.4] — 2026-11-10 (development patch; release HOLD)
 
+- **2026-11-14 full receipt parent-chain validation:** Extend the destination preflight beyond the immediate parent: reject `..` traversal, inspect every existing ancestor with `lstat` so intermediate symlinks cannot redirect the receipt, and reject non-directory path components before the quality gate starts. Preserve the absolute lexical path for the pinned-dirfd writer. Three regressions cover a symlinked grandparent, a regular-file parent component, and parent traversal. Full repository/native acceptance remains pending.
+
 - **2026-11-14 lexical receipt destination guard:** Replace `Path.resolve()` in acceptance CLI destination selection with an explicit no-follow preflight. Reject a symlink at the receipt filename (including dangling links), reject a symlinked immediate parent directory on all hosts, preserve the lexical path for the later pinned-dirfd publication check, and refuse existing targets before running the expensive platform gate. Five focused tests cover relative/absolute paths, dangling target links, parent symlinks and no-overwrite behavior. Full native acceptance remains pending; release HOLD remains.
 
 - **2026-11-14 final receipt privacy/link-count verification:** The last post-fsync receipt check now also requires owner-only `0600`, the same file owner as the staged inode, and exactly one remaining hard link. Two fault-injection regressions attempt to broaden permissions or add a second hardlink during directory fsync; both must prevent a successful receipt result. Full repository and native platform acceptance remain pending.

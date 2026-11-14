@@ -355,21 +355,35 @@ def verified_archive_hashes(dist, version, expected):
 
 
 def acceptance_receipt_path(root, requested):
-    """Select a fresh receipt path without resolving away symlink evidence.
+    """Select a fresh receipt path without traversing symlinked ancestors.
 
-    Keep the lexical destination so the POSIX dirfd/O_NOFOLLOW publication
-    guard can inspect its actual parent. Reject a symlink at the final name or
-    immediate parent on every host, and never overwrite an existing target.
+    Reject parent traversal, inspect every existing parent component with
+    lstat (rather than following it), and preserve the absolute lexical path
+    for the later pinned-dirfd publication check. Existing targets never win.
     """
     requested = Path(requested)
+    if '..' in requested.parts:
+        raise ValueError('parent traversal is not allowed for acceptance receipts')
     output = requested if requested.is_absolute() else Path(root) / requested
-    if output.is_symlink():
+    output = Path(os.path.abspath(output))
+    current = Path(output.anchor)
+    for component in output.parts[1:-1]:
+        current = current / component
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode):
+            raise ValueError('refusing symlinked acceptance receipt directory')
+        if not stat.S_ISDIR(info.st_mode):
+            raise ValueError('acceptance receipt parent is not a directory')
+    try:
+        target_info = output.lstat()
+    except FileNotFoundError:
+        return output
+    if stat.S_ISLNK(target_info.st_mode):
         raise ValueError('refusing symlinked acceptance receipt destination')
-    if output.parent.is_symlink():
-        raise ValueError('refusing symlinked acceptance receipt directory')
-    if output.exists():
-        raise ValueError('refusing to overwrite an existing acceptance receipt')
-    return output
+    raise ValueError('refusing to overwrite an existing acceptance receipt')
 
 
 def main():

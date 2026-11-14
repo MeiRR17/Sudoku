@@ -225,6 +225,40 @@ class ReceiptOutputPathTests(unittest.TestCase):
                 acceptance.acceptance_receipt_path(root, Path('alias') / 'receipt.json')
             self.assertEqual(list(real.iterdir()), [])
 
+    @unittest.skipUnless(hasattr(os, 'symlink'), 'symlinks unavailable')
+    def test_symlinked_grandparent_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            real = root / 'real'
+            (real / 'nested').mkdir(parents=True)
+            alias = root / 'alias'
+            try:
+                alias.symlink_to(real, target_is_directory=True)
+            except OSError:
+                self.skipTest('creating symlinks is not permitted')
+            with self.assertRaisesRegex(ValueError, 'symlinked acceptance receipt directory'):
+                acceptance.acceptance_receipt_path(
+                    root, Path('alias') / 'nested' / 'receipt.json')
+            self.assertEqual(list((real / 'nested').iterdir()), [])
+
+    def test_regular_file_in_parent_chain_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            blocker = root / 'not-a-directory'
+            blocker.write_text('keep', encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'parent is not a directory'):
+                acceptance.acceptance_receipt_path(
+                    root, Path('not-a-directory') / 'nested' / 'receipt.json')
+            self.assertEqual(blocker.read_text(encoding='utf-8'), 'keep')
+
+    def test_parent_traversal_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(ValueError, 'parent traversal'):
+                acceptance.acceptance_receipt_path(
+                    root, Path('..') / 'outside' / 'receipt.json')
+
+
     def test_existing_receipt_file_is_never_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
