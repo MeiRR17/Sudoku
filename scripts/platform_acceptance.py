@@ -131,32 +131,81 @@ def workflow_identity_from_env(environ):
     return {'github_run_id': run_id, 'github_run_attempt': int(attempt)}
 
 
-def write_receipt(output, receipt):
-    """Write one private, fully flushed receipt without clobbering any file.
+def _same_receipt_parent(parent, pinned_fd):
+    """Best-effort identity check against a pinned POSIX directory inode."""
+    try:
+        pinned = os.fstat(pinned_fd)
+        current = os.stat(parent, follow_symlinks=False)
+    except OSError:
+        return False
+    return (stat.S_ISDIR(pinned.st_mode) and stat.S_ISDIR(current.st_mode)
+            and (pinned.st_dev, pinned.st_ino) == (current.st_dev, current.st_ino))
 
-    The unpredictable, exclusive temporary file prevents symlink following
-    and avoids collisions with stale stages left by a previous crash. Linking
-    the completed inode to a not-yet-existing destination is atomic and refuses
-    to replace a receipt created concurrently. Both paths share a directory.
-    Unsupported hardlinks fail closed; no release evidence is fabricated.
+
+def _open_receipt_parent(parent):
+    """Pin the real output directory before staging or publishing evidence."""
+    flags = (os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0) |
+             getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_DIRECTORY', 0) |
+             getattr(os, 'O_NOFOLLOW', 0))
+    fd = os.open(parent, flags)
+    if not _same_receipt_parent(parent, fd):
+        os.close(fd)
+        raise OSError('unsafe or replaced receipt directory')
+    return fd
+
+
+def write_receipt(output, receipt):
+    """Publish a private, no-overwrite JSON receipt; sync its POSIX directory.
+
+    File fsync alone does not persist the link/unlink directory updates. On
+    POSIX pin the parent, publish via directory-relative hardlink, remove the
+    staging name, then fsync the pinned directory and check path identity.
+    A failure after link means publication may have occurred: never claim an
+    acceptance receipt was successfully durably published in that case.
+    Windows keeps the existing no-replace hardlink path without dir fsync.
     """
     output.parent.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(prefix=output.name + '.tmp.', dir=output.parent)
-    stage = Path(name)
+    parent_fd = _open_receipt_parent(output.parent) if os.name == 'posix' else None
     try:
+        fd, name = tempfile.mkstemp(prefix=output.name + '.tmp.', dir=output.parent)
+        stage = Path(name)
+        created = os.fstat(fd)
         try:
-            file = os.fdopen(fd, 'w', encoding='utf-8', newline='\n')
-        except BaseException:
-            os.close(fd)
-            raise
-        with file:
-            json.dump(receipt, file, indent=2, sort_keys=True)
-            file.write('\n')
-            file.flush()
-            os.fsync(file.fileno())
-        os.link(stage, output)
+            try:
+                file = os.fdopen(fd, 'w', encoding='utf-8', newline='\n')
+            except BaseException:
+                os.close(fd)
+                raise
+            with file:
+                json.dump(receipt, file, indent=2, sort_keys=True)
+                file.write('\n')
+                file.flush()
+                os.fsync(file.fileno())
+            if parent_fd is None:
+                os.link(stage, output)
+            else:
+                # Stage and destination must resolve in the pinned parent.
+                # This check also prevents publishing a swapped staging inode.
+                if not _same_receipt_parent(output.parent, parent_fd):
+                    raise OSError('receipt directory changed before publication')
+                staged = os.stat(stage.name, dir_fd=parent_fd,
+                                 follow_symlinks=False)
+                if (staged.st_dev, staged.st_ino) != (created.st_dev, created.st_ino):
+                    raise OSError('receipt staging file replaced')
+                os.link(stage.name, output.name, src_dir_fd=parent_fd,
+                        dst_dir_fd=parent_fd, follow_symlinks=False)
+        finally:
+            if parent_fd is None:
+                stage.unlink()
+            else:
+                os.unlink(stage.name, dir_fd=parent_fd)
+        if parent_fd is not None:
+            os.fsync(parent_fd)
+            if not _same_receipt_parent(output.parent, parent_fd):
+                raise OSError('receipt directory changed after publication')
     finally:
-        stage.unlink()
+        if parent_fd is not None:
+            os.close(parent_fd)
 
 def open_regular_input(path, kind):
     """Open untrusted evidence without following a final POSIX symlink.

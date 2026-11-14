@@ -191,6 +191,72 @@ class ReceiptWriteTests(unittest.TestCase):
             if os.name == 'posix':
                 self.assertEqual(stat.S_IMODE(dest.stat().st_mode), 0o600)
 
+    @unittest.skipUnless(os.name == 'posix', 'directory fsync is POSIX-only')
+    def test_published_receipt_syncs_parent_after_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory) / 'receipt.json'
+            real_fsync = os.fsync
+            synced_directory = []
+            def observe(fd):
+                synced_directory.append(stat.S_ISDIR(os.fstat(fd).st_mode))
+                return real_fsync(fd)
+            with patch.object(acceptance.os, 'fsync', side_effect=observe):
+                acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertEqual(synced_directory, [False, True])
+            self.assertEqual(json.loads(dest.read_text()), {'status': 'passed'})
+
+    @unittest.skipUnless(os.name == 'posix', 'directory fsync is POSIX-only')
+    def test_parent_sync_failure_reports_uncertain_published_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dest = Path(directory) / 'receipt.json'
+            real_fsync = os.fsync
+            def fail_directory(fd):
+                if stat.S_ISDIR(os.fstat(fd).st_mode):
+                    raise OSError('injected directory sync failure')
+                return real_fsync(fd)
+            with patch.object(acceptance.os, 'fsync', side_effect=fail_directory):
+                with self.assertRaisesRegex(OSError, 'directory sync failure'):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            # The link already exists; never report that publication did not occur.
+            self.assertEqual(json.loads(dest.read_text()), {'status': 'passed'})
+            self.assertFalse(list(dest.parent.glob('receipt.json.tmp.*')))
+
+    @unittest.skipUnless(os.name == 'posix', 'directory handles are POSIX-only')
+    def test_directory_swap_after_link_is_not_certified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parent = root / 'evidence'
+            parent.mkdir()
+            moved = root / 'moved-evidence'
+            dest = parent / 'receipt.json'
+            real_link = os.link
+            def replace_parent(*args, **kwargs):
+                real_link(*args, **kwargs)
+                parent.rename(moved)
+                parent.mkdir()
+            with patch.object(acceptance.os, 'link', side_effect=replace_parent):
+                with self.assertRaisesRegex(OSError, 'changed after publication'):
+                    acceptance.write_receipt(dest, {'status': 'passed'})
+            self.assertFalse(dest.exists())
+            self.assertEqual(json.loads((moved / 'receipt.json').read_text()),
+                             {'status': 'passed'})
+            self.assertFalse(list(moved.glob('receipt.json.tmp.*')))
+
+    @unittest.skipUnless(os.name == 'posix', 'O_NOFOLLOW is POSIX-only')
+    def test_symlinked_receipt_directory_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            genuine = root / 'real'
+            genuine.mkdir()
+            alias = root / 'alias'
+            try:
+                alias.symlink_to(genuine, target_is_directory=True)
+            except OSError:
+                self.skipTest('symlinks unavailable on this host')
+            with self.assertRaises(OSError):
+                acceptance.write_receipt(alias / 'receipt.json', {'status': 'passed'})
+            self.assertEqual(list(genuine.iterdir()), [])
+
     def test_existing_receipt_cannot_be_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:
             dest = Path(directory) / 'evidence.json'
