@@ -147,7 +147,8 @@ def _require_receipt_dirfd_support():
     """Refuse POSIX hosts missing any primitive required by the no-follow walk."""
     required_flags = ('O_DIRECTORY', 'O_NOFOLLOW')
     required_functions = (os.open, os.mkdir, os.stat, os.link, os.unlink)
-    if any(not hasattr(os, name) for name in required_flags):
+    if any(not isinstance(getattr(os, name, None), int) or getattr(os, name) == 0
+           for name in required_flags):
         raise OSError('platform lacks required no-follow directory flags')
     if any(function not in os.supports_dir_fd for function in required_functions):
         raise OSError('platform lacks required directory-relative filesystem operations')

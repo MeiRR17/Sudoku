@@ -285,10 +285,12 @@ class ReceiptWriteTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             dest = root / 'receipt.json'
-            with patch.object(acceptance.os, 'O_NOFOLLOW', 0):
-                with self.assertRaisesRegex(OSError, 'no-follow directory flags'):
-                    acceptance.write_receipt(dest, {'status': 'passed'})
-            self.assertEqual(list(root.iterdir()), [])
+            for flag in ('O_NOFOLLOW', 'O_DIRECTORY'):
+                with self.subTest(flag=flag):
+                    with patch.object(acceptance.os, flag, 0):
+                        with self.assertRaisesRegex(OSError, 'no-follow directory flags'):
+                            acceptance.write_receipt(dest, {'status': 'passed'})
+                    self.assertEqual(list(root.iterdir()), [])
 
     @unittest.skipUnless(os.name == 'posix', 'pinned directory walk is POSIX-only')
     def test_missing_dirfd_primitive_fails_closed(self):
