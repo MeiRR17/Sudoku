@@ -9,7 +9,7 @@ if(SUDOKU_ENABLE_COVERAGE AND NOT CMAKE_C_COMPILER_ID STREQUAL "GNU")
     message(FATAL_ERROR "Coverage measurement requires GCC/gcov")
 endif()
 
-add_library(sudoku_core STATIC src/core/board.c src/core/solver.c src/core/generator.c src/core/game.c)
+add_library(sudoku_core STATIC src/core/board.c src/core/solver.c src/core/generator.c src/core/game.c src/core/candidates.c)
 include(GNUInstallDirs)
 target_include_directories(sudoku_core PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
@@ -17,16 +17,23 @@ target_include_directories(sudoku_core PUBLIC
 add_executable(sudoku src/cli/main.c src/cli/play.c)
 target_link_libraries(sudoku PRIVATE sudoku_core)
 
+# Opt-in development inspector. It is intentionally not installed or added to
+# release archives, and does not change the established sudoku CLI contract.
+add_executable(sudoku-candidates src/cli/candidates.c)
+target_link_libraries(sudoku-candidates PRIVATE sudoku_core)
+
 if(MSVC)
     target_compile_options(sudoku_core PRIVATE /W4 /WX)
     target_compile_options(sudoku PRIVATE /W4 /WX)
+    target_compile_options(sudoku-candidates PRIVATE /W4 /WX)
 else()
     target_compile_options(sudoku_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
     target_compile_options(sudoku PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(sudoku-candidates PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 if(SUDOKU_ENABLE_SANITIZERS)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32)
-        foreach(target sudoku_core sudoku)
+        foreach(target sudoku_core sudoku sudoku-candidates)
             target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
             target_link_options(${target} PRIVATE -fsanitize=address,undefined)
         endforeach()
@@ -35,7 +42,7 @@ if(SUDOKU_ENABLE_SANITIZERS)
     endif()
 endif()
 if(SUDOKU_ENABLE_COVERAGE)
-    foreach(target sudoku_core sudoku)
+    foreach(target sudoku_core sudoku sudoku-candidates)
         target_compile_options(${target} PRIVATE --coverage -O0 -g)
         target_link_options(${target} PRIVATE --coverage)
     endforeach()
