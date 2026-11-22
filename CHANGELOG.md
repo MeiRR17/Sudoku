@@ -11,6 +11,15 @@ Versions under 1.0 are development milestones, **not** supported Production rele
 
 ## [Unreleased]
 
+- **Development-only candidate inspector (not a release):** Add a read-only
+  C11 candidate-map API and separate `sudoku-candidates` executable, without
+  changing the main `sudoku` command, gameplay or save files. Results show
+  legal local digits, naked singles and empty cells with no candidate, but
+  never claim a solution or uniqueness.
+- Keep the executable out of packaged releases. This code branch was not
+  compiled, tested or native-platform qualified; release HOLD remains.
+
+
 - Pending: cross-platform acceptance on Windows x64 and macOS arm64, license decision by owner, signing and official release.
 
 ## [0.8.2] — 2026-11-09 (development patch; release HOLD)
