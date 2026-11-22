@@ -52,6 +52,18 @@ See [Packaging and platform gates](docs/PACKAGING_AND_PORTABILITY.md),
 [local packaging verification](docs/VERIFICATION_v0.8.0.md), and
 [license decision record](docs/LICENSE_DECISION_PENDING.md).
 
+## Optional non-spoiler candidate inspector (draft branch only)
+
+A separate `sudoku-candidates` developer executable now derives **locally legal digits** for each empty cell, counts naked singles, and flags cells with no local candidate. It does not run the exact solver, mutate the board, reveal a complete solution, change the `sudoku` main CLI or alter save files.
+
+```sh
+cmake --build build --target sudoku-candidates
+./build/sudoku-candidates --file tests/fixtures/unique.txt --singles-only
+./build/sudoku-candidates --file tests/fixtures/unique.txt --format json
+```
+
+This executable is deliberately **not included in release packages** while the project remains in stabilization/release HOLD. Detailed input/JSON/C-API semantics and limitations are in [Candidate inspector development contract](docs/CANDIDATE_INSPECTOR.md). The new code is untested and not a production or platform-acceptance claim.
+
 ## Run quality checks
 
 For the current platform (including Windows with MSVC, provided CMake/CTest/Python and a compiler are installed):
